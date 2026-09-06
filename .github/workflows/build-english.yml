@@ -1,0 +1,55 @@
+name: Build English userscript
+
+on:
+  push:
+    paths:
+      - '.parts/en/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check all parts exist
+        id: parts
+        shell: bash
+        run: |
+          missing=0
+          for i in 00 01 02 03 04 05 06; do
+            if [ ! -f ".parts/en/part${i}" ]; then
+              missing=1
+            fi
+          done
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+
+      - name: Build and validate
+        if: steps.parts.outputs.missing == '0'
+        shell: bash
+        run: |
+          cat .parts/en/part00 .parts/en/part01 .parts/en/part02 .parts/en/part03 .parts/en/part04 .parts/en/part05 .parts/en/part06 > classic-twitter-en.user.js
+          node --check classic-twitter-en.user.js
+          grep -q '@version      6.2.3-en' classic-twitter-en.user.js
+          if grep -Eq 'APP_THEME_MODE|matchMedia\(|data-ct-theme|applyTheme|systemDark' classic-twitter-en.user.js; then
+            echo 'Unexpected theme-handling code detected.'
+            exit 1
+          fi
+
+      - name: Commit generated userscript
+        if: steps.parts.outputs.missing == '0'
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add classic-twitter-en.user.js
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git commit -m 'feat: add English userscript v6.2.3-en'
+          git push
