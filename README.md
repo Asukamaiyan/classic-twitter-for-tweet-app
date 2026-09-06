@@ -24,6 +24,10 @@
 
 ### Chrome + Tampermonkey
 
+使うファイル: `classic-twitter-ja.user.js`
+
+日本語版バージョン: **v6.2.4**
+
 1. Chrome に **Tampermonkey** を入れます。
 2. Greasy Fork のインストールページを開きます。
 3. **「このスクリプトをインストール」** を押します。
@@ -38,28 +42,40 @@
 
 ### Safari + Stay
 
+使うファイル: `classic-twitter-ja-safari.user.js`
+
+日本語版バージョン: **v6.2.5**
+
 1. App Store から **Stay for Safari** を入れます。
 2. iPhone / iPad の **設定 → Safari → 拡張機能** で Stay をONにします。
-3. Stay にこのユーザースクリプトを追加します。
+3. Stay に Safari版ユーザースクリプトを追加します。
 4. Safari で `tweet.app` を開きます。
 
 **おわり！ 📱🐦**
 
-> iPhone / iPad版は Stay + Safari で使えるように整えています。Safari版では上部の「ツイート」を「Twitter」に変更します。Safari側の制限により、一部機能がPC版と違う場合があります。
+> Safari版だけ、画面上部の「ツイート」を「Twitter」に変更します。本文・返信・投稿操作の日本語表記はそのままです。
 
 ## 🇯🇵 日本語版
 
-現在の公開準備版: **v6.2.5**
+### Chrome + Tampermonkey
 
-主な変更:
+**v6.2.4**
 
 - `Just now` → `たった今`
-- プロフィールのミュート表示を整理
+- プロフィールのミュート表示を `ミュート / ミュート解除` に整理
 - `and` / `others` を含む通知の日本語表示を改善
-- Safari + Stay では上部の `ツイート` → `Twitter`
 - 表示名 + Founder Number
 - ★ お気に入り
 - リツイート表記
+
+### Safari + Stay
+
+**v6.2.5**
+
+v6.2.4の機能に加えて:
+
+- 画面上部の `ツイート` → `Twitter`
+- iPhone / iPad向けにローカルパネルの横幅を調整
 
 ## 🌎 English version
 
@@ -84,7 +100,7 @@ Classic Twitter-style wording:
 - あなたのログイン情報を作者のサーバーへ送る処理はありません。
 - ミュート一覧やローカルお気に入りは、基本的にそのブラウザ内へ保存されます。
 
-コードはこのGitHubですべて公開しています。
+コードはこのGitHubですべて公開します。
 
 ## 🐛 バグを見つけたら
 
@@ -98,8 +114,9 @@ GitHub の **Issues** から教えてください。
 
 ## 📦 ファイル
 
-- `classic-twitter-ja.user.js` 日本語版
-- `classic-twitter-en.user.js` English version
+- `classic-twitter-ja.user.js` 日本語版 / Chrome + Tampermonkey / v6.2.4
+- `classic-twitter-ja-safari.user.js` 日本語版 / Safari + Stay / v6.2.5
+- `classic-twitter-en.user.js` English version / v6.2.3-en
 - `CHANGELOG.md` 更新履歴
 - `LICENSE` MIT License
 
