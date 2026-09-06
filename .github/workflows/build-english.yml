@@ -3,7 +3,7 @@ name: Build English userscript
 on:
   push:
     paths:
-      - '.parts/en/**'
+      - '.parts/enb64/**'
 
 permissions:
   contents: write
@@ -21,8 +21,8 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for i in 00 01 02 03 04 05 06; do
-            if [ ! -f ".parts/en/part${i}" ]; then
+          for i in 00 01 02 03 04 05 06 07; do
+            if [ ! -f ".parts/enb64/part${i}" ]; then
               missing=1
             fi
           done
@@ -32,7 +32,7 @@ jobs:
         if: steps.parts.outputs.missing == '0'
         shell: bash
         run: |
-          cat .parts/en/part00 .parts/en/part01 .parts/en/part02 .parts/en/part03 .parts/en/part04 .parts/en/part05 .parts/en/part06 > classic-twitter-en.user.js
+          cat .parts/enb64/part00 .parts/enb64/part01 .parts/enb64/part02 .parts/enb64/part03 .parts/enb64/part04 .parts/enb64/part05 .parts/enb64/part06 .parts/enb64/part07 | base64 -d > classic-twitter-en.user.js
           node --check classic-twitter-en.user.js
           grep -q '@version      6.2.3-en' classic-twitter-en.user.js
           if grep -Eq 'APP_THEME_MODE|matchMedia\(|data-ct-theme|applyTheme|systemDark' classic-twitter-en.user.js; then
