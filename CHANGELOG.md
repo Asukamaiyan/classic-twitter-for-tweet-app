@@ -2,6 +2,12 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
+## Japanese v6.2.5
+
+- Safari + Stay で画面上部の `ツイート` を `Twitter` に変更
+- PC版の Chrome + Tampermonkey では従来どおり `ツイート` 表記を維持
+- Safari上部だけを対象にし、投稿本文や通常ボタンには影響しないように調整
+
 ## Japanese v6.2.4
 
 - `Just now` を `たった今` に変更
