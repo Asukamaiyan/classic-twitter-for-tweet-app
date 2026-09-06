@@ -2,14 +2,17 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
-## Japanese v6.2.5
+## Japanese Safari v6.2.5
 
-- Safari + Stay で画面上部の `ツイート` を `Twitter` に変更
-- PC版の Chrome + Tampermonkey では従来どおり `ツイート` 表記を維持
-- Safari上部だけを対象にし、投稿本文や通常ボタンには影響しないように調整
+- Safari + Stay 専用ビルドとして分離
+- 画面上部の `ツイート` を `Twitter` に変更
+- 投稿本文や通常の日本語表記には影響しないように調整
+- iPhone / iPad向けにローカルパネルの横幅を調整
+- Chrome版 v6.2.4 の機能を引き継ぎ
 
-## Japanese v6.2.4
+## Japanese Chrome v6.2.4
 
+- Chrome + Tampermonkey 用ビルド
 - `Just now` を `たった今` に変更
 - プロフィールのミュート表示が重複する問題を修正
 - ミュート表示を `ミュート / ミュート解除` に統一
