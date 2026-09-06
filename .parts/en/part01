@@ -1,0 +1,250 @@
+        padding:0 5px;
+        border-radius:999px;
+        background:#1d9bf0;
+        color:#fff;
+        font:700 11px/18px Arial;
+        text-align:center;
+        pointer-events:none;
+      }
+    `;
+
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function classicNotificationText(t) {
+    t = clean(t);
+    if (!t) return null;
+
+    let m;
+
+    const replacements = [
+      [/^(.+?)\s+(?:liked|favorited) your (?:post|tweet)$/i,
+        a => `${a} favorited your Tweet`],
+      [/^(.+?)\s+(?:reposted|retweeted) your (?:post|tweet)$/i,
+        a => `${a} retweeted your Tweet`],
+      [/^(.+?)\s+mentioned you(?: in a (?:post|tweet))?$/i,
+        a => `${a} mentioned you`],
+      [/^(.+?)\s+replied to your (?:post|tweet)$/i,
+        a => `${a} replied to your Tweet`],
+      [/^(.+?)\s+(?:liked|favorited) your reply$/i,
+        a => `${a} favorited your reply`],
+      [/^(.+?)\s+(?:reposted|retweeted) your reply$/i,
+        a => `${a} retweeted your reply`]
+    ];
+
+    for (const [re, fn] of replacements) {
+      if ((m = t.match(re))) return fn(m[1]);
+    }
+
+    return null;
+  }
+
+  function translateTextNode(node) {
+    const parent = node?.parentElement;
+    if (!parent?.isConnected) return;
+    if (parent.closest('textarea,input,[contenteditable="true"],script,style')) return;
+
+    const raw = node.nodeValue || '';
+    const t = clean(raw);
+    if (!t || t.length > 500) return;
+
+    const out = classicNotificationText(t) || EN.get(t);
+    if (out && out !== t) node.nodeValue = raw.replace(t, out);
+  }
+
+  function patchUI(root = document) {
+    const host = root instanceof Node ? root : document;
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) nodes.push(node);
+    nodes.forEach(translateTextNode);
+  }
+
+  function patchInputs(root = document) {
+    const list = [];
+    if (root instanceof Element && root.matches('input[placeholder],textarea[placeholder]')) {
+      list.push(root);
+    }
+    root.querySelectorAll?.('input[placeholder],textarea[placeholder]').forEach(el => list.push(el));
+
+    for (const el of list) {
+      const p = el.getAttribute('placeholder') || '';
+      if (/^Post your reply$/i.test(p)) el.placeholder = 'Tweet your reply';
+      else if (/^Create a post$/i.test(p)) el.placeholder = 'Compose a Tweet';
+    }
+  }
+
+  function hideAffiliation() {
+    document.querySelectorAll('span,p,div,a,small').forEach(el => {
+      if (
+        el.isConnected &&
+        !el.children.length &&
+        /^Not Affiliated with X$/i.test(clean(el.textContent))
+      ) {
+        el.style.setProperty('display', 'none', 'important');
+      }
+    });
+  }
+
+  function patchBrand() {
+    document.querySelectorAll('img').forEach(img => {
+      if (!img.isConnected || img.dataset.ctBrandPatched === '1') return;
+      if (img.closest('article')) return;
+
+      const alt = clean(img.getAttribute('alt') || '');
+      const title = clean(img.getAttribute('title') || '');
+      const rawSrc = img.getAttribute('src') || '';
+      let path = '';
+
+      try {
+        path = new URL(rawSrc, location.href).pathname;
+      } catch {
+        path = rawSrc;
+      }
+
+      if (/avatar|profile|media|photo|processed|firebase/i.test(`${alt} ${title} ${path}`)) return;
+
+      const isBrandAsset = /\/assets\/brand\/[^/]*(?:bird|logo|twitter|tweet)[^/]*\.(?:svg|png|webp)$/i.test(path);
+      const isExplicitBrandAlt = /^(?:twitter|tweet|twitter logo|tweet logo|brand logo|bird logo)$/i.test(`${alt} ${title}`.trim());
+
+      if (!isBrandAsset && !isExplicitBrandAlt) return;
+
+      const r = img.getBoundingClientRect();
+      if (r.width > 80 || r.height > 80) return;
+
+      img.src = LOGO;
+      img.classList.add('ct-twitter-logo');
+      img.dataset.ctBrandPatched = '1';
+    });
+  }
+
+  function requestJSON(url, headers = {}) {
+    if (typeof GM_xmlhttpRequest === 'function') {
+      return new Promise(resolve => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          timeout: 12000,
+          headers: { Accept: 'application/json', ...headers },
+          onload: response => {
+            try {
+              resolve(
+                response.status >= 200 && response.status < 300
+                  ? JSON.parse(response.responseText)
+                  : null
+              );
+            } catch {
+              resolve(null);
+            }
+          },
+          onerror: () => resolve(null),
+          ontimeout: () => resolve(null)
+        });
+      });
+    }
+
+    return fetch(url, {
+      headers: { Accept: 'application/json', ...headers }
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .catch(() => null);
+  }
+
+  function fetchProfile(username) {
+    const key = normUser(username);
+    if (!key) return Promise.resolve(null);
+    if (profileCache.has(key)) return Promise.resolve(profileCache.get(key));
+    if (profilePending.has(key)) return profilePending.get(key);
+
+    const promise = requestJSON(PROFILE_API + encodeURIComponent(username)).then(json => {
+      const user = json?.user ?? json?.profile ?? json?.data ?? json;
+      if (user) profileCache.set(key, user);
+      profilePending.delete(key);
+      return user || null;
+    });
+
+    profilePending.set(key, promise);
+    return promise;
+  }
+
+  function userFromHref(href) {
+    try {
+      const m = new URL(href, location.origin).pathname.match(/^\/user\/([^/?#]+)/i);
+      return m ? validUser(decodeURIComponent(m[1])) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function articleAuthor(article) {
+    if (!article) return null;
+
+    for (const el of article.querySelectorAll('button[aria-label],a[href],span,div')) {
+      let m = (el.getAttribute?.('aria-label') || '').match(/^View @(.+?)'s profile$/i);
+      if (m) return validUser(m[1]);
+
+      const user = userFromHref(el.getAttribute?.('href') || '');
+      if (user) return user;
+
+      if (!el.children.length && (m = clean(el.textContent).match(/^@([A-Za-z0-9_.-]{1,80})$/))) {
+        return validUser(m[1]);
+      }
+    }
+
+    return null;
+  }
+
+  function findAuthorLeaf(article, username) {
+    const target = normUser(username);
+    return (
+      [...article.querySelectorAll('button,span,a,div,strong')].find(el => {
+        if (!el.isConnected || el.children.length) return false;
+        const t = clean(el.textContent);
+        return normUser(t) === target || normUser(t.replace(/^@/, '')) === target;
+      }) || null
+    );
+  }
+
+  let muted = new Set((loadJSON(KEY.muted, []) || []).map(normUser).filter(Boolean));
+  const isMuted = username => muted.has(normUser(username));
+
+  function saveMuted() {
+    saveJSON(KEY.muted, [...muted].sort());
+  }
+
+  function toggleMuted(username) {
+    const key = normUser(username);
+    if (!key) return;
+
+    if (muted.has(key)) muted.delete(key);
+    else muted.add(key);
+
+    saveMuted();
+    patchFeed(document);
+    patchProfileMute();
+  }
+
+  async function patchArticle(article) {
+    if (!article?.isConnected) return;
+
+    const username = articleAuthor(article);
+    if (!username) return;
+
+    if (isMuted(username)) {
+      article.style.setProperty('display', 'none', 'important');
+      return;
+    }
+
+    article.style.removeProperty('display');
+
+    const user = await fetchProfile(username);
+    if (!user || !article.isConnected) return;
+
+    const displayName = clean(user.displayName || user.name || username);
+    const leaf = findAuthorLeaf(article, username);
+    if (!leaf || !displayName) return;
+
+    leaf.textContent = displayName;
+    leaf.classList.add('ct-author-name');
+
