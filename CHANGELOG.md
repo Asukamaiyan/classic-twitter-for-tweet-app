@@ -7,6 +7,7 @@ Classic Twitter for tweet.app の更新履歴です。
 - tweet.app の `/api/users/by-username/` が認証必須になった変更に対応
 - Chrome 日本語版 / Stay・Safari 日本語版 / 英語版で Bearer token 付きプロフィール取得へ変更
 - Founder Number と表示名の取得復旧を目的とした互換性修正
+- 3版共通のプロフィール取得処理を更新
 
 ## Japanese Safari v6.2.5
 
