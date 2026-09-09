@@ -79,34 +79,26 @@ jobs:
                   ? root
                   : document;
 
-              const labels =
-                [];
+              const labels = [];
 
               if (
                 scope instanceof Element &&
                 !scope.children.length &&
-                /^(?:Replying\s+to|返信先[:：]?)$/i.test(
-                  clean(scope.textContent)
-                )
+                /^(?:Replying\s+to|返信先[:：]?)$/i.test(clean(scope.textContent))
               ) {
                 labels.push(scope);
               }
 
-              scope.querySelectorAll?.(
-                'span,div,p,small'
-              )
-                .forEach(
-                  el => {
-                    if (
-                      !el.children.length &&
-                      /^(?:Replying\s+to|返信先[:：]?)$/i.test(
-                        clean(el.textContent)
-                      )
-                    ) {
-                      labels.push(el);
-                    }
+              scope.querySelectorAll?.('span,div,p,small').forEach(
+                el => {
+                  if (
+                    !el.children.length &&
+                    /^(?:Replying\s+to|返信先[:：]?)$/i.test(clean(el.textContent))
+                  ) {
+                    labels.push(el);
                   }
-                );
+                }
+              );
 
               for (const label of labels) {
                 if (/^Replying\s+to$/i.test(clean(label.textContent))) {
@@ -121,19 +113,14 @@ jobs:
                   ].filter(
                     el =>
                       !el.children.length &&
-                      /^@[A-Za-z0-9_.-]{1,80}(?:さん)?$/.test(
-                        clean(el.textContent)
-                      )
+                      /^@[A-Za-z0-9_.-]{1,80}(?:さん)?$/.test(clean(el.textContent))
                   );
 
-                  if (!handles.length) {
-                    continue;
-                  }
+                  if (!handles.length) continue;
 
                   handles.forEach(
                     el => {
                       const handle = clean(el.textContent);
-
                       if (!/さん$/.test(handle)) {
                         el.textContent = `${handle}さん`;
                       }
@@ -157,10 +144,10 @@ jobs:
                   s = s.replace(anchor, anchor + '\n\n' + extra_map, 1)
 
               if 'Replying\\s+to\\s+(.+)' not in s:
-                  marker = "    if ((m = t.match(/^Joined\\s+(.+)$/i))) {"
-                  if marker not in s:
-                      raise RuntimeError(f'dynamicJP anchor missing in {path}')
-                  s = s.replace(marker, dynamic_reply + '\n\n' + marker, 1)
+                  pattern = r'(function dynamicJP\(t\)\s*\{\s*let m;\s*)'
+                  s, count = re.subn(pattern, lambda m: m.group(1) + '\n' + dynamic_reply + '\n\n', s, count=1)
+                  if count != 1:
+                      raise RuntimeError(f'dynamicJP insertion failed in {path}')
 
               if 'function patchReplyingTo(' not in s:
                   marker = '  function patchInputs('
@@ -168,37 +155,11 @@ jobs:
                       raise RuntimeError(f'patchInputs anchor missing in {path}')
                   s = s.replace(marker, patch_reply_fn + '\n\n' + marker, 1)
 
-              scan_anchor = "      patchUI(\n        root\n      );"
-              if '      patchReplyingTo(\n        root\n      );' not in s:
-                  if scan_anchor not in s:
-                      raise RuntimeError(f'scan patchUI anchor missing in {path}')
-                  s = s.replace(
-                      scan_anchor,
-                      scan_anchor + "\n\n      patchReplyingTo(\n        root\n      );",
-                      1,
-                  )
-
-              # Profile-edit placeholders that may remain English even when labels are translated.
-              if "^add a bio$" not in s.lower():
-                  placeholder_anchor = "      else if (\n        /^search/i.test(p)\n      ) {"
-                  addition = """      else if (/^add a bio$/i.test(p)) {
-                el.placeholder =
-                  '自己紹介を追加';
-              }
-
-              else if (/^add (?:your )?location$/i.test(p)) {
-                el.placeholder =
-                  '場所を追加';
-              }
-
-              else if (/^add (?:your )?website$/i.test(p)) {
-                el.placeholder =
-                  'ウェブサイトを追加';
-              }
-
-          """
-                  if placeholder_anchor in s:
-                      s = s.replace(placeholder_anchor, addition + placeholder_anchor, 1)
+              if 'patchReplyingTo(root);' not in s and 'patchReplyingTo(\n        root\n      );' not in s:
+                  pattern = r'(patchUI\(\s*root\s*\);)'
+                  s, count = re.subn(pattern, lambda m: m.group(1) + '\n\n      patchReplyingTo(root);', s, count=1)
+                  if count != 1:
+                      raise RuntimeError(f'scan insertion failed in {path}')
 
               path.write_text(s, encoding='utf-8')
 
