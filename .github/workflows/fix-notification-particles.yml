@@ -1,0 +1,139 @@
+name: Fix Japanese notification particles
+
+on:
+  push:
+    paths:
+      - 'CHANGELOG.md'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch Japanese userscripts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          files = [
+            (Path('classic-twitter-ja.user.js'), '6.2.8'),
+            (Path('classic-twitter-ja-safari.user.js'), '6.3.1'),
+          ]
+
+          helper = r'''
+  function patchNotificationParticles(root = document) {
+    if (!location.pathname.startsWith('/notifications')) return;
+
+    const main =
+      root instanceof Element && root.matches('main')
+        ? root
+        : root.querySelector?.('main') || document.querySelector('main');
+
+    if (!main) return;
+
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent?.isConnected) continue;
+      if (parent.closest('textarea,input,[contenteditable="true"],script,style')) continue;
+      nodes.push(node);
+    }
+
+    const prevUseful = current => {
+      const index = nodes.indexOf(current);
+      for (let i = index - 1; i >= 0; i--) {
+        const t = clean(nodes[i].nodeValue || '');
+        if (t) return { node: nodes[i], text: t };
+      }
+      return null;
+    };
+
+    for (const current of nodes) {
+      const raw = current.nodeValue || '';
+      const t = clean(raw);
+      if (!t) continue;
+
+      let out = null;
+
+      if (/^と$/u.test(t)) {
+        out = 'さんと';
+      } else if (/^とそのほか(\d+)人$/u.test(t)) {
+        out = t.replace(/^と/u, 'さんと');
+      }
+
+      if (out && out !== t) {
+        current.nodeValue = raw.replace(t, out);
+      }
+    }
+
+    const actionPatterns = [
+      /^あなたのツイートをお気に入りに登録しました/u,
+      /^あなたのツイートをリツイートしました/u,
+      /^あなたをフォローしました/u,
+      /^あなたを@ツイートしました/u,
+      /^あなたのツイートに返信しました/u,
+      /^あなたに返信しました/u,
+      /^あなたの返信をお気に入りに登録しました/u,
+      /^あなたの返信をリツイートしました/u
+    ];
+
+    for (const current of nodes) {
+      const raw = current.nodeValue || '';
+      const t = clean(raw);
+      if (!t || !actionPatterns.some(re => re.test(t))) continue;
+      if (/^(?:さん)?が/u.test(t)) continue;
+
+      const prev = prevUseful(current);
+      if (!prev) continue;
+
+      const p = prev.text;
+      let prefix = 'さんが';
+
+      if (/人$/u.test(p) || /さん$/u.test(p)) {
+        prefix = 'が';
+      }
+
+      current.nodeValue = raw.replace(t, `${prefix}${t}`);
+    }
+  }
+'''
+
+          for path, version in files:
+            s = path.read_text(encoding='utf-8')
+            s = re.sub(r'(?m)^// @version\s+\S+', f'// @version      {version}', s, count=1)
+
+            if 'function patchNotificationParticles(' not in s:
+              marker = '  function patchReplyingTo('
+              pos = s.find(marker)
+              if pos < 0:
+                raise RuntimeError(f'patchReplyingTo marker missing: {path}')
+              s = s[:pos] + helper + '\n' + s[pos:]
+
+            if 'patchNotificationParticles(\n      root\n    );' not in s and 'patchNotificationParticles(root);' not in s:
+              target = '    patchNotificationConnectors(\n      root\n    );'
+              if target in s:
+                s = s.replace(target, target + '\n\n    patchNotificationParticles(\n      root\n    );', 1)
+              else:
+                target2 = '    patchNotificationConnectors(root);'
+                if target2 not in s:
+                  raise RuntimeError(f'notification connector call missing: {path}')
+                s = s.replace(target2, target2 + '\n    patchNotificationParticles(root);', 1)
+
+            path.write_text(s, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-notification-particles.yml
+          git add classic-twitter-ja.user.js classic-twitter-ja-safari.user.js
+          git commit -m "Fix Japanese notification particles"
+          git push
