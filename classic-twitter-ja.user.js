@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.2.8
+// @version      6.2.9
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -628,7 +628,7 @@ if (/^just\s+now$/i.test(t)) {
       )
       .filter(Boolean)
       .map(x => `${x}さん`)
-      .join('、');
+      .join('と');
   }
 
   function translateNotification(t) {
