@@ -2,6 +2,12 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
+## Japanese notification grammar fix
+
+- 通知欄の分割DOMで抜けていた「さん」「と」「が」を補完
+- `A と そのほか5人 あなたのツイートを…` を `Aさんとそのほか5人があなたのツイートを…` の形に修正
+- 2人表示でも `AさんとBさんが…` になるよう調整
+
 ## Founder Number authentication fix
 
 - tweet.app の `/api/users/by-username/` が認証必須になった変更に対応
