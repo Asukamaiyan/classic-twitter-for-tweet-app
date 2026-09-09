@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Patch all userscripts
         shell: bash
         run: |
@@ -23,9 +24,9 @@ jobs:
           import re
 
           files = [
-            (Path('classic-twitter-ja.user.js'), '6.2.7'),
-            (Path('classic-twitter-ja-safari.user.js'), '6.3.0'),
-            (Path('classic-twitter-en.user.js'), '6.2.5-en'),
+              (Path('classic-twitter-ja.user.js'), '6.2.7'),
+              (Path('classic-twitter-ja-safari.user.js'), '6.3.0'),
+              (Path('classic-twitter-en.user.js'), '6.2.5-en'),
           ]
 
           new_fetch = r'''  function fetchProfile(username) {
@@ -63,20 +64,21 @@ jobs:
             profilePending.set(key, promise);
             return promise;
           }
-'''
+          '''
 
           for path, version in files:
-            s = path.read_text(encoding='utf-8')
-            s = re.sub(r'(?m)^// @version\s+\S+', f'// @version      {version}', s, count=1)
-            start = s.find('  function fetchProfile(')
-            if start < 0:
-              raise RuntimeError(f'fetchProfile missing: {path}')
-            end = s.find('  function userFromHref(', start)
-            if end < 0:
-              raise RuntimeError(f'userFromHref missing: {path}')
-            s = s[:start] + new_fetch + '\n' + s[end:]
-            path.write_text(s, encoding='utf-8')
+              s = path.read_text(encoding='utf-8')
+              s = re.sub(r'(?m)^// @version\s+\S+', f'// @version      {version}', s, count=1)
+              start = s.find('  function fetchProfile(')
+              if start < 0:
+                  raise RuntimeError(f'fetchProfile missing: {path}')
+              end = s.find('  function userFromHref(', start)
+              if end < 0:
+                  raise RuntimeError(f'userFromHref missing: {path}')
+              s = s[:start] + new_fetch + '\n' + s[end:]
+              path.write_text(s, encoding='utf-8')
           PY
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/fix-founder-auth.yml
