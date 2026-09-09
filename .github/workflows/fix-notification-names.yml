@@ -68,3 +68,5 @@ jobs:
           git add classic-twitter-ja.user.js classic-twitter-ja-safari.user.js
           git commit -m "Fix Japanese notification name separators"
           git push
+
+# trigger
