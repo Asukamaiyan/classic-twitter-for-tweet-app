@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.2.7
+// @version      6.2.8
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -111,6 +111,33 @@
     ['Account', 'アカウント'],
     ['Your account', 'アカウント'],
     ['Account settings', 'アカウント設定'],
+
+    ['Replying to', '返信先:'],
+    ['Account information', 'アカウント情報'],
+    ['Manage your account details and password.', 'アカウント情報やパスワードを管理します。'],
+    ['Two-factor authentication', '2要素認証'],
+    ['Add an extra layer of security to your account.', 'アカウントのセキュリティを強化します。'],
+    ['Protect your account with an extra layer of security.', '2要素認証でアカウントのセキュリティを強化します。'],
+    ['Display', '表示'],
+    ['Manage your theme and appearance.', 'テーマや表示を管理します。'],
+    ['AUTHENTICATION APP', '認証アプリ'],
+    ['Authentication app', '認証アプリ'],
+    ['Use an authentication app like Google Authenticator or Authy to generate verification codes.', 'Google AuthenticatorやAuthyなどの認証アプリを使用して認証コードを生成します。'],
+    ['TEXT MESSAGE', 'SMS'],
+    ['Text message', 'SMS'],
+    ['Receive verification codes via SMS to your phone.', 'SMSで認証コードを受け取ります。'],
+    ['Set up', '設定する'],
+    ['See your account information like your username, email address, and phone number.', 'ユーザー名、メールアドレス、電話番号などのアカウント情報を確認できます。'],
+    ['Phone', '電話番号'],
+    ['DATE OF BIRTH', '生年月日'],
+    ['Date of birth', '生年月日'],
+    ['This information is not public. We use your age to customize your experience, including ads.', 'この情報は公開されません。年齢は、広告を含むTwitterでの表示内容をカスタマイズするために使用されます。'],
+    ['Learn more', '詳細はこちら'],
+    ['Edit', '編集'],
+    ['Bio', '自己紹介'],
+    ['Location', '場所'],
+    ['Website', 'ウェブサイト'],
+    ["This can only be changed a few times. Make sure you enter the age of the person using the account. Even if you're making an account for your business, event, or cat.", '変更できる回数には制限があります。アカウントを利用する本人の生年月日を入力してください。ビジネス、イベント、ペット用のアカウントの場合も同様です。'],
     ['Privacy', 'プライバシー'],
     ['Privacy and safety', 'プライバシーと安全'],
     ['Safety', '安全'],
@@ -423,7 +450,17 @@
   function dynamicJP(t) {
     let m;
 
-    if (/^just\s+now$/i.test(t)) return 'たった今';
+    
+    if ((m = t.match(/^Replying\s+to\s+(.+)$/i))) {
+      const targets = m[1].replace(
+        /(@[A-Za-z0-9_.-]{1,80})(?!さん)/g,
+        '$1さん'
+      );
+
+      return `返信先: ${targets}`;
+    }
+
+if (/^just\s+now$/i.test(t)) return 'たった今';
 
     if ((m = t.match(/^(\d+)s$/))) return `${m[1]}秒`;
     if ((m = t.match(/^(\d+)m$/))) return `${m[1]}分`;
@@ -712,6 +749,68 @@
 
       if (clean(el.textContent) === 'ツイート') {
         el.textContent = 'Twitter';
+      }
+    }
+  }
+
+  function patchReplyingTo(
+    root =
+      document
+  ) {
+    const scope =
+      root instanceof Element
+        ? root
+        : document;
+
+    const labels = [];
+
+    if (
+      scope instanceof Element &&
+      !scope.children.length &&
+      /^(?:Replying\s+to|返信先[:：]?)$/i.test(clean(scope.textContent))
+    ) {
+      labels.push(scope);
+    }
+
+    scope.querySelectorAll?.('span,div,p,small').forEach(
+      el => {
+        if (
+          !el.children.length &&
+          /^(?:Replying\s+to|返信先[:：]?)$/i.test(clean(el.textContent))
+        ) {
+          labels.push(el);
+        }
+      }
+    );
+
+    for (const label of labels) {
+      if (/^Replying\s+to$/i.test(clean(label.textContent))) {
+        label.textContent = '返信先:';
+      }
+
+      let box = label.parentElement;
+
+      for (let depth = 0; box && depth < 4; depth++, box = box.parentElement) {
+        const handles = [
+          ...box.querySelectorAll('a,span,strong')
+        ].filter(
+          el =>
+            !el.children.length &&
+            /^@[A-Za-z0-9_.-]{1,80}(?:さん)?$/.test(clean(el.textContent))
+        );
+
+        if (!handles.length) continue;
+
+        handles.forEach(
+          el => {
+            const handle = clean(el.textContent);
+            if (!/さん$/.test(handle)) {
+              el.textContent = `${handle}さん`;
+            }
+          }
+        );
+
+        break;
       }
     }
   }
@@ -3985,6 +4084,8 @@
       hideAffiliation();
       patchBrand();
       patchUI(root);
+
+      patchReplyingTo(root);
       patchSafariTopTitle();
       patchInputs(root);
       patchNotifications(root);

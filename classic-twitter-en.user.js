@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.2.3-en
+// @version      6.2.4-en
 // @description  Classic Twitter-style terminology for tweet.app with display names, Founder Number, star Favorites, Retweets, reply notification fallback, local mute, and a private Favorites tab. Does not touch theme settings.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -52,6 +52,7 @@
   }
 
   const EN = new Map([
+    ['Feed', 'Home'],
     ['Posts', 'Tweets'],
     ['Post', 'Tweet'],
     ['Reposts', 'Retweets'],
