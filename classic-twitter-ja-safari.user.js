@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.3.0
+// @version      6.3.1
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -751,6 +751,78 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       if (clean(el.textContent) === 'ツイート') {
         el.textContent = 'Twitter';
       }
+    }
+  }
+
+  function patchNotificationParticles(root = document) {
+    if (!location.pathname.startsWith('/notifications')) return;
+
+    const main =
+      root instanceof Element && root.matches('main')
+        ? root
+        : root.querySelector?.('main') || document.querySelector('main');
+
+    if (!main) return;
+
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent?.isConnected) continue;
+      if (parent.closest('textarea,input,[contenteditable="true"],script,style')) continue;
+      nodes.push(node);
+    }
+
+    const prevUseful = current => {
+      const index = nodes.indexOf(current);
+      for (let i = index - 1; i >= 0; i--) {
+        const t = clean(nodes[i].nodeValue || '');
+        if (t) return { node: nodes[i], text: t };
+      }
+      return null;
+    };
+
+    for (const current of nodes) {
+      const raw = current.nodeValue || '';
+      const t = clean(raw);
+      if (!t) continue;
+
+      let out = null;
+      if (/^と$/u.test(t)) {
+        out = 'さんと';
+      } else if (/^とそのほか(\d+)人$/u.test(t)) {
+        out = t.replace(/^と/u, 'さんと');
+      }
+
+      if (out && out !== t) current.nodeValue = raw.replace(t, out);
+    }
+
+    const actionPatterns = [
+      /^あなたのツイートをお気に入りに登録しました/u,
+      /^あなたのツイートをリツイートしました/u,
+      /^あなたをフォローしました/u,
+      /^あなたを@ツイートしました/u,
+      /^あなたのツイートに返信しました/u,
+      /^あなたに返信しました/u,
+      /^あなたの返信をお気に入りに登録しました/u,
+      /^あなたの返信をリツイートしました/u
+    ];
+
+    for (const current of nodes) {
+      const raw = current.nodeValue || '';
+      const t = clean(raw);
+      if (!t || !actionPatterns.some(re => re.test(t))) continue;
+      if (/^(?:さん)?が/u.test(t)) continue;
+
+      const prev = prevUseful(current);
+      if (!prev) continue;
+
+      const prefix = /人$/u.test(prev.text) || /さん$/u.test(prev.text)
+        ? 'が'
+        : 'さんが';
+
+      current.nodeValue = raw.replace(t, `${prefix}${t}`);
     }
   }
 
@@ -2997,6 +3069,10 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     }
 
     patchNotificationConnectors(
+      root
+    );
+
+    patchNotificationParticles(
       root
     );
 
