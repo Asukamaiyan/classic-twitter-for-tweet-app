@@ -1,0 +1,224 @@
+name: Update Classic Twitter localization
+
+on:
+  push:
+    paths:
+      - '.github/workflows/update-classic-twitter-localization.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update Japanese and English userscripts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          repo = Path('.')
+          ja_files = [
+              (repo / 'classic-twitter-ja.user.js', '6.2.5'),
+              (repo / 'classic-twitter-ja-safari.user.js', '6.2.8'),
+          ]
+
+          extra_map = """
+              ['Replying to', '返信先:'],
+              ['Account information', 'アカウント情報'],
+              ['Manage your account details and password.', 'アカウント情報やパスワードを管理します。'],
+              ['Two-factor authentication', '2要素認証'],
+              ['Add an extra layer of security to your account.', 'アカウントのセキュリティを強化します。'],
+              ['Protect your account with an extra layer of security.', '2要素認証でアカウントのセキュリティを強化します。'],
+              ['Display', '表示'],
+              ['Manage your theme and appearance.', 'テーマや表示を管理します。'],
+              ['AUTHENTICATION APP', '認証アプリ'],
+              ['Authentication app', '認証アプリ'],
+              ['Use an authentication app like Google Authenticator or Authy to generate verification codes.', 'Google AuthenticatorやAuthyなどの認証アプリを使用して認証コードを生成します。'],
+              ['TEXT MESSAGE', 'SMS'],
+              ['Text message', 'SMS'],
+              ['Receive verification codes via SMS to your phone.', 'SMSで認証コードを受け取ります。'],
+              ['Set up', '設定する'],
+              ['See your account information like your username, email address, and phone number.', 'ユーザー名、メールアドレス、電話番号などのアカウント情報を確認できます。'],
+              ['Phone', '電話番号'],
+              ['DATE OF BIRTH', '生年月日'],
+              ['Date of birth', '生年月日'],
+              ['This information is not public. We use your age to customize your experience, including ads.', 'この情報は公開されません。年齢は、広告を含むTwitterでの表示内容をカスタマイズするために使用されます。'],
+              ['Learn more', '詳細はこちら'],
+              ['Edit', '編集'],
+              ['Bio', '自己紹介'],
+              ['Location', '場所'],
+              ['Website', 'ウェブサイト'],
+              [\"This can only be changed a few times. Make sure you enter the age of the person using the account. Even if you're making an account for your business, event, or cat.\", '変更できる回数には制限があります。アカウントを利用する本人の生年月日を入力してください。ビジネス、イベント、ペット用のアカウントの場合も同様です。'],
+          """.strip('\n')
+
+          dynamic_reply = r"""
+              if ((m = t.match(/^Replying\s+to\s+(.+)$/i))) {
+                const targets = m[1].replace(
+                  /(@[A-Za-z0-9_.-]{1,80})(?!さん)/g,
+                  '$1さん'
+                );
+
+                return `返信先: ${targets}`;
+              }
+          """.strip('\n')
+
+          patch_reply_fn = r"""
+            function patchReplyingTo(
+              root =
+                document
+            ) {
+              const scope =
+                root instanceof Element
+                  ? root
+                  : document;
+
+              const labels =
+                [];
+
+              if (
+                scope instanceof Element &&
+                !scope.children.length &&
+                /^(?:Replying\s+to|返信先[:：]?)$/i.test(
+                  clean(scope.textContent)
+                )
+              ) {
+                labels.push(scope);
+              }
+
+              scope.querySelectorAll?.(
+                'span,div,p,small'
+              )
+                .forEach(
+                  el => {
+                    if (
+                      !el.children.length &&
+                      /^(?:Replying\s+to|返信先[:：]?)$/i.test(
+                        clean(el.textContent)
+                      )
+                    ) {
+                      labels.push(el);
+                    }
+                  }
+                );
+
+              for (const label of labels) {
+                if (/^Replying\s+to$/i.test(clean(label.textContent))) {
+                  label.textContent = '返信先:';
+                }
+
+                let box = label.parentElement;
+
+                for (let depth = 0; box && depth < 4; depth++, box = box.parentElement) {
+                  const handles = [
+                    ...box.querySelectorAll('a,span,strong')
+                  ].filter(
+                    el =>
+                      !el.children.length &&
+                      /^@[A-Za-z0-9_.-]{1,80}(?:さん)?$/.test(
+                        clean(el.textContent)
+                      )
+                  );
+
+                  if (!handles.length) {
+                    continue;
+                  }
+
+                  handles.forEach(
+                    el => {
+                      const handle = clean(el.textContent);
+
+                      if (!/さん$/.test(handle)) {
+                        el.textContent = `${handle}さん`;
+                      }
+                    }
+                  );
+
+                  break;
+                }
+              }
+            }
+          """.strip('\n')
+
+          def update_ja(path: Path, version: str):
+              s = path.read_text(encoding='utf-8')
+              s = re.sub(r'(?m)^// @version\s+\S+', f'// @version      {version}', s, count=1)
+
+              if "['Account information', 'アカウント情報']" not in s:
+                  anchor = "    ['Account settings', 'アカウント設定'],"
+                  if anchor not in s:
+                      raise RuntimeError(f'JP map anchor missing in {path}')
+                  s = s.replace(anchor, anchor + '\n\n' + extra_map, 1)
+
+              if 'Replying\\s+to\\s+(.+)' not in s:
+                  marker = "    if ((m = t.match(/^Joined\\s+(.+)$/i))) {"
+                  if marker not in s:
+                      raise RuntimeError(f'dynamicJP anchor missing in {path}')
+                  s = s.replace(marker, dynamic_reply + '\n\n' + marker, 1)
+
+              if 'function patchReplyingTo(' not in s:
+                  marker = '  function patchInputs('
+                  if marker not in s:
+                      raise RuntimeError(f'patchInputs anchor missing in {path}')
+                  s = s.replace(marker, patch_reply_fn + '\n\n' + marker, 1)
+
+              scan_anchor = "      patchUI(\n        root\n      );"
+              if '      patchReplyingTo(\n        root\n      );' not in s:
+                  if scan_anchor not in s:
+                      raise RuntimeError(f'scan patchUI anchor missing in {path}')
+                  s = s.replace(
+                      scan_anchor,
+                      scan_anchor + "\n\n      patchReplyingTo(\n        root\n      );",
+                      1,
+                  )
+
+              # Profile-edit placeholders that may remain English even when labels are translated.
+              if "^add a bio$" not in s.lower():
+                  placeholder_anchor = "      else if (\n        /^search/i.test(p)\n      ) {"
+                  addition = """      else if (/^add a bio$/i.test(p)) {
+                el.placeholder =
+                  '自己紹介を追加';
+              }
+
+              else if (/^add (?:your )?location$/i.test(p)) {
+                el.placeholder =
+                  '場所を追加';
+              }
+
+              else if (/^add (?:your )?website$/i.test(p)) {
+                el.placeholder =
+                  'ウェブサイトを追加';
+              }
+
+          """
+                  if placeholder_anchor in s:
+                      s = s.replace(placeholder_anchor, addition + placeholder_anchor, 1)
+
+              path.write_text(s, encoding='utf-8')
+
+          for path, version in ja_files:
+              update_ja(path, version)
+
+          en = repo / 'classic-twitter-en.user.js'
+          s = en.read_text(encoding='utf-8')
+          s = re.sub(r'(?m)^// @version\s+\S+', '// @version      6.2.4-en', s, count=1)
+          if "['Feed', 'Home']" not in s:
+              anchor = '  const EN = new Map([\n'
+              if anchor not in s:
+                  raise RuntimeError('EN map anchor missing')
+              s = s.replace(anchor, anchor + "    ['Feed', 'Home'],\n", 1)
+          en.write_text(s, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/update-classic-twitter-localization.yml
+          git add classic-twitter-ja.user.js classic-twitter-ja-safari.user.js classic-twitter-en.user.js
+          git commit -m "Update Japanese localization and rename Feed to Home"
+          git push
