@@ -54,7 +54,6 @@ jobs:
   async function patchRetweetNavigation(root = document) {
     const scope = root instanceof Element ? root : document;
     const leaves = [];
-
     if (scope instanceof Element && !scope.children.length) leaves.push(scope);
     scope.querySelectorAll?.('span,div,p,small').forEach(el => {
       if (!el.children.length) leaves.push(el);
@@ -64,11 +63,9 @@ jobs:
       if (!el.isConnected || el.dataset.ctRetweeterLink === '1') continue;
       const t = clean(el.textContent);
       if (!t) continue;
-
       const isJP = /さんがリツイートしました$/u.test(t);
       const isEN = /\b(?:retweeted|reposted)$/i.test(t);
       if (!isJP && !isEN) continue;
-
       const username = ctUserFromContainer(el);
       if (!username) continue;
 
@@ -77,7 +74,6 @@ jobs:
       el.setAttribute('tabindex', '0');
       el.style.cursor = 'pointer';
       el.title = `@${username}`;
-
       const go = event => {
         if (event) {
           event.preventDefault();
@@ -85,7 +81,6 @@ jobs:
         }
         location.href = `/user/${encodeURIComponent(username)}`;
       };
-
       el.addEventListener('click', go);
       el.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') go(event);
@@ -96,7 +91,6 @@ jobs:
   async function patchQuotedTweets(root = document) {
     const scope = root instanceof Element ? root : document;
     const articles = new Set();
-
     if (scope instanceof Element) {
       if (scope.matches('article')) articles.add(scope);
       const parent = scope.closest('article');
@@ -130,7 +124,6 @@ jobs:
             else break;
           }
         }
-
         if (!card || card === article) continue;
 
         if (card.dataset.ctQuoteCard !== '1') {
@@ -154,10 +147,8 @@ jobs:
           if (!user || !card.isConnected) continue;
           const displayName = clean(user.displayName || user.name || username);
           if (!displayName) continue;
-
           const leaves = [...card.querySelectorAll('span,strong,div,p,a')].filter(el =>
-            el.isConnected &&
-            !el.children.length &&
+            el.isConnected && !el.children.length &&
             (clean(el.textContent) === `@${username}` || clean(el.textContent) === username)
           );
           for (const leaf of leaves) {
@@ -180,12 +171,10 @@ jobs:
       const text = clean(el.textContent);
       const aria = clean(el.getAttribute('aria-label') || '');
       const title = clean(el.getAttribute('title') || '');
-
       const profileFollowButton =
         !el.closest('article') &&
         /^(?:Follow|Unfollow|フォロー|フォロー解除)$/i.test(text) &&
         (/^\/user\//.test(location.pathname) || location.pathname === '/profile');
-
       if (profileFollowButton) {
         el.dataset.ctKeepProfileFollow = '1';
         el.style.removeProperty('display');
@@ -198,7 +187,6 @@ jobs:
       const r = el.getBoundingClientRect();
       const small = (!r.width || r.width <= 48) && (!r.height || r.height <= 48);
       const nearAvatar = !!el.parentElement?.querySelector('img');
-
       if ((followLabel && (iconOnly || small || nearAvatar)) || (plusOnly && small && nearAvatar)) {
         el.dataset.ctInlineFollow = '1';
         el.style.setProperty('display', 'none', 'important');
@@ -210,7 +198,6 @@ jobs:
           for path, version in targets:
               s = path.read_text(encoding='utf-8')
               s = re.sub(r'(?m)^// @version\s+\S+', f'// @version      {version}', s, count=1)
-
               if 'function patchRetweetNavigation(' not in s:
                   pos = s.find('  function scan(')
                   if pos < 0:
@@ -226,7 +213,6 @@ jobs:
               insertion = '\n\n      patchRetweetNavigation(root);\n      patchQuotedTweets(root);\n      removeInlineFollowBadges(root);'
               if 'patchRetweetNavigation(root);' not in s[call_anchor:call_anchor+1000]:
                   s = s[:semi+1] + insertion + s[semi+1:]
-
               path.write_text(s, encoding='utf-8')
           PY
 
@@ -236,3 +222,5 @@ jobs:
           git add classic-twitter-ja.user.js classic-twitter-ja-safari.user.js classic-twitter-en.user.js
           git commit -m "Improve retweet and quote navigation and hide inline follow badges"
           git push
+
+# trigger
