@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.2.6
+// @version      6.2.7
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1531,82 +1531,41 @@ if (/^just\s+now$/i.test(t)) {
       );
   }
 
-  function fetchProfile(
-    username
-  ) {
-    const key =
-      normUser(
-        username
+  function fetchProfile(username) {
+  const key = normUser(username);
+  if (!key) return Promise.resolve(null);
+  if (profileCache.has(key)) return Promise.resolve(profileCache.get(key));
+  if (profilePending.has(key)) return profilePending.get(key);
+
+  const promise = getAuth()
+    .then(auth => {
+      if (!auth?.token) return null;
+      return requestJSON(
+        PROFILE_API + encodeURIComponent(username),
+        { Authorization: `Bearer ${auth.token}` }
       );
+    })
+    .then(json => {
+      const user =
+        json?.user ??
+        json?.profile ??
+        json?.data?.user ??
+        json?.data?.profile ??
+        json?.data ??
+        json;
 
-    if (!key) {
-      return Promise.resolve(
-        null
-      );
-    }
+      if (user) profileCache.set(key, user);
+      profilePending.delete(key);
+      return user || null;
+    })
+    .catch(() => {
+      profilePending.delete(key);
+      return null;
+    });
 
-    if (
-      profileCache.has(
-        key
-      )
-    ) {
-      return Promise.resolve(
-        profileCache.get(
-          key
-        )
-      );
-    }
-
-    if (
-      profilePending.has(
-        key
-      )
-    ) {
-      return profilePending.get(
-        key
-      );
-    }
-
-    const promise =
-      requestJSON(
-        PROFILE_API +
-        encodeURIComponent(
-          username
-        )
-      )
-        .then(
-          json => {
-            const user =
-              json?.user
-              ??
-              json?.profile
-              ??
-              json?.data
-              ??
-              json;
-
-            if (user) {
-              profileCache.set(
-                key,
-                user
-              );
-            }
-
-            profilePending.delete(
-              key
-            );
-
-            return user || null;
-          }
-        );
-
-    profilePending.set(
-      key,
-      promise
-    );
-
-    return promise;
-  }
+  profilePending.set(key, promise);
+  return promise;
+}
 
   function userFromHref(
     href

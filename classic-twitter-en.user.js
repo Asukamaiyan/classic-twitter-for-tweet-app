@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.2.4-en
+// @version      6.2.5-en
 // @description  Classic Twitter-style terminology for tweet.app with display names, Founder Number, star Favorites, Retweets, reply notification fallback, local mute, and a private Favorites tab. Does not touch theme settings.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -403,21 +403,40 @@
   }
 
   function fetchProfile(username) {
-    const key = normUser(username);
-    if (!key) return Promise.resolve(null);
-    if (profileCache.has(key)) return Promise.resolve(profileCache.get(key));
-    if (profilePending.has(key)) return profilePending.get(key);
+  const key = normUser(username);
+  if (!key) return Promise.resolve(null);
+  if (profileCache.has(key)) return Promise.resolve(profileCache.get(key));
+  if (profilePending.has(key)) return profilePending.get(key);
 
-    const promise = requestJSON(PROFILE_API + encodeURIComponent(username)).then(json => {
-      const user = json?.user ?? json?.profile ?? json?.data ?? json;
+  const promise = getAuth()
+    .then(auth => {
+      if (!auth?.token) return null;
+      return requestJSON(
+        PROFILE_API + encodeURIComponent(username),
+        { Authorization: `Bearer ${auth.token}` }
+      );
+    })
+    .then(json => {
+      const user =
+        json?.user ??
+        json?.profile ??
+        json?.data?.user ??
+        json?.data?.profile ??
+        json?.data ??
+        json;
+
       if (user) profileCache.set(key, user);
       profilePending.delete(key);
       return user || null;
+    })
+    .catch(() => {
+      profilePending.delete(key);
+      return null;
     });
 
-    profilePending.set(key, promise);
-    return promise;
-  }
+  profilePending.set(key, promise);
+  return promise;
+}
 
   function userFromHref(href) {
     try {
