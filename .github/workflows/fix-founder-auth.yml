@@ -3,7 +3,7 @@ name: Fix authenticated Founder Number lookup
 on:
   push:
     paths:
-      - '.github/workflows/fix-founder-auth.yml'
+      - 'CHANGELOG.md'
 
 permissions:
   contents: write
@@ -29,40 +29,40 @@ jobs:
           ]
 
           new_fetch = r'''  function fetchProfile(username) {
-    const key = normUser(username);
-    if (!key) return Promise.resolve(null);
-    if (profileCache.has(key)) return Promise.resolve(profileCache.get(key));
-    if (profilePending.has(key)) return profilePending.get(key);
+            const key = normUser(username);
+            if (!key) return Promise.resolve(null);
+            if (profileCache.has(key)) return Promise.resolve(profileCache.get(key));
+            if (profilePending.has(key)) return profilePending.get(key);
 
-    const promise = getAuth()
-      .then(auth => {
-        if (!auth?.token) return null;
-        return requestJSON(
-          PROFILE_API + encodeURIComponent(username),
-          { Authorization: `Bearer ${auth.token}` }
-        );
-      })
-      .then(json => {
-        const user =
-          json?.user ??
-          json?.profile ??
-          json?.data?.user ??
-          json?.data?.profile ??
-          json?.data ??
-          json;
+            const promise = getAuth()
+              .then(auth => {
+                if (!auth?.token) return null;
+                return requestJSON(
+                  PROFILE_API + encodeURIComponent(username),
+                  { Authorization: `Bearer ${auth.token}` }
+                );
+              })
+              .then(json => {
+                const user =
+                  json?.user ??
+                  json?.profile ??
+                  json?.data?.user ??
+                  json?.data?.profile ??
+                  json?.data ??
+                  json;
 
-        if (user) profileCache.set(key, user);
-        profilePending.delete(key);
-        return user || null;
-      })
-      .catch(() => {
-        profilePending.delete(key);
-        return null;
-      });
+                if (user) profileCache.set(key, user);
+                profilePending.delete(key);
+                return user || null;
+              })
+              .catch(() => {
+                profilePending.delete(key);
+                return null;
+              });
 
-    profilePending.set(key, promise);
-    return promise;
-  }
+            profilePending.set(key, promise);
+            return promise;
+          }
 '''
 
           for path, version in files:
@@ -75,7 +75,6 @@ jobs:
             if end < 0:
               raise RuntimeError(f'userFromHref missing: {path}')
             s = s[:start] + new_fetch + '\n' + s[end:]
-            s = re.sub(r"console\.log\(\s*['\"]🐦 Classic Twitter JP v[^'\"]+ loaded['\"]\s*\);", f"console.log('🐦 Classic Twitter JP {version} loaded');", s)
             path.write_text(s, encoding='utf-8')
           PY
           git config user.name "github-actions[bot]"
