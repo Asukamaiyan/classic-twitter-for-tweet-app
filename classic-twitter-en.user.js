@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.2.6-en
+// @version      6.2.7-en
 // @description  Classic Twitter-style terminology for tweet.app with display names, Founder Number, star Favorites, Retweets, reply notification fallback, local mute, and a private Favorites tab. Does not touch theme settings.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1609,6 +1609,73 @@
     }
   }
 
+  function notificationRowFor(el) {
+    let cur = el;
+    for (let depth = 0; cur && depth < 9; depth++, cur = cur.parentElement) {
+      const t = clean(cur.textContent);
+      if (/(あなたのツイート|あなたをフォロー|お気に入り|リツイート|返信|followed you|favorited|retweeted|replied)/i.test(t)) {
+        if ((cur.querySelectorAll?.('img').length || 0) >= 1) return cur;
+      }
+    }
+    return null;
+  }
+
+  function patchNotificationAvatarLinks(root = document) {
+    if (!location.pathname.startsWith('/notifications')) return;
+    const scope = root instanceof Element ? root : document;
+    const images = [];
+    if (scope instanceof HTMLImageElement) images.push(scope);
+    scope.querySelectorAll?.('img').forEach(img => images.push(img));
+
+    const rows = new Set();
+    for (const img of images) {
+      if (!img.isConnected) continue;
+      const row = notificationRowFor(img);
+      if (row) rows.add(row);
+    }
+
+    for (const row of rows) {
+      const avatars = [...row.querySelectorAll('img')].filter(img => {
+        const r = img.getBoundingClientRect();
+        return (!r.width || r.width <= 64) && (!r.height || r.height <= 64);
+      });
+      if (!avatars.length) continue;
+
+      const userLinks = [];
+      const seen = new Set();
+      for (const a of row.querySelectorAll('a[href]')) {
+        const username = userFromHref(a.getAttribute('href') || '');
+        if (!username) continue;
+        const key = normUser(username);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        userLinks.push({ username, href: `/user/${encodeURIComponent(username)}` });
+      }
+      if (!userLinks.length) continue;
+
+      avatars.forEach((img, index) => {
+        const anchor = img.closest('a[href]');
+        const anchorUser = anchor ? userFromHref(anchor.getAttribute('href') || '') : null;
+        const target = userLinks[index] || (anchorUser ? { username: anchorUser, href: `/user/${encodeURIComponent(anchorUser)}` } : null);
+        if (!target) return;
+
+        const clickable = img.closest('a,button,[role="button"]') || img;
+        clickable.dataset.ctAvatarTarget = target.username;
+        clickable.style.cursor = 'pointer';
+        if (clickable.tagName === 'A') clickable.setAttribute('href', target.href);
+        if (clickable.dataset.ctAvatarBound === '1') return;
+        clickable.dataset.ctAvatarBound = '1';
+        clickable.addEventListener('click', event => {
+          const username = clickable.dataset.ctAvatarTarget;
+          if (!username) return;
+          event.preventDefault();
+          event.stopPropagation();
+          location.href = `/user/${encodeURIComponent(username)}`;
+        }, true);
+      });
+    }
+  }
+
   function scan(root = document) {
     try {
       installStyle();
@@ -1624,6 +1691,7 @@
       patchRetweetNavigation(root);
       patchQuotedTweets(root);
       removeInlineFollowBadges(root);
+      patchNotificationAvatarLinks(root);
       patchProfileFounder();
       patchProfileMute();
       patchOpenMuteMenu();

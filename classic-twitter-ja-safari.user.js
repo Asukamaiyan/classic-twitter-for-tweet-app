@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.3.3
+// @version      6.3.4
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -114,6 +114,16 @@
     ['Account settings', 'アカウント設定'],
 
     ['Replying to', '返信先:'],
+    ['See account information like your username and date of birth.', 'ユーザー名や生年月日などのアカウント情報を確認します。'],
+    ['Manage your public profile, photo, and more.', '公開プロフィール、プロフィール画像などを管理します。'],
+    ['Manage two-factor authentication and security.', '2要素認証などのセキュリティ設定を管理します。'],
+    ['Manage two-factor authentication and account security.', '2要素認証などのセキュリティ設定を管理します。'],
+    ['Update your public profile. To change your username or email, go to Your account.', '公開プロフィールを編集します。ユーザー名やメールアドレスを変更するには、アカウント設定を開いてください。'],
+    ['Help protect your account from unauthorized access by requiring a second authentication method in addition to your password.', 'パスワードに加えて2つ目の認証方法を使用し、不正アクセスからアカウントを保護します。'],
+    ['Your username was set when you created your account and cannot be changed here.', 'ユーザー名はアカウント作成時に設定されたため、ここでは変更できません。'],
+    ['APPEARANCE', '外観'],
+    ['Appearance', '外観'],
+    ['System', 'システム'],
     ['Account information', 'アカウント情報'],
     ['Manage your account details and password.', 'アカウント情報やパスワードを管理します。'],
     ['Two-factor authentication', '2要素認証'],
@@ -4328,6 +4338,95 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     }
   }
 
+
+  function patchComposeJapanese(root = document) {
+    const scope = root instanceof Element ? root : document;
+    const leaves = [];
+    if (scope instanceof Element && !scope.children.length) leaves.push(scope);
+    scope.querySelectorAll?.('button,span,div,p').forEach(el => {
+      if (!el.children.length) leaves.push(el);
+    });
+    for (const el of leaves) {
+      if (!el.isConnected) continue;
+      const t = clean(el.textContent);
+      if (t === '今どうしてる？') el.textContent = 'いまどうしてる？';
+    }
+    const buttons = [];
+    if (scope instanceof Element && scope.matches('button')) buttons.push(scope);
+    scope.querySelectorAll?.('button').forEach(el => buttons.push(el));
+    for (const button of buttons) {
+      if (!button.isConnected) continue;
+      if (clean(button.textContent) === 'ツイート') button.textContent = 'ツイートする';
+    }
+  }
+
+  function notificationRowFor(el) {
+    let cur = el;
+    for (let depth = 0; cur && depth < 9; depth++, cur = cur.parentElement) {
+      const t = clean(cur.textContent);
+      if (/(あなたのツイート|あなたをフォロー|お気に入り|リツイート|返信|followed you|favorited|retweeted|replied)/i.test(t)) {
+        if ((cur.querySelectorAll?.('img').length || 0) >= 1) return cur;
+      }
+    }
+    return null;
+  }
+
+  function patchNotificationAvatarLinks(root = document) {
+    if (!location.pathname.startsWith('/notifications')) return;
+    const scope = root instanceof Element ? root : document;
+    const images = [];
+    if (scope instanceof HTMLImageElement) images.push(scope);
+    scope.querySelectorAll?.('img').forEach(img => images.push(img));
+
+    const rows = new Set();
+    for (const img of images) {
+      if (!img.isConnected) continue;
+      const row = notificationRowFor(img);
+      if (row) rows.add(row);
+    }
+
+    for (const row of rows) {
+      const avatars = [...row.querySelectorAll('img')].filter(img => {
+        const r = img.getBoundingClientRect();
+        return (!r.width || r.width <= 64) && (!r.height || r.height <= 64);
+      });
+      if (!avatars.length) continue;
+
+      const userLinks = [];
+      const seen = new Set();
+      for (const a of row.querySelectorAll('a[href]')) {
+        const username = userFromHref(a.getAttribute('href') || '');
+        if (!username) continue;
+        const key = normUser(username);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        userLinks.push({ username, href: `/user/${encodeURIComponent(username)}` });
+      }
+      if (!userLinks.length) continue;
+
+      avatars.forEach((img, index) => {
+        const anchor = img.closest('a[href]');
+        const anchorUser = anchor ? userFromHref(anchor.getAttribute('href') || '') : null;
+        const target = userLinks[index] || (anchorUser ? { username: anchorUser, href: `/user/${encodeURIComponent(anchorUser)}` } : null);
+        if (!target) return;
+
+        const clickable = img.closest('a,button,[role="button"]') || img;
+        clickable.dataset.ctAvatarTarget = target.username;
+        clickable.style.cursor = 'pointer';
+        if (clickable.tagName === 'A') clickable.setAttribute('href', target.href);
+        if (clickable.dataset.ctAvatarBound === '1') return;
+        clickable.dataset.ctAvatarBound = '1';
+        clickable.addEventListener('click', event => {
+          const username = clickable.dataset.ctAvatarTarget;
+          if (!username) return;
+          event.preventDefault();
+          event.stopPropagation();
+          location.href = `/user/${encodeURIComponent(username)}`;
+        }, true);
+      });
+    }
+  }
+
   function scan(
     root = document
   ) {
@@ -4348,6 +4447,8 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       patchRetweetNavigation(root);
       patchQuotedTweets(root);
       removeInlineFollowBadges(root);
+      patchComposeJapanese(root);
+      patchNotificationAvatarLinks(root);
       patchProfileFounder();
       patchProfileMute();
       patchOpenMuteMenu();
