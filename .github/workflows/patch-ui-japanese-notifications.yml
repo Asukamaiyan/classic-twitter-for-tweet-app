@@ -1,0 +1,177 @@
+name: Patch Japanese UI and notification avatars
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-ui-japanese-notifications.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          jp_targets = [
+              (Path('classic-twitter-ja.user.js'), '6.3.1'),
+              (Path('classic-twitter-ja-safari.user.js'), '6.3.4'),
+          ]
+          en_target = (Path('classic-twitter-en.user.js'), '6.2.7-en')
+
+          jp_entries = r'''    ['See account information like your username and date of birth.', 'ユーザー名や生年月日などのアカウント情報を確認します。'],
+    ['Manage your public profile, photo, and more.', '公開プロフィール、プロフィール画像などを管理します。'],
+    ['Manage two-factor authentication and security.', '2要素認証などのセキュリティ設定を管理します。'],
+    ['Update your public profile. To change your username or email, go to Your account.', '公開プロフィールを編集します。ユーザー名やメールアドレスを変更するには、アカウント設定を開いてください。'],
+    ['Help protect your account from unauthorized access by requiring a second authentication method in addition to your password.', 'パスワードに加えて2つ目の認証方法を使用し、不正アクセスからアカウントを保護します。'],
+    ['Your username was set when you created your account and cannot be changed here.', 'ユーザー名はアカウント作成時に設定されたため、ここでは変更できません。'],
+    ['APPEARANCE', '外観'],
+    ['Appearance', '外観'],
+    ['System', 'システム'],
+'''
+
+          helper = r'''
+  function patchComposeJapanese(root = document) {
+    const scope = root instanceof Element ? root : document;
+    const nodes = [];
+    if (scope instanceof Element) nodes.push(scope);
+    scope.querySelectorAll?.('button,span,div,p').forEach(el => nodes.push(el));
+
+    for (const el of nodes) {
+      if (!el.isConnected || el.children.length) continue;
+      const t = clean(el.textContent);
+      if (t === '今どうしてる？') el.textContent = 'いまどうしてる？';
+    }
+
+    const buttons = [];
+    if (scope instanceof Element && scope.matches('button')) buttons.push(scope);
+    scope.querySelectorAll?.('button').forEach(el => buttons.push(el));
+    for (const button of buttons) {
+      if (!button.isConnected) continue;
+      if (clean(button.textContent) === 'ツイート') button.textContent = 'ツイートする';
+    }
+  }
+
+  function notificationRowFor(el) {
+    let cur = el;
+    for (let depth = 0; cur && depth < 8; depth++, cur = cur.parentElement) {
+      const t = clean(cur.textContent);
+      if (/(あなたのツイート|あなたをフォロー|お気に入り|リツイート|返信|followed you|favorited|retweeted|replied)/i.test(t)) {
+        const imgs = cur.querySelectorAll?.('img').length || 0;
+        if (imgs >= 1) return cur;
+      }
+    }
+    return null;
+  }
+
+  function patchNotificationAvatarLinks(root = document) {
+    if (!location.pathname.startsWith('/notifications')) return;
+    const scope = root instanceof Element ? root : document;
+    const images = [];
+    if (scope instanceof HTMLImageElement) images.push(scope);
+    scope.querySelectorAll?.('img').forEach(img => images.push(img));
+
+    const rows = new Set();
+    for (const img of images) {
+      if (!img.isConnected) continue;
+      const row = notificationRowFor(img);
+      if (row) rows.add(row);
+    }
+
+    for (const row of rows) {
+      const avatars = [...row.querySelectorAll('img')].filter(img => {
+        const r = img.getBoundingClientRect();
+        return (!r.width || r.width <= 64) && (!r.height || r.height <= 64);
+      });
+      if (!avatars.length) continue;
+
+      const userLinks = [];
+      const seen = new Set();
+      for (const a of row.querySelectorAll('a[href]')) {
+        const username = userFromHref(a.getAttribute('href') || '');
+        if (!username) continue;
+        const key = normUser(username);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        userLinks.push({ username, href: `/user/${encodeURIComponent(username)}` });
+      }
+      if (!userLinks.length) continue;
+
+      avatars.forEach((img, index) => {
+        const ownAnchor = img.closest('a[href]');
+        const ownUser = ownAnchor ? userFromHref(ownAnchor.getAttribute('href') || '') : null;
+        const target = ownUser
+          ? { username: ownUser, href: `/user/${encodeURIComponent(ownUser)}` }
+          : userLinks[Math.min(index, userLinks.length - 1)];
+        if (!target) return;
+
+        const clickable = img.closest('a,button,[role="button"]') || img;
+        clickable.dataset.ctAvatarTarget = target.username;
+        clickable.style.cursor = 'pointer';
+        if (clickable.tagName === 'A') clickable.setAttribute('href', target.href);
+
+        if (clickable.dataset.ctAvatarBound === '1') return;
+        clickable.dataset.ctAvatarBound = '1';
+        clickable.addEventListener('click', event => {
+          const username = clickable.dataset.ctAvatarTarget;
+          if (!username) return;
+          event.preventDefault();
+          event.stopPropagation();
+          location.href = `/user/${encodeURIComponent(username)}`;
+        }, true);
+      });
+    }
+  }
+'''
+
+          for path, version in jp_targets:
+              s = path.read_text(encoding='utf-8')
+              s = re.sub(r'(?m)^// @version\s+\S+', f'// @version      {version}', s, count=1)
+              if "['APPEARANCE', '外観']" not in s:
+                  marker = "    ['Replying to', '返信先:'],\n"
+                  if marker not in s:
+                      raise RuntimeError(f'JP map marker missing: {path}')
+                  s = s.replace(marker, marker + jp_entries, 1)
+              if 'function patchComposeJapanese(' not in s:
+                  pos = s.find('  function scan(')
+                  if pos < 0: raise RuntimeError(f'scan marker missing: {path}')
+                  s = s[:pos] + helper + '\n' + s[pos:]
+              # Insert calls into scan after existing social patches if possible.
+              anchor = 'removeInlineFollowBadges(root);'
+              if anchor in s and 'patchComposeJapanese(root);' not in s[s.find(anchor):s.find(anchor)+500]:
+                  s = s.replace(anchor, anchor + '\n      patchComposeJapanese(root);\n      patchNotificationAvatarLinks(root);', 1)
+              elif 'patchComposeJapanese(root);' not in s:
+                  raise RuntimeError(f'call anchor missing: {path}')
+              path.write_text(s, encoding='utf-8')
+
+          path, version = en_target
+          s = path.read_text(encoding='utf-8')
+          s = re.sub(r'(?m)^// @version\s+\S+', f'// @version      {version}', s, count=1)
+          # English only gets avatar-link reliability helper, not Japanese UI strings.
+          avatar_only = helper[helper.find('  function notificationRowFor'):]
+          if 'function patchNotificationAvatarLinks(' not in s:
+              pos = s.find('  function scan(')
+              if pos < 0: raise RuntimeError('EN scan marker missing')
+              s = s[:pos] + avatar_only + '\n' + s[pos:]
+          anchor = 'removeInlineFollowBadges(root);'
+          if anchor in s and 'patchNotificationAvatarLinks(root);' not in s[s.find(anchor):s.find(anchor)+400]:
+              s = s.replace(anchor, anchor + '\n      patchNotificationAvatarLinks(root);', 1)
+          path.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/patch-ui-japanese-notifications.yml
+          git add classic-twitter-ja.user.js classic-twitter-ja-safari.user.js classic-twitter-en.user.js
+          git commit -m "Polish Japanese UI and fix notification avatar links"
+          git push
