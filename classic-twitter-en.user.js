@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.2.7-en
-// @description  Classic Twitter-style terminology for tweet.app with display names, Founder Number, star Favorites, Retweets, reply notification fallback, local mute, and a private Favorites tab. Does not touch theme settings.
+// @version      6.2.8-en
+// @description  Classic Twitter-style terminology for tweet.app with display names, star Favorites, Retweets, reply notification fallback, local mute, and a private Favorites tab. Does not touch theme settings.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @connect      api.tweet.app
@@ -121,19 +121,7 @@
         74% { transform:translateY(-1px) scale(.94) rotate(-2deg); }
         100% { transform:translateY(-1px) scale(1); }
       }
-      .ct-founder,
-      .ct-profile-founder {
-        display:inline-flex;
-        align-items:center;
-        margin-left:4px;
-        font-size:12px;
-        line-height:18px;
-        font-weight:700;
-        white-space:nowrap;
-        opacity:.72;
-      }
-      .ct-profile-founder { font-size:13px; opacity:.78; }
-      .ct-twitter-logo {
+.ct-twitter-logo {
         width:28px!important;
         height:28px!important;
         object-fit:contain!important;
@@ -517,21 +505,7 @@
 
     leaf.textContent = displayName;
     leaf.classList.add('ct-author-name');
-
-    let badge = leaf.parentElement?.querySelector(':scope > .ct-founder');
-    const number = user.foundingMemberNumber;
-
-    if (number !== null && number !== undefined && number !== '') {
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.className = 'ct-founder';
-        leaf.after(badge);
-      }
-
-      const founder = String(number).padStart(5, '0');
-      badge.textContent = `#${founder}`;
-      badge.title = `Founder Number #${founder}`;
-    }
+}
   }
 
   function collectArticles(root = document) {
@@ -631,7 +605,7 @@
 
     const founder = String(number).padStart(5, '0');
     badge.textContent = `#${founder}`;
-    badge.title = `Founder Number #${founder}`;
+    badge.title = ` #${founder}`;
   }
 
   function patchProfileMute() {
@@ -1692,7 +1666,6 @@
       patchQuotedTweets(root);
       removeInlineFollowBadges(root);
       patchNotificationAvatarLinks(root);
-      patchProfileFounder();
       patchProfileMute();
       patchOpenMuteMenu();
       patchFavoriteProfileTab();

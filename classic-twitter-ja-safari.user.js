@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.3.4
-// @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
+// @version      6.3.5
+// @description  tweet.appを旧Twitter風に日本語化。表示名、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -282,25 +282,7 @@
         74% { transform:translateY(-1px) scale(.94) rotate(-2deg); }
         100% { transform:translateY(-1px) scale(1); }
       }
-
-      .ct-founder,
-      .ct-profile-founder {
-        display:inline-flex;
-        align-items:center;
-        margin-left:4px;
-        font-size:12px;
-        line-height:18px;
-        font-weight:700;
-        white-space:nowrap;
-        opacity:.72;
-      }
-
-      .ct-profile-founder {
-        font-size:13px;
-        opacity:.78;
-      }
-
-      .ct-twitter-logo {
+.ct-twitter-logo {
         width:28px!important;
         height:28px!important;
         object-fit:contain!important;
@@ -1582,34 +1564,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     leaf.classList.add(
       'ct-author-name'
     );
-
-    let badge =
-      leaf.parentElement
-        ?.querySelector(
-          ':scope > .ct-founder'
-        );
-
-    if (founder) {
-      if (!badge) {
-        badge =
-          document.createElement(
-            'span'
-          );
-
-        badge.className =
-          'ct-founder';
-
-        leaf.after(
-          badge
-        );
-      }
-
-      badge.textContent =
-        `#${founder}`;
-
-      badge.title =
-        `Founder Number #${founder}`;
-    }
+}
 
     else if (badge) {
       badge.remove();
@@ -1928,7 +1883,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       `#${founder}`;
 
     badge.title =
-      `Founder Number #${founder}`;
+      ` #${founder}`;
   }
 
   function patchProfileMute() {
@@ -4449,7 +4404,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       removeInlineFollowBadges(root);
       patchComposeJapanese(root);
       patchNotificationAvatarLinks(root);
-      patchProfileFounder();
       patchProfileMute();
       patchOpenMuteMenu();
       patchFavoriteProfileTab();

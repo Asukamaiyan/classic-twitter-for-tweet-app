@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.3.1
-// @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
+// @version      6.3.2
+// @description  tweet.appを旧Twitter風に日本語化。表示名、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @connect      api.tweet.app
@@ -346,25 +346,7 @@
           transform:translateY(-1px) scale(1);
         }
       }
-
-      .ct-founder,
-      .ct-profile-founder {
-        display:inline-flex;
-        align-items:center;
-        margin-left:4px;
-        font-size:12px;
-        line-height:18px;
-        font-weight:700;
-        white-space:nowrap;
-        opacity:.72;
-      }
-
-      .ct-profile-founder {
-        font-size:13px;
-        opacity:.78;
-      }
-
-      .ct-twitter-logo {
+.ct-twitter-logo {
         width:28px!important;
         height:28px!important;
         object-fit:contain!important;
@@ -1925,48 +1907,7 @@ if (/^just\s+now$/i.test(t)) {
     leaf.classList.add(
       'ct-author-name'
     );
-
-    let badge =
-      leaf.parentElement
-        ?.querySelector(
-          ':scope > .ct-founder'
-        );
-
-    const number =
-      user.foundingMemberNumber;
-
-    if (
-      number !== null &&
-      number !== undefined &&
-      number !== ''
-    ) {
-      if (!badge) {
-        badge =
-          document.createElement(
-            'span'
-          );
-
-        badge.className =
-          'ct-founder';
-
-        leaf.after(
-          badge
-        );
-      }
-
-      const founder =
-        String(number)
-          .padStart(
-            5,
-            '0'
-          );
-
-      badge.textContent =
-        `#${founder}`;
-
-      badge.title =
-        `Founder Number #${founder}`;
-    }
+}
   }
 
   function collectArticles(
@@ -2162,148 +2103,6 @@ if (/^just\s+now$/i.test(t)) {
     }
 
     return null;
-  }
-
-  async function patchProfileFounder() {
-    const username =
-      routeUser()
-      ||
-      ownProfileUser();
-
-    if (!username) {
-      return;
-    }
-
-    const user =
-      await fetchProfile(
-        username
-      );
-
-    if (!user) {
-      return;
-    }
-
-    const number =
-      user.foundingMemberNumber;
-
-    if (
-      number === null ||
-      number === undefined ||
-      number === ''
-    ) {
-      return;
-    }
-
-    const displayName =
-      clean(
-        user.displayName
-        ||
-        user.name
-        ||
-        username
-      );
-
-    const main =
-      document.querySelector(
-        'main'
-      )
-      ||
-      document;
-
-    const nameEl =
-      [
-        ...main.querySelectorAll(
-          'h1,h2,h3,span,a,div,strong'
-        )
-      ]
-        .find(
-          el => {
-            if (
-              !el.isConnected ||
-              el.children.length ||
-              el.closest(
-                'article'
-              ) ||
-              el.classList.contains(
-                'ct-profile-founder'
-              )
-            ) {
-              return false;
-            }
-
-            const r =
-              el.getBoundingClientRect();
-
-            if (
-              r.top < 30 ||
-              r.top > 520 ||
-              r.width <= 0 ||
-              r.height <= 0
-            ) {
-              return false;
-            }
-
-            const t =
-              clean(
-                el.textContent
-              );
-
-            return (
-              t === displayName
-              ||
-              normUser(t) ===
-                normUser(
-                  username
-                )
-            );
-          }
-        );
-
-    if (!nameEl) {
-      return;
-    }
-
-    if (
-      clean(
-        nameEl.textContent
-      ) !== displayName
-    ) {
-      nameEl.textContent =
-        displayName;
-    }
-
-    let badge =
-      nameEl.parentElement
-        ?.querySelector(
-          ':scope > .ct-profile-founder'
-        );
-
-    if (!badge) {
-      badge =
-        document.createElement(
-          'span'
-        );
-
-      badge.className =
-        'ct-profile-founder';
-
-      nameEl.after(
-        badge
-      );
-    }
-
-    const founder =
-      String(number)
-        .padStart(
-          5,
-          '0'
-        );
-
-    badge.textContent =
-      `#${founder}`;
-
-    badge.title =
-      `Founder Number #${founder}`;
   }
 
   function cleanupOldNamedMute() {
@@ -4812,8 +4611,6 @@ if (/^just\s+now$/i.test(t)) {
       removeInlineFollowBadges(root);
       patchComposeJapanese(root);
       patchNotificationAvatarLinks(root);
-
-      patchProfileFounder();
 
       patchProfileMute();
 
