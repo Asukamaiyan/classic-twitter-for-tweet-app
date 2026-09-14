@@ -1,0 +1,18 @@
+name: Founder and translation update
+on:
+  push:
+    paths:
+      - '.github/workflows/run-founder-translation-patch.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/restore_founder_auto_translation.py
+      - run: node --check classic-twitter-ja.user.js && node --check classic-twitter-ja-safari.user.js && node --check classic-twitter-en.user.js
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Restore Founder Number and automate post translation
+          file_pattern: 'classic-twitter-ja.user.js classic-twitter-ja-safari.user.js classic-twitter-en.user.js'
