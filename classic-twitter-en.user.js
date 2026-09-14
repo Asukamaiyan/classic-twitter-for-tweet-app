@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.2.8-en
-// @description  Classic Twitter-style terminology for tweet.app with display names, star Favorites, Retweets, reply notification fallback, local mute, and a private Favorites tab. Does not touch theme settings.
+// @version      6.2.9-en
+// @description  Classic Twitter-style terminology for tweet.app with display names, Founder Number, star Favorites, Retweets, reply notification fallback, local mute, and a private Favorites tab. Does not touch theme settings.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @connect      api.tweet.app
@@ -121,6 +121,24 @@
         74% { transform:translateY(-1px) scale(.94) rotate(-2deg); }
         100% { transform:translateY(-1px) scale(1); }
       }
+
+      .ct-founder,
+      .ct-profile-founder {
+        display:inline-flex;
+        align-items:center;
+        margin-left:4px;
+        font-size:12px;
+        line-height:18px;
+        font-weight:700;
+        white-space:nowrap;
+        opacity:.72;
+      }
+
+      .ct-profile-founder {
+        font-size:13px;
+        opacity:.78;
+      }
+
 .ct-twitter-logo {
         width:28px!important;
         height:28px!important;
@@ -485,27 +503,34 @@
 
   async function patchArticle(article) {
     if (!article?.isConnected) return;
-
     const username = articleAuthor(article);
     if (!username) return;
-
     if (isMuted(username)) {
       article.style.setProperty('display', 'none', 'important');
       return;
     }
-
     article.style.removeProperty('display');
-
     const user = await fetchProfile(username);
     if (!user || !article.isConnected) return;
-
     const displayName = clean(user.displayName || user.name || username);
     const leaf = findAuthorLeaf(article, username);
     if (!leaf || !displayName) return;
-
     leaf.textContent = displayName;
     leaf.classList.add('ct-author-name');
-}
+    let badge = leaf.parentElement?.querySelector(':scope > .ct-founder');
+    const number = user.foundingMemberNumber;
+    if (number !== null && number !== undefined && number !== '') {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'ct-founder';
+        leaf.after(badge);
+      }
+      const founder = String(number).padStart(5, '0');
+      badge.textContent = `#${founder}`;
+      badge.title = `Founder Number #${founder}`;
+    } else {
+      badge?.remove();
+    }
   }
 
   function collectArticles(root = document) {
@@ -1650,6 +1675,95 @@
     }
   }
 
+  function ctTranslationButtonText(el) {
+    return clean(el?.textContent || el?.getAttribute?.('aria-label') || el?.getAttribute?.('title') || '');
+  }
+
+  function ctTranslationControls(root = document) {
+    const scope = root instanceof Element ? root : document;
+    const out = [];
+    const selector = 'button,[role="button"],a';
+    if (scope instanceof Element && scope.matches(selector)) out.push(scope);
+    scope.querySelectorAll?.(selector).forEach(el => out.push(el));
+    return out.filter(el => /^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(el)));
+  }
+
+  function ctDeclaredLanguage(container) {
+    if (!container) return '';
+    const nodes = [container, ...(container.querySelectorAll?.('[lang],[data-lang],[data-language]') || [])];
+    for (const el of nodes) {
+      const raw = clean(el.getAttribute?.('lang') || el.getAttribute?.('data-lang') || el.getAttribute?.('data-language') || '').toLowerCase();
+      const lang = raw.split(/[-_]/)[0];
+      if (/^[a-z]{2,3}$/.test(lang)) return lang;
+    }
+    return '';
+  }
+
+  function ctPostTextForTranslation(control) {
+    const article = control?.closest?.('article');
+    if (!article) return '';
+    let box = control.parentElement;
+    for (let depth = 0; box && box !== article && depth < 6; depth++, box = box.parentElement) {
+      const candidates = [...box.querySelectorAll('p,[dir="auto"],[data-testid*="text" i]')]
+        .filter(el => !el.closest('button,[role="button"]'))
+        .map(el => clean(el.textContent))
+        .filter(t => t && !/^(?:Show translation|Translate|翻訳を表示|Show original|原文を表示)$/i.test(t));
+      const text = candidates.sort((a,b) => b.length - a.length)[0] || '';
+      if (text.length >= 2) return text;
+    }
+    if (typeof articleText === 'function') return clean(articleText(article));
+    return clean(article.textContent);
+  }
+
+  function ctLikelyLanguage(text, container) {
+    const declared = ctDeclaredLanguage(container);
+    if (declared) return declared;
+    const s = clean(text).replace(/https?:\/\/\S+/gi,' ').replace(/@[A-Za-z0-9_.-]+/g,' ').replace(/#[^\s]+/g,' ');
+    if (!s) return 'unknown';
+    if (/[\u3040-\u30ff]/u.test(s)) return 'ja';
+    if (/[\uac00-\ud7af]/u.test(s)) return 'ko';
+    if (/[\u4e00-\u9fff]/u.test(s)) return 'zh';
+    if (/[\u0400-\u04ff]/u.test(s)) return 'ru';
+    if (/[\u0600-\u06ff]/u.test(s)) return 'ar';
+    if (/[\u0590-\u05ff]/u.test(s)) return 'he';
+    if (/[\u0900-\u097f]/u.test(s)) return 'hi';
+    if (/[\u0e00-\u0e7f]/u.test(s)) return 'th';
+    const lowered = ` ${s.toLowerCase()} `;
+    const words = s.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) || [];
+    if (!words.length) return 'unknown';
+    const other = ['bonjour','merci','salut','avec','pour','dans','une','des','est','mais','vous','nous','hola','gracias','para','con','una','que','los','las','por','pero','como','muy','ciao','grazie','per','che','gli','della','sono','molto','hallo','danke','und','der','die','das','ist','nicht','mit','für','ein','eine','olá','obrigado','obrigada','não','muito'];
+    if (other.some(w => lowered.includes(` ${w} `)) || /[À-ÖØ-öø-ÿ]/u.test(s)) return 'other';
+    const english = new Set(['a','an','and','are','as','at','be','been','but','by','can','could','did','do','does','for','from','had','has','have','he','her','here','his','how','i','if','in','is','it','just','me','more','my','no','not','of','on','one','or','our','out','she','so','some','than','that','the','their','them','there','they','this','to','too','up','us','was','we','were','what','when','where','which','who','why','will','with','would','you','your']);
+    const hits = words.reduce((n,w) => n + (english.has(w) ? 1 : 0), 0);
+    if (hits >= 2 || (words.length <= 4 && hits >= 1)) return 'en';
+    if (words.length <= 3 && /^[\x00-\x7F\s.,!?'"()\-:;]+$/u.test(s)) return 'en';
+    if (words.length >= 5 && hits / words.length >= 0.12) return 'en';
+    return 'other';
+  }
+
+  function patchAutoTranslation(root = document, nativeLanguage = 'ja') {
+    for (const control of ctTranslationControls(root)) {
+      if (!control.isConnected) continue;
+      const article = control.closest('article');
+      if (!article) continue;
+      const text = ctPostTextForTranslation(control);
+      const lang = ctLikelyLanguage(text, article);
+      const isNative = nativeLanguage === 'ja' ? lang === 'ja' : lang === 'en';
+      if (isNative || lang === 'unknown') {
+        control.style.setProperty('display','none','important');
+        continue;
+      }
+      control.style.removeProperty('display');
+      if (control.dataset.ctAutoTranslated === '1') continue;
+      control.dataset.ctAutoTranslated = '1';
+      setTimeout(() => {
+        if (!control.isConnected) return;
+        if (!/^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(control))) return;
+        control.click();
+      }, 40);
+    }
+  }
+
   function scan(root = document) {
     try {
       installStyle();
@@ -1666,6 +1780,9 @@
       patchQuotedTweets(root);
       removeInlineFollowBadges(root);
       patchNotificationAvatarLinks(root);
+      patchAutoTranslation(root, 'en');
+      patchProfileFounder();
+
       patchProfileMute();
       patchOpenMuteMenu();
       patchFavoriteProfileTab();
@@ -1742,5 +1859,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.2.3 loaded');
+  console.log('🐦 Classic Twitter EN v6.2.9-en loaded');
 })();
