@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.3.6
+// @version      6.3.7
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      api.tweet.app
+// @connect      firebasestorage.googleapis.com
+// @connect      storage.googleapis.com
 // @run-at       document-start
 // @license      MIT
 // ==/UserScript==
@@ -441,6 +443,85 @@
 
       .ct-local-empty { padding:28px 18px; text-align:center; opacity:.65; }
       .ct-reply-kicker { font-size:12px; color:#1d9bf0; margin-bottom:3px; }
+
+      .ct-media-info-button {
+        position:absolute!important;
+        right:8px!important;
+        bottom:8px!important;
+        z-index:20!important;
+        width:30px!important;
+        height:30px!important;
+        border:0!important;
+        border-radius:999px!important;
+        background:rgba(0,0,0,.68)!important;
+        color:#fff!important;
+        font:800 16px/30px system-ui,-apple-system,"Segoe UI",sans-serif!important;
+        text-align:center!important;
+        padding:0!important;
+        box-shadow:0 1px 5px rgba(0,0,0,.25)!important;
+        backdrop-filter:blur(6px);
+        -webkit-backdrop-filter:blur(6px);
+      }
+
+      #ct-media-info-panel {
+        position:fixed;
+        inset:0;
+        z-index:2147483600;
+        display:flex;
+        align-items:flex-end;
+        justify-content:center;
+        padding:16px;
+        background:rgba(0,0,0,.34);
+      }
+
+      .ct-media-info-sheet {
+        box-sizing:border-box;
+        width:min(520px,100%);
+        max-height:72vh;
+        overflow:auto;
+        border-radius:18px;
+        padding:16px;
+        background:var(--ct-media-bg,#fff);
+        color:var(--ct-media-fg,#17202a);
+        box-shadow:0 12px 44px rgba(0,0,0,.34);
+        font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;
+      }
+
+      .ct-media-info-head {
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        margin-bottom:12px;
+      }
+
+      .ct-media-info-title { font-size:17px; font-weight:800; }
+      .ct-media-info-close {
+        border:0;
+        border-radius:999px;
+        background:rgba(127,127,127,.15);
+        color:inherit;
+        width:32px;
+        height:32px;
+        font-size:20px;
+      }
+      .ct-media-info-grid {
+        display:grid;
+        grid-template-columns:auto 1fr;
+        gap:7px 12px;
+      }
+      .ct-media-info-key { opacity:.62; }
+      .ct-media-info-value { min-width:0; overflow-wrap:anywhere; font-weight:650; }
+      .ct-media-info-url {
+        margin-top:12px;
+        padding:10px;
+        border-radius:10px;
+        background:rgba(127,127,127,.10);
+        font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
+        overflow-wrap:anywhere;
+        user-select:text;
+        -webkit-user-select:text;
+      }
 
       #ct-reply-badge {
         position:fixed;
@@ -4434,6 +4515,141 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     }
   }
 
+
+  function ctFormatBytes(bytes) {
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n <= 0) return '取得できません';
+    const units = ['B','KB','MB','GB'];
+    let value = n, i = 0;
+    while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+    return `${value >= 10 || i === 0 ? value.toFixed(i === 0 ? 0 : 1) : value.toFixed(2)} ${units[i]}`;
+  }
+
+  function ctMediaFormat(src, contentType = '') {
+    const type = clean(contentType).split(';')[0].toLowerCase();
+    if (type.includes('/')) return type.split('/')[1].toUpperCase().replace('QUICKTIME','MOV').replace('JPEG','JPG');
+    try {
+      const path = decodeURIComponent(new URL(src, location.href).pathname).toLowerCase();
+      const m = path.match(/\.([a-z0-9]{2,5})$/);
+      if (m) return m[1].toUpperCase();
+    } catch {}
+    return '不明';
+  }
+
+  function ctHeadMedia(src) {
+    return new Promise(resolve => {
+      const done = (headers = '') => {
+        const text = String(headers || '');
+        const len = text.match(/^content-length:\s*(\d+)/im)?.[1] || '';
+        const type = text.match(/^content-type:\s*([^\r\n]+)/im)?.[1] || '';
+        resolve({ bytes: len ? Number(len) : null, contentType: type.trim() });
+      };
+      const gm = typeof GM_xmlhttpRequest === 'function'
+        ? GM_xmlhttpRequest
+        : (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest : null);
+      if (!gm) { resolve({ bytes:null, contentType:'' }); return; }
+      try {
+        gm({
+          method:'HEAD',
+          url:src,
+          timeout:8000,
+          onload:r => done(r.responseHeaders),
+          onerror:() => resolve({ bytes:null, contentType:'' }),
+          ontimeout:() => resolve({ bytes:null, contentType:'' })
+        });
+      } catch {
+        resolve({ bytes:null, contentType:'' });
+      }
+    });
+  }
+
+  async function ctShowMediaInfo(media) {
+    document.getElementById('ct-media-info-panel')?.remove();
+    const src = media.currentSrc || media.src || '';
+    const isVideo = media instanceof HTMLVideoElement;
+    const width = isVideo ? media.videoWidth : media.naturalWidth;
+    const height = isVideo ? media.videoHeight : media.naturalHeight;
+    const duration = isVideo && Number.isFinite(media.duration) ? media.duration : null;
+    const head = src ? await ctHeadMedia(src) : { bytes:null, contentType:'' };
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ct-media-info-panel';
+    const dark = matchMedia?.('(prefers-color-scheme: dark)')?.matches;
+    overlay.style.setProperty('--ct-media-bg', dark ? '#15202b' : '#fff');
+    overlay.style.setProperty('--ct-media-fg', dark ? '#f1f5f9' : '#17202a');
+
+    const sheet = document.createElement('div');
+    sheet.className = 'ct-media-info-sheet';
+    const headRow = document.createElement('div');
+    headRow.className = 'ct-media-info-head';
+    const title = document.createElement('div');
+    title.className = 'ct-media-info-title';
+    title.textContent = isVideo ? '🎬 動画情報' : '📸 写真情報';
+    const close = document.createElement('button');
+    close.className = 'ct-media-info-close';
+    close.type = 'button';
+    close.textContent = '×';
+    headRow.append(title, close);
+
+    const grid = document.createElement('div');
+    grid.className = 'ct-media-info-grid';
+    const rows = [
+      ['実解像度', width && height ? `${width} × ${height} px` : '読み込み待ち'],
+      ['形式', ctMediaFormat(src, head.contentType)],
+      ['配信ファイル容量', ctFormatBytes(head.bytes)]
+    ];
+    if (isVideo) rows.push(['長さ', duration != null ? `${duration.toFixed(2)} 秒` : '読み込み待ち']);
+    for (const [key, value] of rows) {
+      const k = document.createElement('div'); k.className = 'ct-media-info-key'; k.textContent = key;
+      const v = document.createElement('div'); v.className = 'ct-media-info-value'; v.textContent = value;
+      grid.append(k, v);
+    }
+
+    const url = document.createElement('div');
+    url.className = 'ct-media-info-url';
+    url.textContent = src || 'URLを取得できません';
+
+    sheet.append(headRow, grid, url);
+    overlay.append(sheet);
+    document.body.append(overlay);
+    const dismiss = () => overlay.remove();
+    close.onclick = dismiss;
+    overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
+  }
+
+  function patchMediaInfo(root = document) {
+    const scope = root instanceof Element ? root : document;
+    const media = [];
+    if (scope instanceof HTMLImageElement || scope instanceof HTMLVideoElement) media.push(scope);
+    scope.querySelectorAll?.('article img, article video').forEach(el => media.push(el));
+
+    for (const el of media) {
+      if (!el.isConnected || el.dataset.ctMediaInfo === '1') continue;
+      if (el instanceof HTMLImageElement) {
+        const alt = clean(el.alt || '').toLowerCase();
+        const r = el.getBoundingClientRect();
+        if (/avatar|profile/.test(alt) || (r.width && r.width <= 96 && r.height <= 96)) continue;
+      }
+      let box = el.parentElement;
+      if (!box) continue;
+      const pos = getComputedStyle(box).position;
+      if (pos === 'static') box.style.position = 'relative';
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ct-media-info-button';
+      button.textContent = 'ⓘ';
+      button.setAttribute('aria-label', 'メディア情報');
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        ctShowMediaInfo(el);
+      }, true);
+      box.append(button);
+      el.dataset.ctMediaInfo = '1';
+    }
+  }
+
   function scan(
     root = document
   ) {
@@ -4457,6 +4673,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       patchComposeJapanese(root);
       patchNotificationAvatarLinks(root);
       patchAutoTranslation(root, 'ja');
+      patchMediaInfo(root);
       patchProfileFounder();
 
       patchProfileMute();
@@ -4647,6 +4864,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.3.6 loaded'
+    '🐦 Classic Twitter JP v6.3.7 loaded'
   );
 })();
