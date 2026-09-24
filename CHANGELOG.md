@@ -2,6 +2,14 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
+## Japanese Chrome / Stay v6.4.2
+
+- Settings の Founding plan / Centurion / 2要素認証説明を追加日本語化
+- ハッシュタグ・ミュートの空状態と Loading 表示を改善
+- 認証済みアカウント通知の空状態を日本語化
+- quoted / posted / reposted / repost removed など投稿・通知文言を追加対応
+- 「さんがあなたを@ツイートしました」の不自然な通知文を「さんがあなた宛てにツイートしました」に修正
+
 ## Japanese Chrome / Stay v6.4.1
 
 - 招待画面の残っていた英語を追加日本語化
