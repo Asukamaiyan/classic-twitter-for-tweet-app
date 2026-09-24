@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.5.1
+// @version      6.5.2
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -4822,6 +4822,37 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     }
   }
 
+  function patchProfileJoinedDate(root = document) {
+    const scope = root instanceof Element ? root : document;
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) nodes.push(node);
+
+    for (const n of nodes) {
+      const t = clean(n.nodeValue);
+      let m = t.match(/^Joined\s+(.+)$/i);
+      if (!m) m = t.match(/^参加した人数\s+(.+)$/);
+      if (!m) continue;
+
+      const article = n.parentElement?.closest('article');
+      if (article) continue;
+
+      let el = n.parentElement;
+      let inviteContext = false;
+      for (let i = 0; el && i < 7; i++, el = el.parentElement) {
+        const txt = clean(el.textContent);
+        if (/Wing|招待リンク|リンクを開いた人数|登録した人数|参加した友だち|Friends who joined|Signed up|Link opens/i.test(txt)) {
+          inviteContext = true;
+          break;
+        }
+      }
+      if (inviteContext) continue;
+
+      n.nodeValue = n.nodeValue.replace(t, `${m[1]}からTwitterを利用しています`);
+    }
+  }
+
   function patchInviteJoinedLabels(root = document) {
     const scope = root instanceof Element ? root : document;
     const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
@@ -4912,6 +4943,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       patchExactPostTime(root);
       patchAutoTranslateSetting();
       patchInviteJoinedLabels(root);
+      patchProfileJoinedDate(root);
       patchMediaInfo(root);
       patchProfileFounder();
 
@@ -5103,6 +5135,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.5.1 loaded'
+    '🐦 Classic Twitter JP Safari v6.5.2 loaded'
   );
 })();
