@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.5.2
+// @version      6.5.3
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -4855,27 +4855,46 @@ if (/^just\s+now$/i.test(t)) {
     let node;
     while ((node = walker.nextNode())) nodes.push(node);
 
+    const isInviteContext = n => {
+      let el = n.parentElement;
+      for (let i = 0; el && i < 7; i++, el = el.parentElement) {
+        const txt = clean(el.textContent);
+        if (/Wing|招待リンク|リンクを開いた人数|登録した人数|参加した友だち|Friends who joined|Signed up|Link opens/i.test(txt)) return true;
+      }
+      return false;
+    };
+
+    // Single text node: "Joined September 2026" / legacy translated form.
     for (const n of nodes) {
       const t = clean(n.nodeValue);
       let m = t.match(/^Joined\s+(.+)$/i);
       if (!m) m = t.match(/^参加した人数\s+(.+)$/);
-      if (!m) continue;
-
-      const article = n.parentElement?.closest('article');
-      if (article) continue;
-
-      let el = n.parentElement;
-      let inviteContext = false;
-      for (let i = 0; el && i < 7; i++, el = el.parentElement) {
-        const txt = clean(el.textContent);
-        if (/Wing|招待リンク|リンクを開いた人数|登録した人数|参加した友だち|Friends who joined|Signed up|Link opens/i.test(txt)) {
-          inviteContext = true;
-          break;
-        }
-      }
-      if (inviteContext) continue;
-
+      if (!m || isInviteContext(n)) continue;
       n.nodeValue = n.nodeValue.replace(t, `${m[1]}からTwitterを利用しています`);
+    }
+
+    // tweet.app currently renders "Joined" and the date as separate DOM text nodes.
+    // Older versions of this script may already have changed only the label to "参加した人数".
+    for (const label of nodes) {
+      const labelText = clean(label.nodeValue);
+      if (!/^(?:Joined|参加した人数)$/i.test(labelText) || isInviteContext(label)) continue;
+
+      let container = label.parentElement;
+      for (let depth = 0; container && depth < 4; depth++, container = container.parentElement) {
+        const allText = clean(container.textContent);
+        const dateMatch = allText.match(/(?:Joined|参加した人数)\s+(.+?)(?=\s+(?:Founder|#\d+)|$)/i);
+        if (!dateMatch) continue;
+
+        const dateText = clean(dateMatch[1]);
+        const dateNode = nodes.find(n => n !== label && container.contains(n) && clean(n.nodeValue) === dateText);
+        if (dateNode) {
+          label.nodeValue = label.nodeValue.replace(labelText, '');
+          dateNode.nodeValue = dateNode.nodeValue.replace(dateText, `${dateText}からTwitterを利用しています`);
+        } else {
+          label.nodeValue = label.nodeValue.replace(labelText, `${dateText}からTwitterを利用しています`);
+        }
+        break;
+      }
     }
   }
 
@@ -5223,6 +5242,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.5.2 loaded'
+    '🐦 Classic Twitter JP v6.5.3 loaded'
   );
 })();
