@@ -2,6 +2,14 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
+## Japanese Chrome / Stay v6.5.0
+
+- Backup codes / Generate new codes / 残りコード数を日本語化
+- プロフィールの Joined 表示を「年月からTwitterを利用しています」に戻し、招待統計の Joined と分離
+- 各ツイートの相対時刻の横に、小さく24時間表記の時刻（HH:mm）を追加
+- 設定画面に「ツイートを自動翻訳」オン/オフを追加
+- 自動翻訳設定は localStorage に保存し、オフ時は手動の翻訳ボタンを利用可能
+
 ## Japanese Chrome / Stay v6.4.3
 
 - Wingバッジ獲得通知を日本語化
