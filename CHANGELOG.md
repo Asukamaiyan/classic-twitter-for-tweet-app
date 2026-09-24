@@ -2,6 +2,13 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
+## Japanese Chrome / Stay v6.5.1
+
+- 自動翻訳設定がホーム更新時にも表示される問題を修正
+- 「ツイートを自動翻訳」は設定画面の「友だちを招待しよう！」内だけに表示
+- 招待項目の下に「拡張機能設定」セクションを追加し、自動翻訳オン/オフを配置
+- 招待設定画面以外へ移動した場合は拡張機能設定UIを自動的に削除
+
 ## Japanese Chrome / Stay v6.5.0
 
 - Backup codes / Generate new codes / 残りコード数を日本語化
