@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.6.1-en
+// @version      6.6.2-en
 // @description  Classic Twitter-style terminology for tweet.app with display names, Founder Number, star Favorites, Retweets, reply notification fallback, local mute, and a private Favorites tab. Does not touch theme settings.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1671,28 +1671,58 @@
   }
 
   function patchAutoTranslateSetting() {
-    const main=document.querySelector('main');
-    const old=document.getElementById('ct-auto-translate-setting');
-    if(!main){old?.remove();return;}
-    const invite=[...main.querySelectorAll('button,a,[role="button"],h1,h2,h3,div,span')]
-      .find(el=>/^(?:Invite friends|Invite friends!)$/i.test(clean(el.textContent)));
-    if(!invite){old?.remove();return;}
-    if(old?.isConnected)return;
-    let host=invite.parentElement;
-    for(let i=0;host&&i<5;i++,host=host.parentElement){if(clean(host.textContent).includes('Invite friends')&&host.parentElement)break;}
-    host=host?.parentElement||invite.parentElement||main;
-    const section=document.createElement('section');
-    section.id='ct-auto-translate-setting';
-    section.style.cssText='margin:14px 0 4px;padding-top:14px;border-top:1px solid rgba(127,127,127,.22);';
-    const heading=document.createElement('div');heading.textContent='Extension settings';heading.style.cssText='font-size:12px;font-weight:800;margin:0 0 8px;';
-    const row=document.createElement('label');row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;cursor:pointer;';
-    const copy=document.createElement('div');
-    const title=document.createElement('div');title.textContent='Automatically translate Tweets';title.style.cssText='font-weight:700;font-size:14px;';
-    const desc=document.createElement('div');desc.textContent='Automatically translate Tweets written in languages other than English.';desc.style.cssText='font-size:12px;opacity:.65;margin-top:3px;';
-    copy.append(title,desc);
-    const toggle=document.createElement('input');toggle.type='checkbox';toggle.checked=autoTranslationEnabled();toggle.style.cssText='width:20px;height:20px;cursor:pointer;';
-    toggle.addEventListener('change',()=>{saveJSON(KEY.autoTranslate,toggle.checked);document.querySelectorAll('[data-ct-auto-translated]').forEach(el=>{delete el.dataset.ctAutoTranslated;el.style.removeProperty('display');});scan(document);});
-    row.append(copy,toggle);section.append(heading,row);host.append(section);
+    const main = document.querySelector('main');
+    const old = document.getElementById('ct-auto-translate-setting');
+    if (!main) { old?.remove(); return; }
+
+    const settingsTitle = [...main.querySelectorAll('h1,h2,h3,div,span')]
+      .some(el => !el.children.length && /^Settings$/i.test(clean(el.textContent)));
+    const inviteItem = [...main.querySelectorAll('button,a,[role="button"],div')]
+      .some(el => /Invite friends/i.test(clean(el.textContent)));
+
+    if (!settingsTitle || !inviteItem) {
+      old?.remove();
+      return;
+    }
+    if (old?.isConnected && old.parentElement === main) return;
+    old?.remove();
+
+    const section = document.createElement('section');
+    section.id = 'ct-auto-translate-setting';
+    section.style.cssText = 'margin:18px 20px 12px;padding:14px 16px;border:1px solid rgba(127,127,127,.22);border-radius:14px;';
+
+    const heading = document.createElement('div');
+    heading.textContent = 'Extension settings';
+    heading.style.cssText = 'font-size:13px;font-weight:800;margin-bottom:8px;';
+
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;';
+    const copy = document.createElement('div');
+    const title = document.createElement('div');
+    title.textContent = 'Automatically translate Tweets';
+    title.style.cssText = 'font-weight:700;font-size:14px;';
+    const desc = document.createElement('div');
+    desc.textContent = 'Automatically translate Tweets written in languages other than English.';
+    desc.style.cssText = 'font-size:12px;opacity:.65;margin-top:3px;';
+    copy.append(title, desc);
+
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = autoTranslationEnabled();
+    toggle.setAttribute('aria-label', 'Automatically translate Tweets');
+    toggle.style.cssText = 'width:20px;height:20px;cursor:pointer;flex:0 0 auto;';
+    toggle.addEventListener('change', () => {
+      saveJSON(KEY.autoTranslate, toggle.checked);
+      document.querySelectorAll('[data-ct-auto-translated]').forEach(el => {
+        delete el.dataset.ctAutoTranslated;
+        el.style.removeProperty('display');
+      });
+      scan(document);
+    });
+
+    row.append(copy, toggle);
+    section.append(heading, row);
+    main.append(section);
   }
 
   function scan(root = document) {
@@ -1789,5 +1819,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.6.1-en loaded');
+  console.log('🐦 Classic Twitter EN v6.6.2-en loaded');
 })();
