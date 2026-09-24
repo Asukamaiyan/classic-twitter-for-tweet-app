@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.6.1
+// @version      6.6.2
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -559,26 +559,6 @@
 
       .ct-local-empty { padding:28px 18px; text-align:center; opacity:.65; }
       .ct-reply-kicker { font-size:12px; color:#1d9bf0; margin-bottom:3px; }
-
-      .ct-media-info-button {
-        position:absolute!important;
-        right:8px!important;
-        bottom:8px!important;
-        z-index:20!important;
-        width:30px!important;
-        height:30px!important;
-        border:0!important;
-        border-radius:999px!important;
-        background:rgba(0,0,0,.68)!important;
-        color:#fff!important;
-        font:800 16px/30px system-ui,-apple-system,"Segoe UI",sans-serif!important;
-        text-align:center!important;
-        padding:0!important;
-        box-shadow:0 1px 5px rgba(0,0,0,.25)!important;
-        backdrop-filter:blur(6px);
-        -webkit-backdrop-filter:blur(6px);
-      }
-
       #ct-media-info-panel {
         position:fixed;
         inset:0;
@@ -4442,22 +4422,35 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         const r = el.getBoundingClientRect();
         if (/avatar|profile/.test(alt) || (r.width && r.width <= 96 && r.height <= 96)) continue;
       }
-      let box = el.parentElement;
-      if (!box) continue;
-      const pos = getComputedStyle(box).position;
-      if (pos === 'static') box.style.position = 'relative';
 
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'ct-media-info-button';
-      button.textContent = 'ⓘ';
-      button.setAttribute('aria-label', 'メディア情報');
-      button.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        ctShowMediaInfo(el);
-      }, true);
-      box.append(button);
+      let timer = null;
+      let startX = 0;
+      let startY = 0;
+      const cancel = () => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+      };
+
+      el.addEventListener('touchstart', event => {
+        const touch = event.touches?.[0];
+        if (!touch) return;
+        startX = touch.clientX;
+        startY = touch.clientY;
+        cancel();
+        timer = setTimeout(() => {
+          timer = null;
+          ctShowMediaInfo(el);
+        }, 650);
+      }, { passive:true });
+
+      el.addEventListener('touchmove', event => {
+        const touch = event.touches?.[0];
+        if (!touch) return;
+        if (Math.abs(touch.clientX - startX) > 12 || Math.abs(touch.clientY - startY) > 12) cancel();
+      }, { passive:true });
+
+      el.addEventListener('touchend', cancel, { passive:true });
+      el.addEventListener('touchcancel', cancel, { passive:true });
       el.dataset.ctMediaInfo = '1';
     }
   }
@@ -4840,6 +4833,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.6.1 loaded'
+    '🐦 Classic Twitter JP Safari v6.6.2 loaded'
   );
 })();
