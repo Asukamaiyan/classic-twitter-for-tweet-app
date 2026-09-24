@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.6.0
+// @version      6.6.1
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -21,7 +21,6 @@
   const LOGO = 'https://app.tweet.app/assets/brand/bird-blue.svg';
 
   const KEY = {
-    muted: 'classicTwitterJP.mutedUsers',
     favorites: 'classicTwitterJP.favorites',
     replyNotices: 'classicTwitterJP.replyNotifications',
     replySeen: 'classicTwitterJP.replySeenIds',
@@ -430,10 +429,6 @@
         height:28px!important;
         object-fit:contain!important;
         display:block!important;
-      }
-
-      .ct-profile-mute {
-        margin-left:8px!important;
       }
 
       .ct-notification-fav-icon {
@@ -1730,58 +1725,10 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       null;
   }
 
-  let muted =
-    new Set(
-      (
-        loadJSON(
-          KEY.muted,
-          []
-        ) ||
-        []
-      )
-        .map(normUser)
-        .filter(Boolean)
-    );
-
-  const isMuted =
-    username =>
-      muted.has(
-        normUser(username)
-      );
-
-  function saveMuted() {
-    saveJSON(
-      KEY.muted,
-      [...muted].sort()
-    );
-  }
-
-  function toggleMuted(username) {
-    const key =
-      normUser(username);
-
-    if (!key) return;
-
-    if (muted.has(key)) {
-      muted.delete(key);
-    } else {
-      muted.add(key);
-    }
-
-    saveMuted();
-    patchFeed(document);
-    patchProfileMute();
-  }
-
   async function patchArticle(article) {
     if (!article?.isConnected) return;
     const username = articleAuthor(article);
     if (!username) return;
-    if (isMuted(username)) {
-      article.style.setProperty('display', 'none', 'important');
-      return;
-    }
-    article.style.removeProperty('display');
     const user = await fetchProfile(username);
     if (!user || !article.isConnected) return;
     const displayName = clean(user.displayName || user.name || username);
@@ -2118,345 +2065,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
 
     badge.title =
       ` #${founder}`;
-  }
-
-  function patchProfileMute() {
-    const username =
-      routeUser();
-
-    const main =
-      document.querySelector(
-        'main'
-      ) ||
-      document;
-
-    const existing =
-      [
-        ...main.querySelectorAll(
-          '.ct-profile-mute'
-        )
-      ];
-
-    const old =
-      existing.shift() ||
-      null;
-
-    existing.forEach(
-      el =>
-        el.remove()
-    );
-
-    if (!username) {
-      old?.remove();
-      return;
-    }
-
-    const ref =
-      [
-        ...main.querySelectorAll(
-          'button'
-        )
-      ]
-        .find(
-          button =>
-            !button.closest(
-              'article'
-            ) &&
-            !button.classList.contains(
-              'ct-profile-mute'
-            ) &&
-            /^(Follow|Unfollow|フォロー|フォロー解除)$/i
-              .test(
-                clean(
-                  button.textContent
-                )
-              )
-        );
-
-    if (!ref) {
-      old?.remove();
-      return;
-    }
-
-    const button =
-      old ||
-      ref.cloneNode(true);
-
-    if (!old) {
-      button.removeAttribute(
-        'id'
-      );
-
-      button.classList.add(
-        'ct-profile-mute'
-      );
-
-      ref.parentElement
-        ?.appendChild(
-          button
-        );
-    }
-
-    const label =
-      isMuted(username)
-        ? 'ミュート解除'
-        : 'ミュート';
-
-    button.textContent =
-      label;
-
-    button.title =
-      label;
-
-    button.setAttribute(
-      'aria-label',
-      label
-    );
-
-    button.onclick =
-      event => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        toggleMuted(
-          username
-        );
-      };
-  }
-
-  let menuUser = null;
-
-  function isMenuButton(button) {
-    const text =
-      [
-        button?.getAttribute?.(
-          'aria-label'
-        ),
-
-        button?.getAttribute?.(
-          'title'
-        ),
-
-        button?.getAttribute?.(
-          'data-testid'
-        ),
-
-        button?.textContent
-      ]
-        .filter(Boolean)
-        .join(' ');
-
-    return (
-      String(
-        button?.getAttribute?.(
-          'aria-haspopup'
-        ) ||
-        ''
-      )
-        .toLowerCase() ===
-        'menu' ||
-
-      /(^|\s)(more|options|menu|もっと|その他)(\s|$)/i
-        .test(text)
-    );
-  }
-
-  document.addEventListener(
-    'click',
-    event => {
-      const button =
-        event.target
-          .closest?.(
-            'button,[role="button"]'
-          );
-
-      const article =
-        button?.closest?.(
-          'article'
-        );
-
-      if (
-        !button ||
-        !article ||
-        !isMenuButton(button)
-      ) {
-        return;
-      }
-
-      const username =
-        articleAuthor(article);
-
-      if (!username) return;
-
-      menuUser =
-        username;
-
-      [
-        0,
-        80,
-        250
-      ]
-        .forEach(
-          delay =>
-            setTimeout(
-              patchOpenMuteMenu,
-              delay
-            )
-        );
-    },
-    true
-  );
-
-  function visible(el) {
-    if (!el?.isConnected) {
-      return false;
-    }
-
-    const r =
-      el.getBoundingClientRect();
-
-    const style =
-      getComputedStyle(el);
-
-    return (
-      r.width > 0 &&
-      r.height > 0 &&
-      style.display !==
-        'none' &&
-      style.visibility !==
-        'hidden'
-    );
-  }
-
-  function patchOpenMuteMenu() {
-    if (!menuUser) return;
-
-    const all =
-      [
-        ...document.querySelectorAll(
-          '[role="menuitem"],button,a,div[role="button"]'
-        )
-      ];
-
-    const isPopupItem =
-      el => {
-        if (!visible(el)) {
-          return false;
-        }
-
-        const explicitMenu =
-          el.closest(
-            '[role="menu"],[data-radix-menu-content],[data-menu-content]'
-          );
-
-        return Boolean(
-          explicitMenu ||
-          !el.closest('main')
-        );
-      };
-
-    const anchor =
-      all.find(el =>
-        isPopupItem(el) &&
-        /^(Report post|Report Tweet|Report|ツイートを報告|報告)$/i
-          .test(
-            clean(
-              el.textContent
-            )
-          )
-      ) ||
-      all.find(el =>
-        isPopupItem(el) &&
-        /^(Follow|Unfollow|フォロー|フォロー解除)(\s+@?.+)?$/i
-          .test(
-            clean(
-              el.textContent
-            )
-          )
-      );
-
-    if (!anchor) return;
-
-    const item =
-      anchor.closest(
-        '[role="menuitem"],button,a,[role="button"]'
-      ) ||
-      anchor;
-
-    const parent =
-      item.parentElement;
-
-    if (!parent) return;
-
-    let muteItem =
-      parent.querySelector(
-        ':scope > [data-ct-mute-menu="1"]'
-      );
-
-    if (!muteItem) {
-      muteItem =
-        document.createElement(
-          item.tagName
-            .toLowerCase()
-        );
-
-      muteItem.className =
-        item.className ||
-        '';
-
-      muteItem.setAttribute(
-        'role',
-        item.getAttribute(
-          'role'
-        ) ||
-        'menuitem'
-      );
-
-      muteItem.dataset.ctMuteMenu =
-        '1';
-
-      parent.insertBefore(
-        muteItem,
-        item
-      );
-    }
-
-    const label =
-      isMuted(menuUser)
-        ? 'ミュート解除'
-        : 'ミュート';
-
-    muteItem.textContent =
-      label;
-
-    muteItem.title =
-      label;
-
-    muteItem.setAttribute(
-      'aria-label',
-      label
-    );
-
-    muteItem.onclick =
-      event => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        toggleMuted(
-          menuUser
-        );
-
-        document.dispatchEvent(
-          new KeyboardEvent(
-            'keydown',
-            {
-              key:'Escape',
-              code:'Escape',
-              bubbles:true
-            }
-          )
-        );
-      };
   }
 
   function articleId(article) {
@@ -4890,7 +4498,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         hour:'2-digit', minute:'2-digit', hour12:false
       }).format(date);
       const dateText = new Intl.DateTimeFormat('ja-JP', {
-        year:'numeric', month:'numeric', day:'numeric'
+        year:'numeric', month:'long', day:'numeric'
       }).format(date);
       stamp.textContent = `${dateText} · ${timeText}`;
 
@@ -5046,9 +4654,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       patchProfileJoinedDate(root);
       patchMediaInfo(root);
       patchProfileFounder();
-
-      patchProfileMute();
-      patchOpenMuteMenu();
       patchFavoriteProfileTab();
 
       if (favoritesActive) {
@@ -5235,6 +4840,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.6.0 loaded'
+    '🐦 Classic Twitter JP Safari v6.6.1 loaded'
   );
 })();
