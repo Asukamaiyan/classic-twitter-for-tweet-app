@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.6.0
+// @version      6.6.1
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -18,7 +18,6 @@
   const LOGO = 'https://app.tweet.app/assets/brand/bird-blue.svg';
 
   const KEY = {
-    muted: 'classicTwitterJP.mutedUsers',
     favorites: 'classicTwitterJP.favorites',
     replyNotices: 'classicTwitterJP.replyNotifications',
     replySeen: 'classicTwitterJP.replySeenIds',
@@ -492,10 +491,6 @@
         height:28px!important;
         object-fit:contain!important;
         display:block!important;
-      }
-
-      .ct-profile-mute {
-        margin-left:8px!important;
       }
 
       .ct-notification-fav-icon {
@@ -1983,81 +1978,10 @@ if (/^just\s+now$/i.test(t)) {
     );
   }
 
-  let muted =
-    new Set(
-      (
-        loadJSON(
-          KEY.muted,
-          []
-        ) || []
-      )
-        .map(
-          normUser
-        )
-        .filter(
-          Boolean
-        )
-    );
-
-  const isMuted =
-    username =>
-      muted.has(
-        normUser(
-          username
-        )
-      );
-
-  function saveMuted() {
-    saveJSON(
-      KEY.muted,
-      [...muted].sort()
-    );
-  }
-
-  function toggleMuted(
-    username
-  ) {
-    const key =
-      normUser(
-        username
-      );
-
-    if (!key) {
-      return;
-    }
-
-    if (
-      muted.has(
-        key
-      )
-    ) {
-      muted.delete(
-        key
-      );
-    } else {
-      muted.add(
-        key
-      );
-    }
-
-    saveMuted();
-
-    patchFeed(
-      document
-    );
-
-    patchProfileMute();
-  }
-
   async function patchArticle(article) {
     if (!article?.isConnected) return;
     const username = articleAuthor(article);
     if (!username) return;
-    if (isMuted(username)) {
-      article.style.setProperty('display', 'none', 'important');
-      return;
-    }
-    article.style.removeProperty('display');
     const user = await fetchProfile(username);
     if (!user || !article.isConnected) return;
     const displayName = clean(user.displayName || user.name || username);
@@ -2303,126 +2227,6 @@ if (/^just\s+now$/i.test(t)) {
     const founder = String(number).padStart(5, '0');
     badge.textContent = `#${founder}`;
     badge.title = `Founder Number #${founder}`;
-  }
-
-  function cleanupOldNamedMute() {
-    document
-      .querySelectorAll(
-        '[data-ct-mute-menu="1"]'
-      )
-      .forEach(
-        el =>
-          el.remove()
-      );
-  }
-
-  function patchProfileMute() {
-    const username =
-      routeUser();
-
-    const main =
-      document.querySelector(
-        'main'
-      )
-      ||
-      document;
-
-    const existing =
-      [
-        ...main.querySelectorAll(
-          '.ct-profile-mute'
-        )
-      ];
-
-    const old =
-      existing.shift()
-      ||
-      null;
-
-    existing.forEach(
-      el =>
-        el.remove()
-    );
-
-    if (!username) {
-      old?.remove();
-      return;
-    }
-
-    const ref =
-      [
-        ...main.querySelectorAll(
-          'button'
-        )
-      ]
-        .find(
-          button =>
-            !button.closest(
-              'article'
-            )
-            &&
-            !button.classList.contains(
-              'ct-profile-mute'
-            )
-            &&
-            /^(Follow|Unfollow|フォロー|フォロー解除)$/i
-              .test(
-                clean(
-                  button.textContent
-                )
-              )
-        );
-
-    if (!ref) {
-      old?.remove();
-      return;
-    }
-
-    const button =
-      old
-      ||
-      ref.cloneNode(
-        true
-      );
-
-    if (!old) {
-      button.removeAttribute(
-        'id'
-      );
-
-      button.classList.add(
-        'ct-profile-mute'
-      );
-
-      ref.parentElement
-        ?.appendChild(
-          button
-        );
-    }
-
-    button.textContent =
-      isMuted(
-        username
-      )
-        ? 'ミュート解除'
-        : 'ミュート';
-
-    button.title =
-      isMuted(
-        username
-      )
-        ? 'ミュート解除'
-        : 'ミュート';
-
-    button.onclick =
-      event => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        toggleMuted(
-          username
-        );
-      };
   }
 
   function articleId(
@@ -4906,7 +4710,7 @@ if (/^just\s+now$/i.test(t)) {
         hour:'2-digit', minute:'2-digit', hour12:false
       }).format(date);
       const dateText = new Intl.DateTimeFormat('ja-JP', {
-        year:'numeric', month:'numeric', day:'numeric'
+        year:'numeric', month:'long', day:'numeric'
       }).format(date);
       stamp.textContent = `${dateText} · ${timeText}`;
 
@@ -5062,8 +4866,6 @@ if (/^just\s+now$/i.test(t)) {
     try {
       installStyle();
 
-      cleanupOldNamedMute();
-
       hideAffiliation();
 
       patchBrand();
@@ -5107,8 +4909,6 @@ if (/^just\s+now$/i.test(t)) {
       patchProfileJoinedDate(root);
 
       patchProfileFounder();
-
-      patchProfileMute();
 
       patchFavoriteProfileTab();
 
@@ -5313,6 +5113,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.6.0 loaded'
+    '🐦 Classic Twitter JP v6.6.1 loaded'
   );
 })();
