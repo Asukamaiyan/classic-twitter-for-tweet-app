@@ -4575,46 +4575,54 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     const old = document.getElementById('ct-auto-translate-setting');
     if (!main) { old?.remove(); return; }
 
-    const inviteLabel = [...main.querySelectorAll('button,a,[role="button"],h1,h2,h3,div,span')]
-      .find(el => clean(el.textContent) === '友だちを招待しよう！');
+    const settingsTitle = [...main.querySelectorAll('h1,h2,h3,div,span')]
+      .some(el => !el.children.length && /^(?:設定|Settings)$/i.test(clean(el.textContent)));
+    const inviteItem = [...main.querySelectorAll('button,a,[role="button"],div')]
+      .some(el => /友だちを招待しよう！/.test(clean(el.textContent)));
 
-    if (!inviteLabel) {
+    if (!settingsTitle || !inviteItem) {
       old?.remove();
       return;
     }
-    if (old?.isConnected) return;
+    if (old?.isConnected && old.parentElement === main) return;
+    old?.remove();
 
-    let host = inviteLabel.parentElement;
-    for (let i=0; host && i<5; i++, host=host.parentElement) {
-      if (clean(host.textContent).includes('友だちを招待しよう！') && host.parentElement) break;
-    }
-    host = host?.parentElement || inviteLabel.parentElement || main;
+    const section = document.createElement('section');
+    section.id = 'ct-auto-translate-setting';
+    section.style.cssText = 'margin:18px 20px 12px;padding:14px 16px;border:1px solid rgba(127,127,127,.22);border-radius:14px;';
 
-    const section=document.createElement('section');
-    section.id='ct-auto-translate-setting';
-    section.style.cssText='margin:14px 0 4px;padding-top:14px;border-top:1px solid rgba(127,127,127,.22);';
-    const heading=document.createElement('div');
-    heading.textContent='拡張機能設定';
-    heading.style.cssText='font-size:12px;font-weight:800;letter-spacing:.02em;margin:0 0 8px;';
-    const row=document.createElement('label');
-    row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;cursor:pointer;';
-    const copy=document.createElement('div');
-    const title=document.createElement('div');
-    title.textContent='ツイートを自動翻訳';
-    title.style.cssText='font-weight:700;font-size:14px;';
-    const desc=document.createElement('div');
-    desc.textContent='日本語以外のツイートを自動的に翻訳します。';
-    desc.style.cssText='font-size:12px;opacity:.65;margin-top:3px;';
-    copy.append(title,desc);
-    const toggle=document.createElement('input');
-    toggle.type='checkbox';
-    toggle.checked=autoTranslationEnabled();
-    toggle.setAttribute('aria-label','ツイートの自動翻訳');
-    toggle.style.cssText='width:20px;height:20px;cursor:pointer;flex:0 0 auto;';
-    toggle.addEventListener('change',()=>{saveJSON(KEY.autoTranslate,toggle.checked);document.querySelectorAll('[data-ct-auto-translated]').forEach(el=>{delete el.dataset.ctAutoTranslated;el.style.removeProperty('display');});scan(document);});
-    row.append(copy,toggle);
-    section.append(heading,row);
-    host.append(section);
+    const heading = document.createElement('div');
+    heading.textContent = '拡張機能設定';
+    heading.style.cssText = 'font-size:13px;font-weight:800;margin-bottom:8px;';
+
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;';
+    const copy = document.createElement('div');
+    const title = document.createElement('div');
+    title.textContent = 'ツイートを自動翻訳';
+    title.style.cssText = 'font-weight:700;font-size:14px;';
+    const desc = document.createElement('div');
+    desc.textContent = '日本語以外のツイートを自動的に翻訳します。';
+    desc.style.cssText = 'font-size:12px;opacity:.65;margin-top:3px;';
+    copy.append(title, desc);
+
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = autoTranslationEnabled();
+    toggle.setAttribute('aria-label', 'ツイートの自動翻訳');
+    toggle.style.cssText = 'width:20px;height:20px;cursor:pointer;flex:0 0 auto;';
+    toggle.addEventListener('change', () => {
+      saveJSON(KEY.autoTranslate, toggle.checked);
+      document.querySelectorAll('[data-ct-auto-translated]').forEach(el => {
+        delete el.dataset.ctAutoTranslated;
+        el.style.removeProperty('display');
+      });
+      scan(document);
+    });
+
+    row.append(copy, toggle);
+    section.append(heading, row);
+    main.append(section);
   }
 
   function scan(
