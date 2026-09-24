@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.4.2
+// @version      6.4.3
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -131,6 +131,26 @@
     ['Unlike', 'お気に入りを解除'],
 
     ['Who to follow', 'おすすめユーザー'],
+
+    // Wing badge / loading states
+    ['You earned the Wing badge for inviting 5 friends who joined.', '5人の友だちを招待したので、Wingバッジを獲得しました！'],
+    ['awarded you a badge', 'あなたにバッジを贈りました'],
+    ['Loading account...', 'アカウント情報を読み込み中…'],
+    ['Loading followed hashtags...', 'フォロー中のハッシュタグを読み込み中…'],
+    ['Loading more followed hashtags', 'フォロー中のハッシュタグをさらに読み込み中…'],
+    ['Loading more muted accounts', 'ミュートしているアカウントをさらに読み込み中…'],
+    ['Loading muted accounts...', 'ミュートしているアカウントを読み込み中…'],
+    ['Loading more notifications', '通知をさらに読み込み中…'],
+    ['Loading more notifications...', '通知をさらに読み込み中…'],
+    ['Loading notifications...', '通知を読み込み中…'],
+    ['Loading notification...', '通知を読み込み中…'],
+    ['Loading profile...', 'プロフィールを読み込み中…'],
+    ['Loading posts...', 'ツイートを読み込み中…'],
+    ['Loading more posts...', 'ツイートをさらに読み込み中…'],
+    ['Loading followers...', 'フォロワーを読み込み中…'],
+    ['Loading following...', 'フォロー中のユーザーを読み込み中…'],
+    ['Loading more', 'さらに読み込み中…'],
+    ['Load more', 'さらに読み込む'],
 
     // Settings / loading / notifications refinements
     ['See your account information like your username and date of birth.', 'ユーザー名や生年月日などのアカウント情報を確認できます。'],
