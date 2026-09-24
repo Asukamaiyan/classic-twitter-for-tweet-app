@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.4.0
+// @version      6.4.1
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -113,6 +113,17 @@
     // Invite / referral
     ['Invite', '招待する'],
     ['Invite friends', '友だちを招待しよう！'],
+    ['Share your personal invite link with friends by text, email, or anywhere else.', 'あなた専用の招待リンクを、メッセージやメールなどで友だちにシェアしよう！'],
+    ['Share invite', '招待リンクをシェア'],
+    ['Link opens', 'リンクを開いた人数'],
+    ['Signed up', '登録した人数'],
+    ['Joined', '参加した人数'],
+    ['Friends who joined', '参加した友だち'],
+    ['Earn a Wing badge!', 'Wingバッジを獲得しよう！'],
+    ['How it works:', '仕組み:'],
+    ['Share your invite link with friends.', '招待リンクを友だちにシェアします。'],
+    ['They sign up. Once they confirm their email, pay, and activate their account, that counts as one friend.', '友だちが登録し、メール認証・支払い・アカウントの有効化を完了すると、1人としてカウントされます。'],
+    ['Get 5 friends → get a Wing badge!', '5人の友だちが参加すると、Wingバッジを獲得できます！'],
     ['Share your personal invite link.', 'あなた専用の招待リンクをシェアしよう！'],
     ['Invalid invite link.', 'この招待リンクは無効です'],
     ['Invite link is missing.', '招待リンクが見つかりません'],
@@ -4922,6 +4933,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.4.0 loaded'
+    '🐦 Classic Twitter JP Safari v6.4.1 loaded'
   );
 })();
