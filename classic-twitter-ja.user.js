@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.4.1
+// @version      6.4.2
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -131,6 +131,29 @@
     ['Unlike', 'お気に入りを解除'],
 
     ['Who to follow', 'おすすめユーザー'],
+
+    // Settings / loading / notifications refinements
+    ['See your account information like your username and date of birth.', 'ユーザー名や生年月日などのアカウント情報を確認できます。'],
+    ['Founding plan', 'Foundingプラン'],
+    ['You have Centurion.', 'Centurionを利用中です。'],
+    ['Generating new codes invalidates any unused codes you already have.', '新しいコードを生成すると、現在お持ちの未使用コードはすべて無効になります。'],
+    ['Manage two-factor authentication and sign-in protection.', '2要素認証とログイン保護を管理します。'],
+    ["You aren't following any hashtags.", 'フォローしているハッシュタグはありません。'],
+    ["You haven't muted anyone.", 'ミュートしているアカウントはありません。'],
+    ['Loading muted', 'ミュートしているアカウントを読み込み中…'],
+    ['Loading notifications', '通知を読み込み中…'],
+    ['Loading notification', '通知を読み込み中…'],
+    ['No verified account notifications yet.', '認証済みアカウントからの通知はまだありません。'],
+    ['quoted your post', 'あなたのツイートを引用しました'],
+    ['quoted your tweet', 'あなたのツイートを引用しました'],
+    ['posted', 'ツイートしました'],
+    ['reposted', 'リツイートしました'],
+    ['retweeted', 'リツイートしました'],
+    ['removed a repost', 'リツイートを取り消しました'],
+    ['removed a retweet', 'リツイートを取り消しました'],
+    ['Your post was sent.', 'ツイートしました'],
+    ['Repost removed.', 'リツイートを取り消しました'],
+    ['Post deleted.', 'ツイートを削除しました'],
 
     // Invite / referral
     ['Invite', '招待する'],
@@ -635,6 +658,19 @@
     let m;
 
     
+    // Notification grammar normalization
+    if ((m = t.match(/^(.+?)さんがあなたを@ツイートしました$/))) {
+      return `${m[1]}さんがあなた宛てにツイートしました`;
+    }
+
+    if ((m = t.match(/^(.+?)\s+mentioned you(?: in a (?:post|tweet))?$/i))) {
+      return `${m[1]}さんがあなた宛てにツイートしました`;
+    }
+
+    if ((m = t.match(/^(.+?)\s+quoted your (?:post|tweet)$/i))) {
+      return `${m[1]}さんがあなたのツイートを引用しました`;
+    }
+
     if ((m = t.match(/^Replying\s+to\s+(.+)$/i))) {
       const targets = m[1].replace(
         /(@[A-Za-z0-9_.-]{1,80})(?!さん)/g,
