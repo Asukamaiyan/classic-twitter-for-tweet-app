@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.6.1
+// @version      6.6.2
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -4797,40 +4797,30 @@ if (/^just\s+now$/i.test(t)) {
   function patchAutoTranslateSetting() {
     const main = document.querySelector('main');
     const old = document.getElementById('ct-auto-translate-setting');
+    if (!main) { old?.remove(); return; }
 
-    if (!main) {
+    const settingsTitle = [...main.querySelectorAll('h1,h2,h3,div,span')]
+      .some(el => !el.children.length && /^(?:設定|Settings)$/i.test(clean(el.textContent)));
+    const inviteItem = [...main.querySelectorAll('button,a,[role="button"],div')]
+      .some(el => /友だちを招待しよう！/.test(clean(el.textContent)));
+
+    if (!settingsTitle || !inviteItem) {
       old?.remove();
       return;
     }
-
-    const inviteLabel = [...main.querySelectorAll('button,a,[role="button"],h1,h2,h3,div,span')]
-      .find(el => clean(el.textContent) === '友だちを招待しよう！');
-
-    if (!inviteLabel) {
-      old?.remove();
-      return;
-    }
-
-    if (old?.isConnected) return;
-
-    let host = inviteLabel.parentElement;
-    for (let i = 0; host && i < 5; i++, host = host.parentElement) {
-      const text = clean(host.textContent);
-      if (text.includes('友だちを招待しよう！') && host.parentElement) break;
-    }
-    host = host?.parentElement || inviteLabel.parentElement || main;
+    if (old?.isConnected && old.parentElement === main) return;
+    old?.remove();
 
     const section = document.createElement('section');
     section.id = 'ct-auto-translate-setting';
-    section.style.cssText = 'margin:14px 0 4px;padding-top:14px;border-top:1px solid rgba(127,127,127,.22);';
+    section.style.cssText = 'margin:18px 20px 12px;padding:14px 16px;border:1px solid rgba(127,127,127,.22);border-radius:14px;';
 
     const heading = document.createElement('div');
     heading.textContent = '拡張機能設定';
-    heading.style.cssText = 'font-size:12px;font-weight:800;letter-spacing:.02em;margin:0 0 8px;';
+    heading.style.cssText = 'font-size:13px;font-weight:800;margin-bottom:8px;';
 
     const row = document.createElement('label');
-    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;cursor:pointer;';
-
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;';
     const copy = document.createElement('div');
     const title = document.createElement('div');
     title.textContent = 'ツイートを自動翻訳';
@@ -4856,7 +4846,7 @@ if (/^just\s+now$/i.test(t)) {
 
     row.append(copy, toggle);
     section.append(heading, row);
-    host.append(section);
+    main.append(section);
   }
 
   function scan(
@@ -5113,6 +5103,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.6.1 loaded'
+    '🐦 Classic Twitter JP v6.6.2 loaded'
   );
 })();
