@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.5.3
+// @version      6.5.4
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -89,6 +89,8 @@
     ['Tweets', 'ツイート'],
     ['Tweet', 'ツイート'],
     ['Replies', '返信'],
+    ['No replies yet', 'まだ返信はありません'],
+    ['Be the first to reply.', '最初の返信をしてみましょう。'],
     ['Reply', '返信'],
     ['Followers', 'フォロワー'],
     ['Follower', 'フォロワー'],
@@ -5154,6 +5156,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.5.3 loaded'
+    '🐦 Classic Twitter JP Safari v6.5.4 loaded'
   );
 })();
