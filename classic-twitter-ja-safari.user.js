@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.5.5
+// @version      6.6.0
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -644,12 +644,14 @@
         -webkit-user-select:text;
       }
 
-      .ct-exact-post-time {
-        font-size:10px;
-        opacity:.48;
+      .ct-detail-post-time {
+        font-size:13px;
+        opacity:.68;
         font-weight:400;
+        padding:10px 0 8px;
+        margin:0 0 2px;
+        border-bottom:1px solid rgba(127,127,127,.20);
         white-space:nowrap;
-        margin-left:1px;
       }
 
       #ct-reply-badge {
@@ -4854,19 +4856,49 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
 
   function patchExactPostTime(root = document) {
     const scope = root instanceof Element ? root : document;
-    const times = [];
-    if (scope instanceof HTMLTimeElement && scope.matches('time[datetime]')) times.push(scope);
-    scope.querySelectorAll?.('article time[datetime]').forEach(el => times.push(el));
-    for (const time of times) {
-      if (!time.isConnected || time.dataset.ctExactTime === '1') continue;
-      const date = new Date(time.getAttribute('datetime') || '');
-      if (Number.isNaN(date.getTime())) continue;
-      const exact = document.createElement('span');
-      exact.className = 'ct-exact-post-time';
-      exact.textContent = ' · ' + new Intl.DateTimeFormat('ja-JP', {hour:'2-digit',minute:'2-digit',hour12:false}).format(date);
-      exact.title = new Intl.DateTimeFormat('ja-JP', {year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(date);
-      time.insertAdjacentElement('afterend', exact);
-      time.dataset.ctExactTime = '1';
+    const articles = [];
+    if (scope instanceof Element && scope.matches('article')) articles.push(scope);
+    scope.querySelectorAll?.('article').forEach(a => articles.push(a));
+
+    for (const article of articles) {
+      if (!article.isConnected) continue;
+
+      // Only add the X-style timestamp to the Tweet detail/conversation view.
+      // Feed cards keep their compact relative timestamp.
+      const path = location.pathname;
+      const isDetail = /\/status\/|\/post\/|\/posts\//i.test(path) ||
+        !!article.querySelector('[data-testid*="reply" i] textarea, textarea[placeholder*="reply" i]');
+      if (!isDetail) continue;
+      if (article.querySelector('.ct-detail-post-time')) continue;
+
+      const timeEl = article.querySelector('time[datetime]');
+      let date = timeEl ? new Date(timeEl.getAttribute('datetime') || '') : null;
+
+      if (!date || Number.isNaN(date.getTime())) {
+        const candidates = [...article.querySelectorAll('[title],[datetime]')];
+        for (const el of candidates) {
+          const raw = el.getAttribute('datetime') || el.getAttribute('title') || '';
+          const d = new Date(raw);
+          if (!Number.isNaN(d.getTime())) { date = d; break; }
+        }
+      }
+      if (!date || Number.isNaN(date.getTime())) continue;
+
+      const stamp = document.createElement('div');
+      stamp.className = 'ct-detail-post-time';
+      const timeText = new Intl.DateTimeFormat('ja-JP', {
+        hour:'2-digit', minute:'2-digit', hour12:false
+      }).format(date);
+      const dateText = new Intl.DateTimeFormat('ja-JP', {
+        year:'numeric', month:'numeric', day:'numeric'
+      }).format(date);
+      stamp.textContent = `${dateText} · ${timeText}`;
+
+      // Put it below the Tweet body/media and above the action row when possible.
+      const actions = [...article.querySelectorAll('button')].map(b => b.parentElement)
+        .find(el => el && /reply|返信|repost|retweet|リツイート|like|お気に入り/i.test(el.textContent || ''));
+      if (actions?.parentElement) actions.parentElement.insertBefore(stamp, actions);
+      else article.append(stamp);
     }
   }
 
@@ -5203,6 +5235,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.5.5 loaded'
+    '🐦 Classic Twitter JP Safari v6.6.0 loaded'
   );
 })();
