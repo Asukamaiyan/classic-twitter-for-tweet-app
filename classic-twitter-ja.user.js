@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.4.3
+// @version      6.4.4
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -238,6 +238,7 @@
     // Translation / profile copy
     ['Translate', '翻訳する'],
     ['Translated', '翻訳済み'],
+    ["Couldn’t translate. Try again.", '翻訳できませんでした。もう一度お試しください。'],
     ['Manage your public profile, photo, and bio.', 'プロフィール、写真、自己紹介を編集できます'],
 
     // Official role badge names intentionally remain unchanged
