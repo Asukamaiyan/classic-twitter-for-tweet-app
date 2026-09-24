@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.4.4
+// @version      6.5.0
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -26,7 +26,8 @@
     replyNotices: 'classicTwitterJP.replyNotifications',
     replySeen: 'classicTwitterJP.replySeenIds',
     replyCounts: 'classicTwitterJP.replyCounts',
-    replyInit: 'classicTwitterJP.replyWatcherInitialized'
+    replyInit: 'classicTwitterJP.replyWatcherInitialized',
+    autoTranslate: 'classicTwitterJP.autoTranslate'
   };
 
   const profileCache = new Map();
@@ -110,6 +111,12 @@
     ['Unlike', 'お気に入りを解除'],
     ['Who to follow', 'おすすめユーザー'],
 
+    // Backup codes / security
+    ['Backup codes', 'バックアップコード'],
+    ['Generate new codes', '新しいコードを生成'],
+    ['codes remaining', '個のコードが残っています'],
+    ['code remaining', '個のコードが残っています'],
+
     // Wing badge / loading states
     ['You earned the Wing badge for inviting 5 friends who joined.', '5人の友だちを招待したので、Wingバッジを獲得しました！'],
     ['awarded you a badge', 'あなたにバッジを贈りました'],
@@ -160,7 +167,6 @@
     ['Share invite', '招待リンクをシェア'],
     ['Link opens', 'リンクを開いた人数'],
     ['Signed up', '登録した人数'],
-    ['Joined', '参加した人数'],
     ['Friends who joined', '参加した友だち'],
     ['Earn a Wing badge!', 'Wingバッジを獲得しよう！'],
     ['How it works:', '仕組み:'],
@@ -634,6 +640,14 @@
         overflow-wrap:anywhere;
         user-select:text;
         -webkit-user-select:text;
+      }
+
+      .ct-exact-post-time {
+        font-size:10px;
+        opacity:.48;
+        font-weight:400;
+        white-space:nowrap;
+        margin-left:1px;
       }
 
       #ct-reply-badge {
@@ -4618,8 +4632,22 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     return 'other';
   }
 
+  function autoTranslationEnabled() {
+    return loadJSON(KEY.autoTranslate, true) !== false;
+  }
+
   function patchAutoTranslation(root = document, nativeLanguage = 'ja') {
-    for (const control of ctTranslationControls(root)) {
+    const controls = ctTranslationControls(root);
+
+    if (!autoTranslationEnabled()) {
+      for (const control of controls) {
+        control.style.removeProperty('display');
+        delete control.dataset.ctAutoTranslated;
+      }
+      return;
+    }
+
+    for (const control of controls) {
       if (!control.isConnected) continue;
       const article = control.closest('article');
       if (!article) continue;
@@ -4776,6 +4804,67 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     }
   }
 
+  function patchExactPostTime(root = document) {
+    const scope = root instanceof Element ? root : document;
+    const times = [];
+    if (scope instanceof HTMLTimeElement && scope.matches('time[datetime]')) times.push(scope);
+    scope.querySelectorAll?.('article time[datetime]').forEach(el => times.push(el));
+    for (const time of times) {
+      if (!time.isConnected || time.dataset.ctExactTime === '1') continue;
+      const date = new Date(time.getAttribute('datetime') || '');
+      if (Number.isNaN(date.getTime())) continue;
+      const exact = document.createElement('span');
+      exact.className = 'ct-exact-post-time';
+      exact.textContent = ' · ' + new Intl.DateTimeFormat('ja-JP', {hour:'2-digit',minute:'2-digit',hour12:false}).format(date);
+      exact.title = new Intl.DateTimeFormat('ja-JP', {year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(date);
+      time.insertAdjacentElement('afterend', exact);
+      time.dataset.ctExactTime = '1';
+    }
+  }
+
+  function patchInviteJoinedLabels(root = document) {
+    const scope = root instanceof Element ? root : document;
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) nodes.push(node);
+    for (const n of nodes) {
+      if (clean(n.nodeValue) !== 'Joined') continue;
+      let el = n.parentElement, inviteContext = false;
+      for (let i=0; el && i<7; i++, el=el.parentElement) {
+        const txt = clean(el.textContent);
+        if (/Wing|招待|Link opens|Signed up|Friends who joined/i.test(txt)) { inviteContext=true; break; }
+      }
+      if (inviteContext) n.nodeValue = n.nodeValue.replace(/Joined/, '参加した人数');
+    }
+  }
+
+  function patchAutoTranslateSetting() {
+    const path = location.pathname.toLowerCase();
+    const main = document.querySelector('main');
+    if (!main || (!path.includes('settings') && !/設定|Settings/.test(main.textContent || ''))) return;
+    if (document.getElementById('ct-auto-translate-setting')) return;
+    const card = document.createElement('section');
+    card.id = 'ct-auto-translate-setting';
+    card.style.cssText = 'margin:12px 16px;padding:14px 16px;border:1px solid rgba(127,127,127,.28);border-radius:14px;display:flex;align-items:center;justify-content:space-between;gap:16px;';
+    const copy = document.createElement('div');
+    const title = document.createElement('div');
+    title.textContent = 'ツイートを自動翻訳';
+    title.style.cssText = 'font-weight:700;font-size:14px;';
+    const desc = document.createElement('div');
+    desc.textContent = '日本語以外のツイートを自動的に翻訳します。';
+    desc.style.cssText = 'font-size:12px;opacity:.65;margin-top:3px;';
+    copy.append(title, desc);
+    const toggle = document.createElement('input');
+    toggle.type='checkbox';
+    toggle.checked=autoTranslationEnabled();
+    toggle.setAttribute('aria-label','ツイートの自動翻訳');
+    toggle.style.cssText='width:20px;height:20px;cursor:pointer;flex:0 0 auto;';
+    toggle.addEventListener('change',()=>{saveJSON(KEY.autoTranslate,toggle.checked);document.querySelectorAll('[data-ct-auto-translated]').forEach(el=>{delete el.dataset.ctAutoTranslated;el.style.removeProperty('display');});scan(document);});
+    card.append(copy,toggle);
+    main.append(card);
+  }
+
   function scan(
     root = document
   ) {
@@ -4799,6 +4888,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       patchComposeJapanese(root);
       patchNotificationAvatarLinks(root);
       patchAutoTranslation(root, 'ja');
+      patchExactPostTime(root);
+      patchAutoTranslateSetting();
+      patchInviteJoinedLabels(root);
       patchMediaInfo(root);
       patchProfileFounder();
 
@@ -4990,6 +5082,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.4.4 loaded'
+    '🐦 Classic Twitter JP Safari v6.5.0 loaded'
   );
 })();
