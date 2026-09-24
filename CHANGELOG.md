@@ -2,6 +2,13 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
+## Japanese Chrome / Stay v6.4.1
+
+- 招待画面の残っていた英語を追加日本語化
+- Share invite / Link opens / Signed up / Joined / Friends who joined に対応
+- Wingバッジ獲得条件と「How it works」説明文を日本語化
+- 招待リンク共有の説明文を日本語化
+
 ## Japanese Chrome / Stay v6.4.0
 
 - tweet.app の新しい招待機能を日本語化
