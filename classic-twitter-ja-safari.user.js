@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.5.4
+// @version      6.5.5
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1058,6 +1058,52 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         : 'さんが';
 
       current.nodeValue = raw.replace(t, `${prefix}${t}`);
+    }
+  }
+
+  function patchNotificationFollowGrammar(root = document) {
+    if (!location.pathname.startsWith('/notifications')) return;
+    const main = root instanceof Element && root.matches('main')
+      ? root
+      : root.querySelector?.('main') || document.querySelector('main');
+    if (!main) return;
+
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) nodes.push(node);
+
+    // The notification UI splits actor names, "and N others", and the action
+    // into separate text nodes. Follow notifications must read
+    // "AさんとそのほかN人があなたをフォローしました", never "N人さんが".
+    for (const action of nodes) {
+      const t = clean(action.nodeValue);
+      if (!/^あなたをフォローしました$/u.test(t)) continue;
+
+      let previous = null;
+      for (let i = nodes.indexOf(action) - 1; i >= 0; i--) {
+        const pt = clean(nodes[i].nodeValue);
+        if (pt) { previous = nodes[i]; break; }
+      }
+      if (!previous) continue;
+
+      const p = clean(previous.nodeValue);
+      if (/^(?:さんと)?そのほか\d+人(?:さん)?$/u.test(p)) {
+        previous.nodeValue = previous.nodeValue.replace(/さん$/u, '');
+        if (!/^が/u.test(t)) action.nodeValue = action.nodeValue.replace(t, 'があなたをフォローしました');
+      } else if (/人さん$/u.test(p)) {
+        previous.nodeValue = previous.nodeValue.replace(/人さん$/u, '人');
+        if (!/^が/u.test(t)) action.nodeValue = action.nodeValue.replace(t, 'があなたをフォローしました');
+      }
+    }
+
+    // Final cleanup for already-composed follow notification text.
+    for (const n of nodes) {
+      const raw = n.nodeValue || '';
+      if (!/フォローしました/u.test(raw)) continue;
+      n.nodeValue = raw
+        .replace(/そのほか(\d+)人さんがあなたをフォローしました/gu, 'そのほか$1人があなたをフォローしました')
+        .replace(/(\d+)人さんがあなたをフォローしました/gu, '$1人があなたをフォローしました');
     }
   }
 
@@ -4959,6 +5005,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       patchQuotedTweets(root);
       removeInlineFollowBadges(root);
       patchComposeJapanese(root);
+      patchNotificationFollowGrammar(root);
       patchNotificationAvatarLinks(root);
       patchAutoTranslation(root, 'ja');
       patchExactPostTime(root);
@@ -5156,6 +5203,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.5.4 loaded'
+    '🐦 Classic Twitter JP Safari v6.5.5 loaded'
   );
 })();
