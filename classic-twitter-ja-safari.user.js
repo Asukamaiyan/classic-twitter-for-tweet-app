@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.3.7
+// @version      6.4.0
 // @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -109,6 +109,64 @@
     ['Liked by', 'お気に入りしたユーザー'],
     ['Unlike', 'お気に入りを解除'],
     ['Who to follow', 'おすすめユーザー'],
+
+    // Invite / referral
+    ['Invite', '招待する'],
+    ['Invite friends', '友だちを招待しよう！'],
+    ['Share your personal invite link.', 'あなた専用の招待リンクをシェアしよう！'],
+    ['Invalid invite link.', 'この招待リンクは無効です'],
+    ['Invite link is missing.', '招待リンクが見つかりません'],
+    ['Could not validate invite link.', '招待リンクを確認できませんでした'],
+    ['Could not redeem invite.', '招待を利用できませんでした'],
+    ['Copy link', 'リンクをコピー'],
+    ['Share', 'シェア'],
+    ['Share post', 'ツイートをシェア'],
+    ['Shared post', 'シェアされたツイート'],
+
+    // Post editing
+    ['Edit post', 'ツイートを編集'],
+    ['Edit your post...', 'ツイートを編集...'],
+    ['Edited', '編集済み'],
+    ['Post updated.', 'ツイートを更新しました'],
+    ['The edit window for this post has closed.', 'このツイートの編集可能時間は終了しました'],
+    ['This edit could not be saved. Your post is unchanged.', '編集を保存できませんでした。ツイートは変更されていません'],
+    ['Editing is temporarily unavailable. Try again shortly.', '現在、編集機能を利用できません。しばらくしてからもう一度お試しください'],
+
+    // Hashtags
+    ['Hashtag', 'ハッシュタグ'],
+    ['Hashtag suggestions', 'ハッシュタグ候補'],
+    ['Followed hashtags', 'フォロー中のハッシュタグ'],
+    ['View and unfollow hashtags you follow.', 'フォローしているハッシュタグを確認・解除できます'],
+    ['Posts with these hashtags are boosted in your For You feed. Unfollow one here to stop boosting it.', 'フォローしたハッシュタグのツイートは「おすすめ」に表示されやすくなります。ここからフォローを解除できます。'],
+    ['No hashtags found.', 'ハッシュタグが見つかりません'],
+    ['Loading followed hashtags...', 'フォロー中のハッシュタグを読み込んでいます…'],
+    ['Something went wrong loading hashtags you follow.', 'フォロー中のハッシュタグを読み込めませんでした'],
+
+    // Mute / reports
+    ['Mute user', 'ミュートする'],
+    ['Unmute', 'ミュートを解除'],
+    ['Unmute user', 'ミュートを解除'],
+    ['User muted.', 'アカウントをミュートしました'],
+    ['View and unmute the accounts you have muted.', 'ミュートしているアカウントを確認・解除できます'],
+    ['Muted accounts stay hidden from your For You feed. Unmute one here to see their posts again.', 'ミュートしたアカウントのツイートは「おすすめ」に表示されません。ここからミュートを解除できます。'],
+    ['Report', '報告する'],
+    ['Submit report', '報告を送信'],
+    ['Thanks for your report', 'ご報告ありがとうございます'],
+    ['Why are you reporting this?', 'このツイートを報告する理由を選んでください'],
+    ['Report submitted.', '報告を送信しました'],
+    ['Your report is private. We use it to review and improve safety.', '報告内容が他のユーザーに公開されることはありません。安全性向上のため確認を行います。'],
+    ['Only you see this notice. Our team will review the report.', 'このお知らせはあなたにのみ表示されています。運営チームが報告内容を確認します。'],
+    ['Manipulated media', '加工・改変されたメディア'],
+    ['Likely false claim', '誤解を招く可能性のある情報'],
+
+    // Translation / profile copy
+    ['Translate', '翻訳する'],
+    ['Translated', '翻訳済み'],
+    ['Manage your public profile, photo, and bio.', 'プロフィール、写真、自己紹介を編集できます'],
+
+    // Official role badge names intentionally remain unchanged
+    ['Team Member', 'Team Member'],
+    ['Tweet Ambassador', 'Tweet Ambassador'],
     ['Search', '検索'],
     ['Search Twitter', 'Twitterを検索'],
     ['Account', 'アカウント'],
@@ -4864,6 +4922,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.3.7 loaded'
+    '🐦 Classic Twitter JP Safari v6.4.0 loaded'
   );
 })();
