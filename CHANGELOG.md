@@ -2,6 +2,16 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
+## Japanese Chrome / Stay v6.4.0
+
+- tweet.app の新しい招待機能を日本語化
+- `Invite friends` を「友だちを招待しよう！」に変更
+- 招待リンクの共有・検証・エラー表示を日本語化
+- 投稿編集（30分編集UI）、フォロー中ハッシュタグ、ミュート管理、通報UIの新文言に対応
+- 翻訳・プロフィール周辺の追加文言に対応
+- Team Member / Tweet Ambassador は公式Role badge名として英語表記を維持
+- Chrome版とStay / Safari版の翻訳内容を同期
+
 ## Japanese notification grammar fix
 
 - 通知欄の分割DOMで抜けていた「さん」「と」「が」を補完
