@@ -2,6 +2,14 @@
 
 Classic Twitter for tweet.app の更新履歴です。
 
+## Japanese Chrome / Stay v6.4.3
+
+- Wingバッジ獲得通知を日本語化
+- badge awarded 通知を日本語化
+- 最新bundleで確認した Loading account / followed hashtags / muted accounts を日本語化
+- notifications / profile / posts / followers / following などのLoading表示も追加対応
+- Load more を「さらに読み込む」に統一
+
 ## Japanese Chrome / Stay v6.4.2
 
 - Settings の Founding plan / Centurion / 2要素認証説明を追加日本語化
