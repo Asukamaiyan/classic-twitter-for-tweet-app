@@ -49,3 +49,17 @@ Codex内蔵ブラウザ（Chromium）で、実際のtweet.app画面に配布ス�
 - 長時間利用、全アカウント状態、全てのAPI応答、将来のtweet.app画面変更への対応。
 
 公開・インストールの確認を追加する場合は、対象版、管理アプリ、ブラウザ／OS、確認した操作と未確認範囲をこの記録に追記してください。
+
+## 公開先の照合（2026-09-27）
+
+GitHub [PR #1](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/1) をmainへマージ済み。マージコミット `5f8149f566a45eaa51f27cdff045f85a6993fb56` のGitHub Actionsも成功しました。
+
+Greasy Forkの既存3スクリプトを6.7.0へ更新し、各掲載ページの版表示と、通常のインストールURLから取得したコードを確認しました。Greasy Forkが追加する`@downloadURL`・`@updateURL`と改行の差を除き、3版とも検証済み配布ファイルと一致しています。英語版の配布キャッシュは初回に旧版を返しましたが、その後同じ通常URLで6.7.0への反映を確認しました。既存のUnlisted設定は維持しています。
+
+| 配布 | ID | ダウンロード内容のSHA-256 |
+|---|---|---|
+| 日本語Chrome | 594601 | `46c71f8bef8ec7298cc1dbabc310699a2e15d9ef1337ce4aaec7541efb5107dd` |
+| 日本語Safari | 594602 | `b218841f7fc8af4f10233db6799149286699ba3efd49c93a2acdca68f36b3108` |
+| English | 594603 | `a1ba5d63a4fc9d8bb3591389d4cff49e8136bdf0f576caebef40c92488218aa7` |
+
+これは配布先とのコード照合であり、利用者の管理アプリへの更新適用やSafari実機での動作完了を意味しません。
