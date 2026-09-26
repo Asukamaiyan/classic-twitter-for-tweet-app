@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Classic Twitter regression fixture</title>
+<style>
+:root{--color-tl-app-text:#17202a;--color-tl-app-bg:#f5f8fa;--color-tl-app-card:#fff;--color-tl-app-border:#cbd5df}*{box-sizing:border-box}body{font:16px/1.5 system-ui;margin:0;background:var(--color-tl-app-bg);color:var(--color-tl-app-text)}nav,main{max-width:700px;margin:auto;padding:16px}nav{display:flex;gap:12px}button,input,textarea{font:inherit}button{cursor:pointer;padding:8px;border:1px solid #cbd5df;background:white;border-radius:8px}article{padding:18px;margin:12px 0;background:white;border:1px solid #cbd5df;border-radius:12px}.tweet-action-bar{display:flex;gap:12px}.whitespace-pre-wrap{white-space:pre-wrap}.truncate{font-weight:700}textarea{width:100%;min-height:90px}p[aria-live]{font-size:13px}.qa{font-size:13px;color:#536471}input{padding:10px;width:100%}
+</style>
+<nav><button>Feed</button><button>Explore</button><button>Notifications</button><button>Settings</button></nav>
+<main><h1>Classic Twitter UI fixture</h1><p class="qa">Synthetic content for regression checks. No account or API is connected.</p>
+<input type="text" placeholder="Search Tweet" aria-label="Search Tweet">
+<article><div><button class="truncate font-bold">Home</button><span class="text-tl-app-text-muted hover:underline" title="2026-09-26T03:26:42.659Z">Just now</span><p aria-live="polite"><button>Show translation</button></p></div>
+<p class="break-words whitespace-pre-wrap">Home
+Like / Post / Following
+これは投稿本文です。UI の単語が含まれていても変更しません。</p>
+<div role="button" aria-label="Quoted post by Like"><p class="break-words whitespace-pre-wrap">Like</p></div>
+<div class="tweet-action-bar" data-testid="tweet-action-bar"><button data-testid="tweet-like-action" aria-label="Like, 3 likes">♡ 3</button><button data-testid="tweet-repost-action">Repost</button><button data-testid="tweet-open-comment-action">Reply</button></div></article>
+<article><button class="truncate font-bold">Following</button><p class="break-words whitespace-pre-wrap">spoiler: this example can be folded with the keyword filter.</p><div class="tweet-action-bar" data-testid="tweet-action-bar"><button data-testid="tweet-like-action" aria-label="Unlike, 1 likes" class="text-pink-500">♡ 1</button><button>Reply</button></div></article>
+<label for="public-tweet-input">Draft</label><textarea id="public-tweet-input" placeholder="What's happening?">Home / Like / Post 入力中の文章</textarea><button id="public-tweet-submit-btn" disabled>Tweet</button>
+</main>
+<script>const variant = new URL(location.href).searchParams.get('variant') || 'ja';const script = document.createElement('script');script.src = '/classic-twitter-' + ({ja:'ja',en:'en',safari:'ja-safari'}[variant] || 'ja') + '.user.js';document.body.append(script);</script>
+</html>
