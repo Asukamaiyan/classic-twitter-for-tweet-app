@@ -1,20 +1,1256 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.6.2
-// @description  tweet.appを旧Twitter風に日本語化。表示名、Founder Number、★お気に入り、リツイート、通知、返信通知補完、ローカルミュート、自分専用お気に入り一覧に対応。テーマには干渉しません。
+// @version      6.7.0
+// @description  tweet.appのUIを安全に日本語化。投稿本文・名前を保持し、表示名・Founder Number・星のお気に入り、保存検索・投稿保存・任意のキーワード折りたたみに対応。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      api.tweet.app
 // @connect      firebasestorage.googleapis.com
 // @connect      storage.googleapis.com
+// @noframes
 // @run-at       document-start
 // @license      MIT
+// @homepageURL  https://github.com/Asukamaiyan/classic-twitter-for-tweet-app
+// @supportURL   https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/issues
 // ==/UserScript==
 
 (() => {
   'use strict';
+  if (document.documentElement?.dataset.ctActiveVersion) return;
+  const CT_LOCALE = 'ja';
+    // Shared read-only transport. Authentication stays in memory only for one lookup.
+  const ctNetworkState = {
+    requestTimeout: 12000,
+    authTimeout: 2500,
+    authPending: null,
+    authUID: null,
+    profileTTL: 5 * 60 * 1000,
+    profileTimes: new Map(),
+    profileFailures: new Map()
+  };
+
+  function ctAllowedAPIURL(value) {
+    try {
+      const url = new URL(value);
+      if (url.origin !== 'https://api.tweet.app' || !url.pathname.startsWith('/api/') ||
+          url.username || url.password || url.hash) return null;
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+
+  function requestJSON(url, headers = {}) {
+    const target = ctAllowedAPIURL(url);
+    if (!target) return Promise.resolve(null);
+    const requestHeaders = { Accept: 'application/json' };
+    if (typeof headers?.Authorization === 'string' &&
+        /^Bearer [A-Za-z0-9._~-]+$/.test(headers.Authorization)) {
+      requestHeaders.Authorization = headers.Authorization;
+    }
+
+    return new Promise(resolve => {
+      let settled = false;
+      let handle;
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value ?? null);
+      };
+      const timer = setTimeout(() => {
+        finish(null);
+        try { handle?.abort?.(); } catch {}
+        try { controller?.abort(); } catch {}
+      }, ctNetworkState.requestTimeout);
+      const parse = response => {
+        if (!response || !(response.status >= 200 && response.status < 300) ||
+            (response.finalUrl && !ctAllowedAPIURL(response.finalUrl))) return null;
+        try {
+          if (typeof response.responseText !== 'string' || response.responseText.length > 2 * 1024 * 1024) return null;
+          return JSON.parse(response.responseText);
+        } catch {
+          return null;
+        }
+      };
+      let gmRequest = null;
+      if (typeof GM_xmlhttpRequest === 'function') gmRequest = GM_xmlhttpRequest;
+      else if (typeof globalThis.GM?.xmlHttpRequest === 'function') {
+        gmRequest = globalThis.GM.xmlHttpRequest.bind(globalThis.GM);
+      }
+      if (gmRequest) {
+        try {
+          handle = gmRequest({
+            method: 'GET', url: target, headers: requestHeaders,
+            timeout: ctNetworkState.requestTimeout, redirect: 'error', anonymous: true,
+            onload: response => finish(parse(response)),
+            onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null)
+          });
+          if (handle && typeof handle.then === 'function') {
+            Promise.resolve(handle).then(response => finish(parse(response)), () => finish(null));
+          }
+        } catch {
+          finish(null);
+        }
+        return;
+      }
+      if (typeof fetch !== 'function') return finish(null);
+      Promise.resolve().then(() => fetch(target, {
+        method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
+        ...(controller ? { signal: controller.signal } : {})
+      })).then(async response => {
+        if (!response?.ok || (response.url && !ctAllowedAPIURL(response.url))) return null;
+        const body = await response.text();
+        if (body.length > 2 * 1024 * 1024) return null;
+        try { return JSON.parse(body); } catch { return null; }
+      }).then(finish, () => finish(null));
+    });
+  }
+
+  function ctFirebaseKey(key) {
+    return typeof key === 'string' && /^firebase:authUser:[A-Za-z0-9_-]{1,128}:\[DEFAULT\]$/.test(key);
+  }
+
+  function ctFirebaseAuth(key, value) {
+    if (!ctFirebaseKey(key)) return null;
+    try {
+      if (typeof value === 'string') {
+        if (value.length > 128 * 1024) return null;
+        value = JSON.parse(value);
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+      const apiKey = key.split(':')[2];
+      if (value.apiKey && value.apiKey !== apiKey) return null;
+      const manager = value.stsTokenManager;
+      const token = manager?.accessToken;
+      const uid = value.uid;
+      const expires = Number(manager?.expirationTime || 0);
+      if (typeof token !== 'string' || token.length < 40 || token.length > 16384 ||
+          !/^[A-Za-z0-9._~-]+$/.test(token) || typeof uid !== 'string' || !uid || uid.length > 256 ||
+          (manager?.expirationTime != null && (!Number.isFinite(expires) || expires <= Date.now()))) return null;
+      return { token, uid, apiKey, expires };
+    } catch {
+      return null;
+    }
+  }
+
+  function ctReadStorageAuth() {
+    const found = [];
+    for (const name of ['sessionStorage', 'localStorage']) {
+      try {
+        const storage = globalThis[name];
+        if (!storage) continue;
+        for (let i = 0; i < Math.min(storage.length, 1024); i += 1) {
+          const key = storage.key(i);
+          if (!ctFirebaseKey(key)) continue;
+          const auth = ctFirebaseAuth(key, storage.getItem(key));
+          if (auth) found.push(auth);
+        }
+      } catch {}
+    }
+    return found;
+  }
+
+  function ctReadIDBAuth() {
+    return new Promise(resolve => {
+      let done = false;
+      let db = null;
+      const found = [];
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { db?.close(); } catch {}
+        resolve(found);
+      };
+      const timer = setTimeout(finish, ctNetworkState.authTimeout);
+      try {
+        if (typeof indexedDB === 'undefined' || typeof IDBKeyRange === 'undefined') return finish();
+        const request = indexedDB.open('firebaseLocalStorageDb');
+        request.onerror = finish;
+        request.onblocked = finish;
+        request.onupgradeneeded = () => {
+          // Abort creation of a database when Firebase has not initialized it.
+          try { request.transaction?.abort(); } catch {}
+          try { request.result?.close(); } catch {}
+          finish();
+        };
+        request.onsuccess = () => {
+          db = request.result;
+          if (done) {
+            try { db?.close(); } catch {}
+            return;
+          }
+          try {
+            db.onversionchange = finish;
+            if (!db.objectStoreNames.contains('firebaseLocalStorage')) return finish();
+            const transaction = db.transaction('firebaseLocalStorage', 'readonly');
+            transaction.onerror = finish;
+            transaction.onabort = finish;
+            const range = IDBKeyRange.bound('firebase:authUser:', 'firebase:authUser:\uffff');
+            const cursor = transaction.objectStore('firebaseLocalStorage').openCursor(range);
+            cursor.onerror = finish;
+            let scanned = 0;
+            cursor.onsuccess = () => {
+              if (done) return;
+              const row = cursor.result;
+              if (!row || scanned++ >= 128) return finish();
+              if (ctFirebaseKey(row.key)) {
+                const auth = ctFirebaseAuth(row.key, row.value?.value);
+                if (auth) found.push(auth);
+              }
+              row.continue();
+            };
+          } catch {
+            finish();
+          }
+        };
+      } catch {
+        finish();
+      }
+    });
+  }
+
+  function getAuth() {
+    if (ctNetworkState.authPending) return ctNetworkState.authPending;
+    const pending = Promise.resolve().then(async () => {
+      const local = ctReadStorageAuth();
+      const candidates = [...local, ...await ctReadIDBAuth()];
+      const identities = new Set(candidates.map(auth => `${auth.apiKey}:${auth.uid}`));
+      // Never choose an arbitrary account from inconsistent persistence stores.
+      const latest = identities.size === 1
+        ? candidates.sort((a, b) => b.expires - a.expires)[0] : null;
+      const auth = latest ? { token: latest.token, uid: latest.uid } : null;
+      if (ctNetworkState.authUID !== (auth?.uid || null)) {
+        ctNetworkState.authUID = auth?.uid || null;
+        profileCache.clear();
+        ctNetworkState.profileTimes.clear();
+        ctNetworkState.profileFailures.clear();
+      }
+      return auth;
+    }).catch(() => null).finally(() => {
+      if (ctNetworkState.authPending === pending) ctNetworkState.authPending = null;
+    });
+    ctNetworkState.authPending = pending;
+    return pending;
+  }
+
+  function getCachedAuth() {
+    // Kept for Safari callers; only simultaneous lookups are shared.
+    return getAuth();
+  }
+
+  function ctProfileFromJSON(json, username) {
+    if (!json || typeof json !== 'object' || Array.isArray(json) || json.success === false || json.error) return null;
+    const user = json.user ?? json.profile ?? json.data?.user ?? json.data?.profile ?? json.data ?? json;
+    if (!user || typeof user !== 'object' || Array.isArray(user) || user.error) return null;
+    const handle = String(user.username || user.handle || '').replace(/^@/, '').toLowerCase();
+    if (handle && handle !== username) return null;
+    const identity = user.id || user.uid || user.userId || handle;
+    const display = typeof user.displayName === 'string' || typeof user.name === 'string' || handle;
+    return identity && display ? user : null;
+  }
+
+  function fetchProfile(username) {
+    const key = String(username ?? '').trim().replace(/^@/, '').toLowerCase();
+    if (!/^[a-z0-9_.-]{1,80}$/.test(key)) return Promise.resolve(null);
+    if (profilePending.has(key)) return profilePending.get(key);
+    const promise = Promise.resolve().then(async () => {
+      const auth = await getAuth();
+      if (!auth?.token) return null;
+      const now = Date.now();
+      if (profileCache.has(key) && now - (ctNetworkState.profileTimes.get(key) || 0) < ctNetworkState.profileTTL) {
+        return profileCache.get(key);
+      }
+      const failure = ctNetworkState.profileFailures.get(key);
+      if (failure && now < failure.nextTry) return null;
+      const json = await requestJSON(PROFILE_API + encodeURIComponent(key), { Authorization: `Bearer ${auth.token}` });
+      if (ctNetworkState.authUID !== auth.uid) return null;
+      const user = ctProfileFromJSON(json, key);
+      if (user) {
+        if (profileCache.size >= 300 && !profileCache.has(key)) {
+          const oldest = profileCache.keys().next().value;
+          profileCache.delete(oldest);
+          ctNetworkState.profileTimes.delete(oldest);
+        }
+        profileCache.set(key, user);
+        ctNetworkState.profileTimes.set(key, Date.now());
+        ctNetworkState.profileFailures.delete(key);
+        return user;
+      }
+      profileCache.delete(key);
+      ctNetworkState.profileTimes.delete(key);
+      const count = Math.min((failure?.count || 0) + 1, 6);
+      if (ctNetworkState.profileFailures.size >= 300 && !ctNetworkState.profileFailures.has(key)) {
+        ctNetworkState.profileFailures.delete(ctNetworkState.profileFailures.keys().next().value);
+      }
+      // The next normal UI pass may retry; no background or recursive retry loop.
+      ctNetworkState.profileFailures.set(key, { count, nextTry: Date.now() + Math.min(5000 * 2 ** (count - 1), 120000) });
+      return null;
+    }).catch(() => null).finally(() => {
+      if (profilePending.get(key) === promise) profilePending.delete(key);
+    });
+    profilePending.set(key, promise);
+    return promise;
+  }
+
+  /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
+function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTranslate } = {}) {
+  const existing = document.getElementById('ct-local-tools');
+  if (existing) return existing.ctController;
+  const ja = locale.startsWith('ja');
+  const copy = ja ? {
+    tools: '便利ツール', title: 'このブラウザの設定', close: '閉じる',
+    scope: 'このブラウザ内でのみ保存されます。同じブラウザの別アカウントにも適用されます。',
+    filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
+    words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
+    save: 'フィルターを保存', saved: '設定を保存しました。', searches: '保存した検索',
+    query: '保存する検索語', add: '検索を保存', remove: '削除', noSearches: '保存した検索はありません。',
+    searchHelp: '最大 20 件。検索語を押すと検索画面で検索します。',
+    collapsed: 'キーワードに一致した投稿を折りたたみました。', reveal: 'この投稿を表示',
+    invalidWords: 'キーワードは 30 件以内、各 80 文字以内で入力してください。',
+    invalidSearch: '検索語は 1〜200 文字、保存は 20 件以内です。',
+    duplicate: 'この検索語は保存済みです。',
+    storageError: 'このブラウザに保存できませんでした。設定は変更されていません。ブラウザの保存設定を確認してください。',
+    readError: '保存済み設定を読み込めませんでした。初期設定で開始しました。',
+    searchError: '自動検索を開始できませんでした。検索画面で次の検索語を入力してください：',
+    automatic: '投稿を自動翻訳する', autoHelp: '有効にすると、サイトの翻訳機能を自動で呼び出します。',
+    autoError: '自動翻訳の設定を保存できませんでした。',
+    bookmarks: '保存した投稿', bookmarkLabel: '投稿のメモ（任意）', bookmarkSave: 'この投稿を保存',
+    bookmarkHelp: '投稿の詳細画面を開くと保存できます。最大 50 件。削除された投稿や非公開の投稿は閲覧できない場合があります。',
+    noBookmarks: '保存した投稿はありません。', bookmarkMissing: '先に投稿の詳細画面を開いてください。',
+    bookmarkFull: '投稿は 50 件まで、メモは 200 文字以内です。', bookmarkDuplicate: 'この投稿は保存済みです。',
+    post: '投稿',
+  } : {
+    tools: 'Tools', title: 'Settings for this browser', close: 'Close',
+    scope: 'Saved only in this browser. Applies to other accounts in the same browser, too.',
+    filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
+    words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
+    save: 'Save filters', saved: 'Settings saved.', searches: 'Saved searches',
+    query: 'Search to save', add: 'Save search', remove: 'Remove', noSearches: 'No saved searches yet.',
+    searchHelp: 'Save up to 20 searches. Select a search to open it in Explore.',
+    collapsed: 'Post collapsed because it matches a keyword.', reveal: 'Show this post',
+    invalidWords: 'Enter up to 30 keywords, with up to 80 characters each.',
+    invalidSearch: 'Use 1–200 characters per search, and save up to 20 searches.',
+    duplicate: 'This search is already saved.',
+    storageError: 'Could not save in this browser. Settings have not changed. Check browser storage settings.',
+    readError: 'Could not read saved settings. Started with the defaults.',
+    searchError: 'Could not start the search automatically. Enter this query in Explore:',
+    automatic: 'Automatically translate posts', autoHelp: 'Calls the site’s translation feature automatically when enabled.',
+    autoError: 'Could not save the automatic translation setting.',
+    bookmarks: 'Saved posts', bookmarkLabel: 'Note for this post (optional)', bookmarkSave: 'Save this post',
+    bookmarkHelp: 'Open a post’s detail page to save it. Up to 50 posts. Deleted or private posts may be unavailable later.',
+    noBookmarks: 'No saved posts yet.', bookmarkMissing: 'Open a post’s detail page first.',
+    bookmarkFull: 'Save up to 50 posts, with notes of up to 200 characters.', bookmarkDuplicate: 'This post is already saved.',
+    post: 'Post',
+  };
+  const storageKey = 'ct-local-tools-v1';
+  const searchIntentKey = 'ct-local-search-intent-v1';
+  const normalize = value => String(value).normalize('NFKC').toLowerCase();
+  const unique = values => values.filter((value, index, all) =>
+    all.findIndex(other => normalize(other) === normalize(value)) === index);
+  const postPathPattern = /^\/post\/[A-Za-z0-9_-]{1,200}$/;
+  let state = { version: 1, enabled: false, keywords: [], searches: [], bookmarks: [] };
+  let loadError = '';
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== 1 || typeof parsed.enabled !== 'boolean' ||
+          !Array.isArray(parsed.keywords) || !Array.isArray(parsed.searches) ||
+          parsed.keywords.length > 30 || parsed.searches.length > 20 ||
+          parsed.keywords.some(s => typeof s !== 'string' || !s.trim() || s.length > 80) ||
+          parsed.searches.some(s => typeof s !== 'string' || !s.trim() || s.length > 200) ||
+          (parsed.bookmarks !== undefined && (!Array.isArray(parsed.bookmarks) || parsed.bookmarks.length > 50 ||
+            parsed.bookmarks.some(item => !item || typeof item.path !== 'string' || !postPathPattern.test(item.path) ||
+              typeof item.label !== 'string' || !item.label.trim() || item.label.length > 200)))) {
+        throw new Error('Invalid local settings');
+      }
+      state = { version: 1, enabled: parsed.enabled,
+        keywords: unique(parsed.keywords.map(s => s.trim())),
+        searches: unique(parsed.searches.map(s => s.trim())),
+        bookmarks: (parsed.bookmarks || []).filter((item, index, all) => all.findIndex(other => other.path === item.path) === index)
+          .map(item => ({ path: item.path, label: item.label.trim() })) };
+    }
+  } catch { loadError = copy.readError; }
+
+  function element(tag, text, attrs = {}) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    return node;
+  }
+  const style = element('style');
+  style.id = 'ct-local-tools-style';
+  style.textContent = `
+    #ct-local-tools { position:fixed; right:max(12px, env(safe-area-inset-right)); bottom:calc(76px + env(safe-area-inset-bottom)); z-index:70; font:14px/1.5 system-ui,sans-serif; color:var(--color-tl-app-text, #17202a); }
+    #ct-local-tools * { box-sizing:border-box; }
+    #ct-local-tools button, #ct-local-tools a, .ct-keyword-notice button { font:inherit; cursor:pointer; }
+    #ct-local-tools button, .ct-keyword-notice button { border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:10px; padding:8px 12px; color:inherit; background:var(--color-tl-app-card, #fff); min-height:40px; }
+    #ct-local-tools button:focus-visible, #ct-local-tools a:focus-visible, .ct-keyword-notice button:focus-visible { outline:3px solid #1688d4; outline-offset:2px; }
+    #ct-local-tools button:disabled { opacity:.55; cursor:default; }
+    #ct-local-tools-toggle { box-shadow:0 2px 12px #0002; }
+    #ct-local-tools-panel { position:absolute; bottom:48px; right:0; width:min(350px, calc(100vw - 24px)); max-height:calc(100dvh - 156px - env(safe-area-inset-bottom)); overflow:auto; overscroll-behavior:contain; border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:14px; background:var(--color-tl-app-card, #fff); box-shadow:0 6px 28px #0003; padding:16px; }
+    #ct-local-tools [hidden] { display:none !important; }
+    #ct-local-tools header { display:flex; gap:12px; align-items:center; justify-content:space-between; }
+    #ct-local-tools h2, #ct-local-tools h3 { margin:0; font-size:16px; font-weight:700; }
+    #ct-local-tools section { margin-top:16px; padding-top:16px; border-top:1px solid var(--color-tl-app-border, #b8c5d1); }
+    #ct-local-tools p { margin:6px 0; }
+    #ct-local-tools .ct-local-note { font-size:12px; opacity:.85; }
+    #ct-local-tools label { display:block; margin:10px 0 5px; }
+    #ct-local-tools input[type=text], #ct-local-tools textarea { display:block; width:100%; padding:9px; border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:8px; font:16px/1.5 system-ui,sans-serif; color:inherit; background:var(--color-tl-app-bg, #fff); }
+    #ct-local-tools textarea { min-height:85px; resize:vertical; }
+    #ct-local-tools input[type=checkbox] { display:inline-block; width:auto; height:auto; padding:0; vertical-align:middle; margin-inline-end:8px; accent-color:#1688d4; }
+    #ct-local-tools form > button { margin-top:8px; }
+    #ct-local-tools ul { padding:0; margin:8px 0; list-style:none; }
+    #ct-local-tools li { display:flex; align-items:center; gap:10px; padding:5px 0; }
+    #ct-local-tools li a { flex:1; min-width:0; overflow-wrap:anywhere; color:inherit; text-decoration:underline; padding:5px 0; }
+    #ct-local-tools-status { font-size:13px; overflow-wrap:anywhere; }
+    #ct-local-tools-status[data-error=true] { color:#c23636; }
+    article.ct-keyword-collapsed > :not(.ct-keyword-notice) { display:none !important; }
+    .ct-keyword-notice { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 0; font:13px/1.5 system-ui,sans-serif; }
+    .ct-keyword-notice span { flex:1; min-width:140px; }
+    @media (min-width:1024px) { #ct-local-tools { bottom:20px; } #ct-local-tools-panel { max-height:calc(100dvh - 90px); } }
+  `;
+  document.head.append(style);
+  const root = element('aside', undefined, { id: 'ct-local-tools', 'data-ct-local-ui': '', 'aria-label': copy.tools });
+  const toggle = element('button', copy.tools, { id: 'ct-local-tools-toggle', type: 'button', 'aria-expanded': 'false', 'aria-controls': 'ct-local-tools-panel' });
+  const panel = element('div', undefined, { id: 'ct-local-tools-panel' });
+  panel.hidden = true;
+  const header = element('header');
+  const title = element('h2', copy.title);
+  const close = element('button', copy.close, { type: 'button' });
+  header.append(title, close);
+  const status = element('p', loadError, { id: 'ct-local-tools-status', role: 'status', 'aria-live': 'polite' });
+  if (loadError) status.dataset.error = 'true';
+  panel.append(header, element('p', copy.scope, { class: 'ct-local-note' }), status);
+  root.append(panel, toggle);
+  document.body.append(root);
+
+  function openPanel(open) {
+    if (open) updateBookmarkControl();
+    panel.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    if (!open && panel.contains(document.activeElement)) toggle.focus();
+  }
+  toggle.addEventListener('click', () => openPanel(panel.hidden));
+  close.addEventListener('click', () => openPanel(false));
+  root.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !panel.hidden) { event.stopPropagation(); openPanel(false); }
+  });
+  function announce(message, error = false) {
+    status.textContent = message;
+    status.dataset.error = String(error);
+  }
+  function persist(next) {
+    try { window.localStorage.setItem(storageKey, JSON.stringify(next)); }
+    catch { announce(copy.storageError, true); return false; }
+    state = next;
+    announce(copy.saved);
+    return true;
+  }
+
+  if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {
+    const automatic = element('section');
+    const label = element('label');
+    const input = element('input', undefined, { type: 'checkbox', id: 'ct-local-auto-translate' });
+    try { input.checked = !!getAutoTranslate(); } catch { input.checked = false; }
+    label.append(input, document.createTextNode(copy.automatic));
+    automatic.append(label, element('p', copy.autoHelp, { class: 'ct-local-note' }));
+    input.addEventListener('change', () => {
+      const requested = input.checked;
+      try {
+        if (setAutoTranslate(requested) === false || !!getAutoTranslate() !== requested) throw new Error('Setting was not saved');
+        announce(copy.saved);
+      } catch {
+        try { input.checked = !!getAutoTranslate(); } catch { input.checked = !requested; }
+        announce(copy.autoError, true);
+      }
+    });
+    panel.append(automatic);
+  }
+
+  const filterSection = element('section');
+  const filterForm = element('form');
+  const enabledLabel = element('label');
+  const enabled = element('input', undefined, { type: 'checkbox', id: 'ct-local-filter-enabled' });
+  enabled.checked = state.enabled;
+  enabledLabel.append(enabled, document.createTextNode(copy.enabled));
+  const keywords = element('textarea', undefined, { id: 'ct-local-keywords', rows: '3', 'aria-describedby': 'ct-local-keyword-help', spellcheck: 'false' });
+  keywords.value = state.keywords.join('\n');
+  filterForm.append(enabledLabel, element('label', copy.words, { for: keywords.id }), keywords,
+    element('p', copy.help, { id: 'ct-local-keyword-help', class: 'ct-local-note' }), element('button', copy.save, { type: 'submit' }));
+  filterSection.append(element('h3', copy.filters), filterForm);
+  panel.append(filterSection);
+
+  const searchSection = element('section');
+  const searchForm = element('form');
+  const searchInput = element('input', undefined, { id: 'ct-local-search-input', type: 'text', maxlength: '200', autocomplete: 'off' });
+  searchForm.append(element('label', copy.query, { for: searchInput.id }), searchInput, element('button', copy.add, { type: 'submit' }));
+  const searches = element('ul');
+  searchSection.append(element('h3', copy.searches), element('p', copy.searchHelp, { class: 'ct-local-note' }), searchForm, searches);
+  panel.append(searchSection);
+  function renderSearches() {
+    searches.replaceChildren();
+    if (!state.searches.length) searches.append(element('li', copy.noSearches));
+    for (const query of state.searches) {
+      const row = element('li');
+      // The native route is /explore. ct_search is consumed by this script;
+      // tweet.app itself does not currently support search query deep links.
+      const link = element('a', query, { href: '/explore?ct_search=' + encodeURIComponent(query) });
+      link.addEventListener('click', event => {
+        link.setAttribute('href', '/explore?ct_search=' + encodeURIComponent(query));
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (window.location.pathname === '/explore') {
+          event.preventDefault();
+          announce('');
+          openPanel(false);
+          startPendingSearch(query, true);
+          return;
+        }
+        try {
+          // This tab-only handoff survives the app normalizing its URL before
+          // the userscript starts. No account data or API credential is stored.
+          window.sessionStorage.setItem(searchIntentKey, JSON.stringify({ version: 1, query, createdAt: Date.now() }));
+          link.setAttribute('href', '/explore');
+        } catch { /* The URL remains a best-effort fallback when storage is blocked. */ }
+      });
+      const remove = element('button', copy.remove, { type: 'button', 'aria-label': `${copy.remove}: ${query}` });
+      remove.addEventListener('click', () => {
+        if (persist({ ...state, searches: state.searches.filter(item => item !== query) })) {
+          renderSearches();
+          searchInput.focus();
+        }
+      });
+      row.append(link, remove);
+      searches.append(row);
+    }
+  }
+  renderSearches();
+  searchForm.addEventListener('submit', event => {
+    event.preventDefault();
+    const query = searchInput.value.trim();
+    if (!query || query.length > 200 || state.searches.length >= 20) { announce(copy.invalidSearch, true); return; }
+    if (state.searches.some(item => normalize(item) === normalize(query))) { announce(copy.duplicate, true); return; }
+    if (persist({ ...state, searches: [...state.searches, query] })) {
+      searchInput.value = '';
+      renderSearches();
+    }
+  });
+
+  const bookmarkSection = element('section');
+  const bookmarkForm = element('form');
+  const bookmarkInput = element('input', undefined, { id: 'ct-local-bookmark-input', type: 'text', maxlength: '200' });
+  const bookmarkSave = element('button', copy.bookmarkSave, { type: 'submit', 'aria-describedby': 'ct-local-bookmark-help' });
+  bookmarkForm.append(element('label', copy.bookmarkLabel, { for: bookmarkInput.id }), bookmarkInput, bookmarkSave);
+  const bookmarks = element('ul', undefined, { id: 'ct-local-bookmarks' });
+  bookmarkSection.append(element('h3', copy.bookmarks),
+    element('p', copy.bookmarkHelp, { id: 'ct-local-bookmark-help', class: 'ct-local-note' }), bookmarkForm, bookmarks);
+  panel.append(bookmarkSection);
+  function currentPost() {
+    const path = window.location.pathname.replace(/\/$/, '');
+    if (!postPathPattern.test(path)) return null;
+    const article = [...document.querySelectorAll('main article')]
+      .find(node => !node.closest('[data-ct-local-ui]'));
+    if (!article) return null;
+    // Use only the current detail URL. Text can be absent on media-only posts,
+    // or still belong to the previous page during a native route transition.
+    // Do not guess a permalink or copy private post bodies into local storage.
+    return { path, label: `${copy.post} ${path.split('/').pop()}`.slice(0, 200) };
+  }
+  function updateBookmarkControl() {
+    bookmarkSave.disabled = !currentPost();
+  }
+  function renderBookmarks() {
+    bookmarks.replaceChildren();
+    if (!state.bookmarks.length) bookmarks.append(element('li', copy.noBookmarks));
+    for (const item of state.bookmarks) {
+      const row = element('li');
+      const link = element('a', item.label, { href: item.path });
+      const remove = element('button', copy.remove, { type: 'button', 'aria-label': `${copy.remove}: ${item.label}` });
+      remove.addEventListener('click', () => {
+        if (persist({ ...state, bookmarks: state.bookmarks.filter(other => other.path !== item.path) })) {
+          renderBookmarks();
+          bookmarkInput.focus();
+        }
+      });
+      row.append(link, remove);
+      bookmarks.append(row);
+    }
+  }
+  renderBookmarks();
+  bookmarkForm.addEventListener('submit', event => {
+    event.preventDefault();
+    const current = currentPost();
+    if (!current) { announce(copy.bookmarkMissing, true); return; }
+    const label = bookmarkInput.value.trim() || current.label;
+    if (label.length > 200 || state.bookmarks.length >= 50) { announce(copy.bookmarkFull, true); return; }
+    if (state.bookmarks.some(item => item.path === current.path)) { announce(copy.bookmarkDuplicate, true); return; }
+    if (persist({ ...state, bookmarks: [...state.bookmarks, { path: current.path, label }] })) {
+      bookmarkInput.value = '';
+      renderBookmarks();
+    }
+  });
+
+  let reveals = new WeakMap();
+  const collapsed = new Set();
+  function articleText(article) {
+    // Both native post and reply components use this paragraph class. Avoid
+    // matching author names, buttons, composer text, or nested reply articles.
+    return [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')]
+      .filter(p => p.closest('article') === article && !p.closest('[data-ct-local-ui], input, textarea, [contenteditable]') &&
+        !p.querySelector('input, textarea, [contenteditable]'))
+      .map(p => p.textContent || '').join('\n');
+  }
+  function uncollapse(article) {
+    article.classList.remove('ct-keyword-collapsed');
+    for (const child of [...article.children]) if (child.classList.contains('ct-keyword-notice')) child.remove();
+    collapsed.delete(article);
+  }
+  function refresh() {
+    updateBookmarkControl();
+    for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);
+    if (!state.enabled && collapsed.size === 0) return;
+    for (const article of document.querySelectorAll('article')) {
+      if (article.closest('[data-ct-local-ui]')) continue;
+      const body = articleText(article);
+      const signature = normalize(body);
+      const shouldCollapse = state.enabled && state.keywords.length &&
+        state.keywords.some(keyword => signature.includes(normalize(keyword))) && reveals.get(article) !== signature;
+      if (!shouldCollapse) { if (collapsed.has(article)) uncollapse(article); continue; }
+      if (collapsed.has(article) && article.querySelector(':scope > .ct-keyword-notice')) continue;
+      const notice = element('div', undefined, { class: 'ct-keyword-notice', 'data-ct-local-ui': '' });
+      const reveal = element('button', copy.reveal, { type: 'button' });
+      notice.append(element('span', copy.collapsed), reveal);
+      notice.addEventListener('click', event => event.stopPropagation());
+      notice.addEventListener('keydown', event => event.stopPropagation());
+      reveal.addEventListener('click', () => {
+        reveals.set(article, normalize(articleText(article)));
+        uncollapse(article);
+        // The button is removed; move focus to the preserved native post.
+        const previousTabIndex = article.getAttribute('tabindex');
+        if (previousTabIndex === null) article.setAttribute('tabindex', '-1');
+        article.focus({ preventScroll: true });
+        if (previousTabIndex === null) article.addEventListener('blur', () => article.removeAttribute('tabindex'), { once: true });
+      });
+      article.append(notice);
+      article.classList.add('ct-keyword-collapsed');
+      collapsed.add(article);
+    }
+  }
+  filterForm.addEventListener('submit', event => {
+    event.preventDefault();
+    const words = keywords.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    if (words.length > 30 || words.some(value => value.length > 80)) { announce(copy.invalidWords, true); return; }
+    if (persist({ ...state, enabled: enabled.checked, keywords: unique(words) })) {
+      keywords.value = state.keywords.join('\n');
+      reveals = new WeakMap();
+      refresh();
+    }
+  });
+
+  let pendingSearch = null;
+  try {
+    const raw = window.sessionStorage.getItem(searchIntentKey);
+    window.sessionStorage.removeItem(searchIntentKey);
+    if (raw && window.location.pathname === '/explore') {
+      const intent = JSON.parse(raw);
+      const age = Date.now() - intent?.createdAt;
+      if (intent?.version === 1 && typeof intent.query === 'string' && intent.query.trim() &&
+          intent.query.length <= 200 && typeof intent.createdAt === 'number' && Number.isFinite(age) && age >= 0 && age <= 120000) {
+        pendingSearch = intent.query;
+      }
+    }
+  } catch { /* No usable tab-local handoff. */ }
+  try {
+    const value = new URL(window.location.href).searchParams.get('ct_search');
+    if (window.location.pathname === '/explore' && value && value.length <= 200) pendingSearch = value;
+  } catch { /* No deep link to consume. */ }
+  let searchTimer;
+  let searchRetryTimer;
+  let searchTarget;
+  let searchAttempts = 0;
+  let allowSearchReplacement = false;
+  function stopPendingSearch() {
+    pendingSearch = null;
+    clearTimeout(searchTimer);
+    clearTimeout(searchRetryTimer);
+    searchRetryTimer = null;
+  }
+  function failPendingSearch() {
+    const query = pendingSearch;
+    stopPendingSearch();
+    if (!query) return;
+    announce(`${copy.searchError} ${query}`, true);
+    openPanel(true);
+  }
+  function nativeSearchInput() {
+    // Verified in tweet.app's Explore component. Placeholder may have been
+    // localized already, so accept English and Japanese forms.
+    return [...document.querySelectorAll('main input[type="text"][placeholder]')]
+      .find(node => !node.closest('[data-ct-local-ui]') && /^(Search\s|検索|.*を検索$)/i.test(node.getAttribute('placeholder') || ''));
+  }
+  function dispatchSearchValue(input, value) {
+    const page = input.ownerDocument.defaultView;
+    const setValue = Object.getOwnPropertyDescriptor(page.HTMLInputElement.prototype, 'value').set;
+    setValue.call(input, value);
+    const inputEvent = typeof page.InputEvent === 'function'
+      ? new page.InputEvent('input', { bubbles: true, composed: true, inputType: 'insertReplacementText', data: value })
+      : new page.Event('input', { bubbles: true, composed: true });
+    input.dispatchEvent(inputEvent);
+    input.dispatchEvent(new page.Event('change', { bubbles: true, composed: true }));
+  }
+  function applyPendingSearch() {
+    if (!pendingSearch || searchRetryTimer) return;
+    if (window.location.pathname !== '/explore') { stopPendingSearch(); return; }
+    const input = nativeSearchInput();
+    if (!input) return;
+    const query = pendingSearch;
+    // Never overwrite an existing query or a user's edits while waiting for
+    // the native React tree to finish mounting.
+    if (input.value && input.value !== query && !allowSearchReplacement) { stopPendingSearch(); return; }
+    // This control is rendered by the native component only after its query
+    // state becomes nonempty. A DOM value alone is not proof React accepted it.
+    const acknowledged = input.parentElement?.querySelector('button[aria-label="Clear search"], button[aria-label="検索をクリア"]');
+    if (searchTarget && input.value === query && acknowledged) {
+      stopPendingSearch();
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('ct_search') === query) {
+        url.searchParams.delete('ct_search');
+        window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+      }
+      return;
+    }
+    if (searchAttempts >= 5) { failPendingSearch(); return; }
+    searchTarget = input;
+    allowSearchReplacement = false;
+    try {
+      // A field mounted after an early injection may start tracking our DOM
+      // value as its initial value. Send an empty change first on that retry
+      // so the subsequent query is a real change to the native value tracker.
+      if (input.value === query) dispatchSearchValue(input, '');
+      dispatchSearchValue(input, query);
+    } catch { /* Retry until the native field is ready, then report failure. */ }
+    const delay = [150, 300, 600, 1000, 2000][searchAttempts++];
+    searchRetryTimer = setTimeout(() => {
+      searchRetryTimer = null;
+      applyPendingSearch();
+    }, delay);
+  }
+  function onSearchUserInput(event) {
+    if (!pendingSearch || !event.isTrusted || event.target !== nativeSearchInput()) return;
+    stopPendingSearch();
+  }
+  document.addEventListener('input', onSearchUserInput, true);
+  function startPendingSearch(query, allowReplacement = false) {
+    stopPendingSearch();
+    pendingSearch = query;
+    searchTarget = null;
+    searchAttempts = 0;
+    allowSearchReplacement = allowReplacement;
+    searchTimer = setTimeout(failPendingSearch, 15000);
+    // Let the native mount/effect pass settle before changing its input.
+    searchRetryTimer = setTimeout(() => {
+      searchRetryTimer = null;
+      applyPendingSearch();
+    }, 80);
+  }
+  if (pendingSearch) startPendingSearch(pendingSearch);
+
+  let timer;
+  let destroyed = false;
+  const observer = new MutationObserver(records => {
+    if (records.every(record => {
+      const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      return target?.closest('[data-ct-local-ui]') ||
+        (record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].every(node =>
+          node.nodeType === 1 && node.matches('[data-ct-local-ui]')));
+    })) return;
+    if (timer) return;
+    timer = setTimeout(() => { timer = null; if (!destroyed) { refresh(); applyPendingSearch(); } }, 80);
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  function onStorage(event) {
+    // An open tab keeps its own unsaved edits. Tell the user to reload instead
+    // of silently replacing the form and possibly changing visible posts.
+    if (event.key === storageKey) announce(ja ? '別のタブで設定が更新されました。反映するには再読み込みしてください。' : 'Settings changed in another tab. Reload to apply them.');
+  }
+  window.addEventListener('storage', onStorage);
+  window.addEventListener('popstate', refresh);
+  refresh();
+  const controller = { root, panel, refresh, destroy() {
+    destroyed = true;
+    observer.disconnect();
+    clearTimeout(timer);
+    clearTimeout(searchTimer);
+    clearTimeout(searchRetryTimer);
+    document.removeEventListener('input', onSearchUserInput, true);
+    window.removeEventListener('storage', onStorage);
+    window.removeEventListener('popstate', refresh);
+    for (const article of [...collapsed]) uncollapse(article);
+    root.remove();
+    style.remove();
+  } };
+  root.ctController = controller;
+  return controller;
+}
+
+    // Shared runtime; embedded at build time, never fetched remotely.
+  const ctAutoSeen = new WeakMap();
+  const ctAutoPending = new Map();
+  const ctManualTranslation = new WeakSet();
+  const ctNativeLikeButtons = new WeakSet();
+  const ctLikeLabels = new WeakMap();
+  let ctAutoClick = false;
+  let ctNextTranslationAt = 0;
+
+  function autoTranslationEnabled() {
+    // A separate opt-in key does not inherit the old enabled-by-default setting.
+    return loadJSON(KEY.autoTranslate + '.optInV2', false) === true;
+  }
+
+  function ctCancelTranslations() {
+    for (const timer of ctAutoPending.values()) clearTimeout(timer);
+    ctAutoPending.clear();
+    ctNextTranslationAt = 0;
+  }
+
+  function ctOwnTranslationText(control) {
+    if (control.closest('blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"]')) return null;
+    const article = control.closest('article');
+    if (!article) return null;
+    const body = [...article.querySelectorAll('p.whitespace-pre-wrap,[data-testid="tweet-text"],[data-testid="post-text"]')]
+      .find(el => el.closest('article') === article &&
+        !el.closest('[aria-live],button,[role="button"],blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"]'));
+    const text = body?.textContent?.trim();
+    return text ? { article, body, text } : null;
+  }
+
+  function ctTranslationDisabled(control) {
+    return control.disabled || control.getAttribute('aria-disabled') === 'true' ||
+      control.getAttribute('aria-busy') === 'true';
+  }
+
+  function patchAutoTranslation(root = document, nativeLanguage = CT_LOCALE) {
+    if (!autoTranslationEnabled() || document.hidden || !ctPageActive) {
+      ctCancelTranslations();
+      return;
+    }
+    // Tweet's native translator chooses navigator.language, not the userscript UI locale.
+    const targetLanguage = (navigator.language || nativeLanguage).toLowerCase().split(/[-_]/)[0];
+    for (const control of ctTranslationControls(root)) {
+      if (!control.isConnected || ctTranslationDisabled(control)) continue;
+      const context = ctOwnTranslationText(control);
+      if (!context || !control.closest('[aria-live="polite"]')) continue;
+      const { article, body, text } = context;
+      const lang = ctLikelyLanguage(text, body);
+      if (lang === 'unknown' || lang === targetLanguage || ctManualTranslation.has(article)) continue;
+      if (ctAutoSeen.get(article) === text || ctAutoPending.has(control)) continue;
+      if (!/^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(control))) continue;
+      if (ctAutoPending.size >= 40) break;
+      const delay = Math.max(0, ctNextTranslationAt - Date.now());
+      ctNextTranslationAt = Date.now() + delay + 750;
+      const timer = setTimeout(() => {
+        ctAutoPending.delete(control);
+        if (!autoTranslationEnabled() || document.hidden || !ctPageActive ||
+            !control.isConnected || ctTranslationDisabled(control) || ctManualTranslation.has(article)) return;
+        if (ctOwnTranslationText(control)?.text !== text) return;
+        if (!/^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(control))) return;
+        ctAutoSeen.set(article, text);
+        ctAutoClick = true;
+        try { control.click(); } finally { ctAutoClick = false; }
+      }, delay);
+      ctAutoPending.set(control, timer);
+    }
+  }
+
+  function ctRememberTranslationChoice(event) {
+    if (ctAutoClick) return;
+    const control = event.target?.closest?.('button,[role="button"],a');
+    if (!control?.closest('[aria-live="polite"]') || !/^(?:Show original|Show translation|Translate|原文を表示|翻訳を表示)$/i.test(ctTranslationButtonText(control))) return;
+    const article = control.closest('article');
+    if (!article) return;
+    ctManualTranslation.add(article);
+    const timer = ctAutoPending.get(control);
+    if (timer !== undefined) clearTimeout(timer);
+    ctAutoPending.delete(control);
+  }
+
+  function ctIsLiked(button) {
+    const pressed = button.getAttribute('aria-pressed');
+    if (pressed !== null) return pressed === 'true';
+    const pink = button.classList.contains('text-pink-500');
+    if (pink || button.classList.contains('text-tl-app-text-muted')) ctNativeLikeButtons.add(button);
+    if (ctNativeLikeButtons.has(button)) return pink;
+    const label = button.getAttribute('aria-label') || '';
+    const previous = ctLikeLabels.get(button);
+    if (previous?.label === label) return previous.liked;
+    return /^(?:Unlike|Unfavorite|お気に入りを解除)(?:,|$)/i.test(label);
+  }
+
+  function patchFavoriteButtons(root = document) {
+    const buttons = [...root.querySelectorAll?.('[data-testid="tweet-like-action"]') || []];
+    if (root.matches?.('[data-testid="tweet-like-action"]')) buttons.push(root);
+    for (const button of buttons) {
+      const liked = ctIsLiked(button);
+      const action = CT_LOCALE === 'ja' ? (liked ? 'お気に入りを解除' : 'お気に入り') : (liked ? 'Unfavorite' : 'Favorite');
+      if (button.title !== action) button.title = action;
+      const old = button.getAttribute('aria-label') || '';
+      const count = old.match(/,\s*([\d,.]+)\s*(?:likes?|favorites?|件)?/i)?.[1];
+      const label = count ? `${action}, ${count} ${CT_LOCALE === 'ja' ? '件' : 'favorites'}` : action;
+      ctLikeLabels.set(button, { label, liked });
+      if (old !== label) button.setAttribute('aria-label', label);
+      if (button.classList.contains('ct-is-liked') !== liked) button.classList.toggle('ct-is-liked', liked);
+    }
+  }
+
+  // Never mistake a quoted post's link for its parent post.
+  function articleId(article) {
+    if (!article) return null;
+    for (const link of article.querySelectorAll('a[href]')) {
+      if (link.closest('article') !== article ||
+          !(link.querySelector('time') || link.closest('[data-testid="post-permalink"]')) ||
+          link.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"]')) continue;
+      try {
+        const url = new URL(link.getAttribute('href'), location.origin);
+        const id = url.pathname.match(/^\/post\/([A-Za-z0-9_-]+)\/?$/)?.[1];
+        if (url.origin === location.origin && id) return id;
+      } catch {}
+    }
+    const detail = location.pathname.match(/^\/post\/([A-Za-z0-9_-]+)\/?$/)?.[1];
+    return detail && article === document.querySelector('article') &&
+      !article.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"]') ? detail : null;
+  }
+
+  let ctScanTimer = null;
+  let ctScanning = false;
+  let ctPageActive = true;
+  let ctStarted = false;
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'class'];
+  const observer = new MutationObserver(mutations => {
+    if (ctScanning || !ctPageActive) return;
+    if (!mutations.some(m => {
+      const el = m.target.nodeType === Node.ELEMENT_NODE ? m.target : m.target.parentElement;
+      if (el?.closest('[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel,#ct-reply-panel')) return false;
+      if (m.type === 'attributes') return m.oldValue !== m.target.getAttribute(m.attributeName);
+      if (m.type === 'characterData') return m.oldValue !== m.target.data;
+      if (m.type === 'childList' && m.addedNodes.length && m.removedNodes.length &&
+          [...m.addedNodes, ...m.removedNodes].every(node => node.nodeType === Node.TEXT_NODE)) {
+        return [...m.addedNodes].map(node => node.data).join('') !== [...m.removedNodes].map(node => node.data).join('');
+      }
+      return true;
+    })) return;
+    ctScheduleScan();
+  });
+
+  function ctObserve() {
+    if (ctPageActive && document.documentElement) observer.observe(document.documentElement, {
+      childList: true, subtree: true, characterData: true, characterDataOldValue: true,
+      attributes: true, attributeOldValue: true, attributeFilter: ctObservedAttributes
+    });
+  }
+
+  function ctRunScan() {
+    ctScanTimer = null;
+    if (ctScanning || !ctPageActive || !document.body) return;
+    ctScanning = true;
+    observer.disconnect();
+    try { scan(document); ctTools?.refresh(); }
+    finally { ctScanning = false; ctObserve(); }
+  }
+
+  function ctScheduleScan() {
+    if (!ctPageActive || ctScanTimer !== null) return;
+    ctScanTimer = setTimeout(ctRunScan, 100);
+  }
+
+  let ctTools = null;
+  let ctReplyInterval = null;
+  function ctStartReplyInterval() {
+    if (ctReplyInterval !== null) return;
+    ctReplyInterval = setInterval(() => {
+      if (!document.hidden && ctPageActive) replyWatchTick();
+    }, 90000);
+  }
+
+  function start() {
+    if (ctStarted) return;
+    if (document.documentElement.dataset.ctActiveVersion) return;
+    document.documentElement.dataset.ctActiveVersion = '6.7.0';
+    ctStarted = true;
+    ctTools = installLocalEnhancements({
+      locale: CT_LOCALE,
+      getAutoTranslate: autoTranslationEnabled,
+      setAutoTranslate: enabled => {
+        if (!saveJSON(KEY.autoTranslate + '.optInV2', enabled === true)) throw new Error('Storage unavailable');
+        ctCancelTranslations();
+        ctScheduleScan();
+      }
+    });
+    document.addEventListener('click', ctRememberTranslationChoice, true);
+    ctRunScan();
+    ctStartReplyInterval();
+    window.addEventListener('popstate', ctScheduleScan);
+    for (const name of ['pushState', 'replaceState']) {
+      const original = history[name];
+      history[name] = function (...args) {
+        const result = original.apply(this, args);
+        ctScheduleScan();
+        return result;
+      };
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) ctCancelTranslations();
+      else ctScheduleScan();
+    });
+    window.addEventListener('pagehide', () => {
+      ctPageActive = false;
+      observer.disconnect();
+      clearTimeout(ctScanTimer);
+      ctScanTimer = null;
+      ctCancelTranslations();
+      clearInterval(ctReplyInterval);
+      ctReplyInterval = null;
+    });
+    window.addEventListener('pageshow', event => {
+      if (event.persisted && !ctPageActive) {
+        ctPageActive = true;
+        ctObserve();
+        ctScheduleScan();
+        ctStartReplyInterval();
+      }
+    });
+  }
+
+    // Only the verified author header is eligible for display-name enhancement.
+  function findAuthorLeaf(article, username) {
+    return [...article.querySelectorAll('button.truncate.font-bold,a[data-testid="author-name"],.ct-author-name')]
+      .find(el => !el.closest('[aria-label^="Quoted post"],blockquote') &&
+        (normUser(el.textContent) === normUser(username) || el.dataset.ctAuthorUser === normUser(username))) || null;
+  }
+
+  async function patchArticle(article) {
+    if (!article?.isConnected) return;
+    const username = articleAuthor(article);
+    if (!username) return;
+    const leaf = findAuthorLeaf(article, username);
+    if (!leaf) return;
+    const previousText = leaf.textContent;
+    const user = await fetchProfile(username);
+    if (!user || !leaf.isConnected || !article.contains(leaf) ||
+        articleAuthor(article) !== username || leaf.textContent !== previousText) return;
+    const displayName = clean(user.displayName || user.name || username);
+    if (!displayName) return;
+    if (leaf.textContent !== displayName) leaf.textContent = displayName;
+    leaf.classList.add('ct-author-name');
+    leaf.dataset.ctAuthorUser = normUser(username);
+    let badge = leaf.parentElement?.querySelector(':scope > .ct-founder');
+    const number = user.foundingMemberNumber;
+    if (number !== null && number !== undefined && /^\d+$/.test(String(number))) {
+      if (!badge) { badge = document.createElement('span'); badge.className = 'ct-founder'; leaf.after(badge); }
+      const founder = String(number).padStart(5, '0');
+      if (badge.textContent !== `#${founder}`) badge.textContent = `#${founder}`;
+      if (badge.title !== `Founder Number #${founder}`) badge.title = `Founder Number #${founder}`;
+    } else { badge?.remove(); }
+  }
+
+  async function patchProfileFounder() {
+    if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) return;
+    const path = location.pathname;
+    const username = routeUser() || ownProfileUser();
+    if (!username) return;
+    const user = await fetchProfile(username);
+    if (!user || location.pathname !== path) return;
+    const number = user.foundingMemberNumber;
+    if (number == null || !/^\d+$/.test(String(number))) return;
+    const displayName = clean(user.displayName || user.name || username);
+    const heading = [...document.querySelectorAll('main h1,main h2')].find(el =>
+      !el.closest('article,[data-ct-owned]') &&
+      [displayName, username, `@${username}`].includes(clean(el.textContent)));
+    if (!heading) return;
+    let badge = heading.parentElement.querySelector(':scope > .ct-profile-founder');
+    if (!badge) { badge = document.createElement('span'); badge.className = 'ct-profile-founder'; heading.after(badge); }
+    const label = `#${String(number).padStart(5, '0')}`;
+    if (badge.textContent !== label) badge.textContent = label;
+  }
+
+  function snapshotFavorite(article) {
+    const id = articleId(article);
+    if (!id) return null;
+    const username = articleAuthor(article) || '';
+    const name = clean(article.querySelector('.ct-author-name,button.truncate.font-bold')?.textContent) || username;
+    const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')].find(el =>
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[aria-live]'));
+    return { id, username, name, text: body?.textContent || '', avatar: articleAvatar(article),
+      href: `${location.origin}/post/${encodeURIComponent(id)}`, savedAt: Date.now() };
+  }
+
+    function ctFormatBytes(bytes) {
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n <= 0) return '取得できません';
+    const units = ['B','KB','MB','GB'];
+    let value = n, i = 0;
+    while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+    return `${value >= 10 || i === 0 ? value.toFixed(i === 0 ? 0 : 1) : value.toFixed(2)} ${units[i]}`;
+  }
+
+  function ctMediaFormat(src, contentType = '') {
+    const type = clean(contentType).split(';')[0].toLowerCase();
+    if (type.includes('/')) return type.split('/')[1].toUpperCase().replace('QUICKTIME','MOV').replace('JPEG','JPG');
+    try {
+      const path = decodeURIComponent(new URL(src, location.href).pathname).toLowerCase();
+      const m = path.match(/\.([a-z0-9]{2,5})$/);
+      if (m) return m[1].toUpperCase();
+    } catch {}
+    return '不明';
+  }
+
+  function ctHeadMedia(src) {
+    const empty = { bytes: null, contentType: '' };
+    try {
+      const url = new URL(src);
+      if (url.protocol !== 'https:' || !['firebasestorage.googleapis.com', 'storage.googleapis.com'].includes(url.hostname) || url.username || url.password) return Promise.resolve(empty);
+    } catch { return Promise.resolve(empty); }
+    return new Promise(resolve => {
+      let settled = false;
+      let handle;
+      const finish = response => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const headers = response?.status >= 200 && response.status < 300 ? String(response.responseHeaders || '') : '';
+        const length = headers.match(/^content-length:\s*(\d+)/im)?.[1];
+        const contentType = headers.match(/^content-type:\s*([^\r\n]+)/im)?.[1]?.trim() || '';
+        resolve({ bytes: length ? Number(length) : null, contentType });
+      };
+      const timer = setTimeout(() => { finish(null); try { handle?.abort?.(); } catch {} }, 8000);
+      const gm = typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest :
+        typeof globalThis.GM?.xmlHttpRequest === 'function' ? globalThis.GM.xmlHttpRequest.bind(globalThis.GM) : null;
+      if (!gm) return finish(null);
+      try {
+        handle = gm({ method: 'HEAD', url: src, timeout: 8000, anonymous: true, redirect: 'error',
+          onload: finish, onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null) });
+        if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(finish, () => finish(null));
+      } catch { finish(null); }
+    });
+  }
+
+  async function ctShowMediaInfo(media) {
+    document.getElementById('ct-media-info-panel')?.remove();
+    const src = media.currentSrc || media.src || '';
+    const isVideo = media instanceof HTMLVideoElement;
+    const width = isVideo ? media.videoWidth : media.naturalWidth;
+    const height = isVideo ? media.videoHeight : media.naturalHeight;
+    const duration = isVideo && Number.isFinite(media.duration) ? media.duration : null;
+    const head = src ? await ctHeadMedia(src) : { bytes:null, contentType:'' };
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ct-media-info-panel';
+    overlay.setAttribute('data-ct-local-ui', '');
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-label', isVideo ? '動画情報' : '写真情報');
+    const dark = matchMedia?.('(prefers-color-scheme: dark)')?.matches;
+    overlay.style.setProperty('--ct-media-bg', dark ? '#15202b' : '#fff');
+    overlay.style.setProperty('--ct-media-fg', dark ? '#f1f5f9' : '#17202a');
+
+    const sheet = document.createElement('div');
+    sheet.className = 'ct-media-info-sheet';
+    const headRow = document.createElement('div');
+    headRow.className = 'ct-media-info-head';
+    const title = document.createElement('div');
+    title.className = 'ct-media-info-title';
+    title.textContent = isVideo ? '🎬 動画情報' : '📸 写真情報';
+    const close = document.createElement('button');
+    close.className = 'ct-media-info-close';
+    close.type = 'button';
+    close.textContent = '×';
+    close.setAttribute('aria-label', '閉じる');
+    headRow.append(title, close);
+
+    const grid = document.createElement('div');
+    grid.className = 'ct-media-info-grid';
+    const rows = [
+      ['実解像度', width && height ? `${width} × ${height} px` : '読み込み待ち'],
+      ['形式', ctMediaFormat(src, head.contentType)],
+      ['配信ファイル容量', ctFormatBytes(head.bytes)]
+    ];
+    if (isVideo) rows.push(['長さ', duration != null ? `${duration.toFixed(2)} 秒` : '読み込み待ち']);
+    for (const [key, value] of rows) {
+      const k = document.createElement('div'); k.className = 'ct-media-info-key'; k.textContent = key;
+      const v = document.createElement('div'); v.className = 'ct-media-info-value'; v.textContent = value;
+      grid.append(k, v);
+    }
+
+    const url = document.createElement('div');
+    url.className = 'ct-media-info-url';
+    url.textContent = src || 'URLを取得できません';
+
+    sheet.append(headRow, grid, url);
+    overlay.append(sheet);
+    document.body.append(overlay);
+    const previousFocus = document.activeElement;
+    const dismiss = () => { overlay.remove(); previousFocus?.focus?.(); };
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') dismiss(); });
+    close.focus();
+    close.onclick = dismiss;
+    overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
+  }
+
+  function patchMediaInfo(root = document) {
+    const scope = root instanceof Element ? root : document;
+    const media = [];
+    if (scope instanceof HTMLImageElement || scope instanceof HTMLVideoElement) media.push(scope);
+    scope.querySelectorAll?.('article img, article video').forEach(el => media.push(el));
+
+    for (const el of media) {
+      if (!el.isConnected || el.dataset.ctMediaInfo === '1') continue;
+      if (el instanceof HTMLImageElement) {
+        const alt = clean(el.alt || '').toLowerCase();
+        const r = el.getBoundingClientRect();
+        if (/avatar|profile/.test(alt) || (r.width && r.width <= 96 && r.height <= 96)) continue;
+      }
+
+      let timer = null;
+      let startX = 0;
+      let startY = 0;
+      const cancel = () => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+      };
+
+      el.addEventListener('touchstart', event => {
+        const touch = event.touches?.[0];
+        if (!touch) return;
+        startX = touch.clientX;
+        startY = touch.clientY;
+        cancel();
+        timer = setTimeout(() => {
+          timer = null;
+          ctShowMediaInfo(el);
+        }, 650);
+      }, { passive:true });
+
+      el.addEventListener('touchmove', event => {
+        const touch = event.touches?.[0];
+        if (!touch) return;
+        if (Math.abs(touch.clientX - startX) > 12 || Math.abs(touch.clientY - startY) > 12) cancel();
+      }, { passive:true });
+
+      el.addEventListener('touchend', cancel, { passive:true });
+      el.addEventListener('touchcancel', cancel, { passive:true });
+      el.dataset.ctMediaInfo = '1';
+    }
+  }
+  function installSafariStyle() {
+    if(document.getElementById("ct-safari-style")) return;
+    const style=document.createElement("style"); style.id="ct-safari-style";
+    style.textContent="      #ct-media-info-panel {\n        position:fixed;\n        inset:0;\n        z-index:2147483600;\n        display:flex;\n        align-items:flex-end;\n        justify-content:center;\n        padding:16px;\n        background:rgba(0,0,0,.34);\n      }\n\n      .ct-media-info-sheet {\n        box-sizing:border-box;\n        width:min(520px,100%);\n        max-height:72vh;\n        overflow:auto;\n        border-radius:18px;\n        padding:16px;\n        background:var(--ct-media-bg,#fff);\n        color:var(--ct-media-fg,#17202a);\n        box-shadow:0 12px 44px rgba(0,0,0,.34);\n        font:14px/1.55 system-ui,-apple-system,\"Segoe UI\",sans-serif;\n      }\n\n      .ct-media-info-head {\n        display:flex;\n        align-items:center;\n        justify-content:space-between;\n        gap:12px;\n        margin-bottom:12px;\n      }\n\n      .ct-media-info-title { font-size:17px; font-weight:800; }\n      .ct-media-info-close {\n        border:0;\n        border-radius:999px;\n        background:rgba(127,127,127,.15);\n        color:inherit;\n        width:32px;\n        height:32px;\n        font-size:20px;\n      }\n      .ct-media-info-grid {\n        display:grid;\n        grid-template-columns:auto 1fr;\n        gap:7px 12px;\n      }\n      .ct-media-info-key { opacity:.62; }\n      .ct-media-info-value { min-width:0; overflow-wrap:anywhere; font-weight:650; }\n      .ct-media-info-url {\n        margin-top:12px;\n        padding:10px;\n        border-radius:10px;\n        background:rgba(127,127,127,.10);\n        font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;\n        overflow-wrap:anywhere;\n        user-select:text;\n        -webkit-user-select:text;\n      }\n\n";
+    (document.head || document.documentElement).append(style);
+  }
+
 
   const API_ORIGIN = 'https://api.tweet.app';
   const PROFILE_API = `${API_ORIGIN}/api/users/by-username/`;
@@ -32,22 +1268,30 @@
   const profileCache = new Map();
   const profilePending = new Map();
 
-  // Safari / Stay でも認証付きAPIを再利用できるように短時間キャッシュ。
-  let authCache = null;
-  let authCacheCheckedAt = 0;
-  let authCachePending = null;
+  const clean = v =>
+    String(v ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-  const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
-  const normUser = v => clean(v).replace(/^@/, '').toLowerCase();
+  const normUser = v =>
+    clean(v)
+      .replace(/^@/, '')
+      .toLowerCase();
 
   const validUser = v => {
     const s = clean(v).replace(/^@/, '');
-    return /^[A-Za-z0-9_.-]{1,80}$/.test(s) ? s : null;
+
+    return /^[A-Za-z0-9_.-]{1,80}$/.test(s)
+      ? s
+      : null;
   };
 
   function loadJSON(key, fallback) {
     try {
-      const value = JSON.parse(localStorage.getItem(key) || 'null');
+      const value = JSON.parse(
+        localStorage.getItem(key) || 'null'
+      );
+
       return value ?? fallback;
     } catch {
       return fallback;
@@ -55,9 +1299,7 @@
   }
 
   function saveJSON(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {}
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
   }
 
   const JP = new Map([
@@ -67,49 +1309,69 @@
     ['Notifications', '通知'],
     ['Profile', 'プロフィール'],
     ['Settings', '設定'],
+
     ['For you', 'おすすめ'],
     ['Following', 'フォロー中'],
+
     ['Trending', 'トレンド'],
     ['Trends for you', 'おすすめのトレンド'],
     ['News', 'ニュース'],
     ['Sports', 'スポーツ'],
     ['Entertainment', 'エンターテインメント'],
     ['Technology', 'テクノロジー'],
+
     ['Top', '話題'],
     ['Latest', '最新'],
     ['People', 'ユーザー'],
     ['Photos', '画像'],
     ['Hashtags', 'ハッシュタグ'],
+
     ['All', 'すべて'],
     ['Verified', '認証済み'],
     ['Mentions', '@ツイート'],
+
     ['Posts', 'ツイート'],
     ['Post', 'ツイート'],
     ['Tweets', 'ツイート'],
     ['Tweet', 'ツイート'],
+
     ['Replies', '返信'],
     ['No replies yet', 'まだ返信はありません'],
+    ['No replies yet.', 'まだ返信はありません。'],
+    ['No tweets yet.', 'まだツイートはありません。'],
+    ['No posts yet.', 'まだツイートはありません。'],
+    ['No reposts yet.', 'まだリツイートはありません。'],
+    ['No tweets yet. Share your first thought with the community.', 'まだツイートはありません。最初のツイートを投稿してみましょう。'],
+    ['No posts yet. Share your first thought with the community.', 'まだツイートはありません。最初のツイートを投稿してみましょう。'],
     ['Be the first to reply.', '最初の返信をしてみましょう。'],
     ['Reply', '返信'],
+
     ['Followers', 'フォロワー'],
     ['Follower', 'フォロワー'],
+
     ['Edit profile', 'プロフィールを編集'],
+
     ['Follow', 'フォロー'],
     ['Unfollow', 'フォロー解除'],
+
     ['Reposts', 'リツイート'],
     ['Repost', 'リツイート'],
     ['Retweets', 'リツイート'],
     ['Retweet', 'リツイート'],
+
     ['Quote', '引用ツイート'],
     ['Quote Tweet', '引用ツイート'],
     ['Quote Retweet', '引用ツイート'],
+
     ['Undo repost', 'リツイートを取り消す'],
     ['Undo retweet', 'リツイートを取り消す'],
+
     ['Like', 'お気に入り'],
     ['Likes', 'お気に入り'],
     ['Liked', 'お気に入り済み'],
     ['Liked by', 'お気に入りしたユーザー'],
     ['Unlike', 'お気に入りを解除'],
+
     ['Who to follow', 'おすすめユーザー'],
 
     // Backup codes / security
@@ -150,6 +1412,9 @@
     ['Loading notifications', '通知を読み込み中…'],
     ['Loading notification', '通知を読み込み中…'],
     ['No verified account notifications yet.', '認証済みアカウントからの通知はまだありません。'],
+    ['No VERA notifications yet.', 'VERAからの通知はまだありません。'],
+    ['When someone quotes or mentions you, it will show up here.', 'あなたへの引用や@ツイートがここに表示されます。'],
+    ['Nothing to see here yet. Likes, reposts, and follows will show up here.', '通知はまだありません。お気に入り、リツイート、フォローの通知がここに表示されます。'],
     ['quoted your post', 'あなたのツイートを引用しました'],
     ['quoted your tweet', 'あなたのツイートを引用しました'],
     ['posted', 'ツイートしました'],
@@ -229,8 +1494,10 @@
     // Official role badge names intentionally remain unchanged
     ['Team Member', 'Team Member'],
     ['Tweet Ambassador', 'Tweet Ambassador'],
+
     ['Search', '検索'],
     ['Search Twitter', 'Twitterを検索'],
+
     ['Account', 'アカウント'],
     ['Your account', 'アカウント'],
     ['Account settings', 'アカウント設定'],
@@ -273,38 +1540,50 @@
     ['Location', '場所'],
     ['Website', 'ウェブサイト'],
     ["This can only be changed a few times. Make sure you enter the age of the person using the account. Even if you're making an account for your business, event, or cat.", '変更できる回数には制限があります。アカウントを利用する本人の生年月日を入力してください。ビジネス、イベント、ペット用のアカウントの場合も同様です。'],
+
     ['Privacy', 'プライバシー'],
     ['Privacy and safety', 'プライバシーと安全'],
     ['Safety', '安全'],
     ['Security', 'セキュリティ'],
+
     ['Content', 'コンテンツ'],
     ['Content preferences', 'コンテンツ設定'],
+
     ['Sensitive content', 'センシティブなコンテンツ'],
     ['Show sensitive content', 'センシティブなコンテンツを表示'],
     ['Hide sensitive content', 'センシティブなコンテンツを非表示'],
+
     ['Push notifications', 'プッシュ通知'],
     ['Email notifications', 'メール通知'],
     ['Notification settings', '通知設定'],
+
     ['Language', '言語'],
     ['Languages', '言語'],
     ['Language settings', '言語設定'],
     ['English', '英語'],
     ['Japanese', '日本語'],
+
     ['Accessibility', 'アクセシビリティ'],
     ['Reduce motion', '動きを減らす'],
+
     ['Autoplay', '自動再生'],
     ['Autoplay videos', '動画を自動再生'],
+
     ['Muted accounts', 'ミュートしているアカウント'],
     ['Muted', 'ミュート済み'],
     ['Mute', 'ミュート'],
+
     ['Data', 'データ'],
     ['Data usage', 'データ利用'],
+
     ['Help', 'ヘルプ'],
     ['Help Center', 'ヘルプセンター'],
     ['Support', 'サポート'],
     ['Feedback', 'フィードバック'],
+
     ['Terms of Service', '利用規約'],
     ['Privacy Policy', 'プライバシーポリシー'],
+
     ['Save', '保存'],
     ['Saved', '保存しました'],
     ['Cancel', 'キャンセル'],
@@ -313,60 +1592,74 @@
     ['Done', '完了'],
     ['Confirm', '確認'],
     ['Delete', '削除'],
+
     ['Log out', 'ログアウト'],
     ['Logout', 'ログアウト'],
     ['Sign out', 'ログアウト'],
+
     ['Delete account', 'アカウントを削除'],
     ['Deactivate account', 'アカウントを停止'],
+
     ['Username', 'ユーザー名'],
     ['Display name', '表示名'],
     ['Name', '名前'],
     ['Email', 'メールアドレス'],
     ['Password', 'パスワード'],
     ['Change password', 'パスワードを変更'],
+
     ['On', 'オン'],
     ['Off', 'オフ'],
     ['Enabled', '有効'],
     ['Disabled', '無効'],
+
     ['Just now', 'たった今'],
     ['just now', 'たった今'],
+
     ['Report post', 'ツイートを報告'],
     ['Delete post', 'ツイートを削除'],
 
-    // 操作完了ポップアップ
     ['Repost removed', 'リツイートを取り消しました'],
     ['Repost added', 'リツイートしました'],
     ['Post reposted', 'リツイートしました'],
     ['Retweet removed', 'リツイートを取り消しました'],
+
     ['Post liked', 'お気に入りに登録しました'],
     ['Like removed', 'お気に入りを解除しました'],
+
     ['Copied to clipboard', 'クリップボードにコピーしました'],
     ['Post deleted', 'ツイートを削除しました'],
     ['Post posted', 'ツイートしました'],
 
-    // 通知アクション
     ['mentioned you', 'あなたを@ツイートしました'],
     ['mentioned you in a post', 'あなたを@ツイートしました'],
     ['mentioned you in a tweet', 'あなたを@ツイートしました'],
+
     ['replied to your post', 'あなたのツイートに返信しました'],
     ['replied to your tweet', 'あなたのツイートに返信しました'],
     ['replied to you', 'あなたに返信しました'],
+
     ['liked your post', 'あなたのツイートをお気に入りに登録しました'],
     ['liked your tweet', 'あなたのツイートをお気に入りに登録しました'],
     ['favorited your post', 'あなたのツイートをお気に入りに登録しました'],
     ['favorited your tweet', 'あなたのツイートをお気に入りに登録しました'],
+
     ['reposted your post', 'あなたのツイートをリツイートしました'],
     ['reposted your tweet', 'あなたのツイートをリツイートしました'],
     ['retweeted your post', 'あなたのツイートをリツイートしました'],
     ['retweeted your tweet', 'あなたのツイートをリツイートしました'],
+
     ['followed you', 'あなたをフォローしました']
   ]);
 
   function installStyle() {
-    if (document.getElementById('ct-jp-style')) return;
+    if (document.getElementById('ct-jp-style')) {
+      return;
+    }
 
     const style = document.createElement('style');
+
     style.id = 'ct-jp-style';
+
     style.textContent = `
       [data-testid="tweet-like-action"] svg {
         display:none!important;
@@ -380,6 +1673,7 @@
         transform-origin:center;
       }
 
+      [data-testid="tweet-like-action"].ct-is-liked::before,
       [data-testid="tweet-like-action"][aria-pressed="true"]::before,
       [data-testid="tweet-like-action"].text-pink-500::before {
         content:"★";
@@ -401,10 +1695,22 @@
       }
 
       @keyframes ctStarPop {
-        0% { transform:translateY(-1px) scale(.72) rotate(-8deg); opacity:.55; }
-        48% { transform:translateY(-1px) scale(1.3) rotate(6deg); }
-        74% { transform:translateY(-1px) scale(.94) rotate(-2deg); }
-        100% { transform:translateY(-1px) scale(1); }
+        0% {
+          transform:translateY(-1px) scale(.72) rotate(-8deg);
+          opacity:.55;
+        }
+
+        48% {
+          transform:translateY(-1px) scale(1.3) rotate(6deg);
+        }
+
+        74% {
+          transform:translateY(-1px) scale(.94) rotate(-2deg);
+        }
+
+        100% {
+          transform:translateY(-1px) scale(1);
+        }
       }
 
       .ct-founder,
@@ -485,8 +1791,14 @@
         box-shadow:0 10px 35px rgba(0,0,0,.25);
       }
 
-      #ct-favorites-panel { border-radius:0 0 12px 12px; }
-      #ct-reply-panel { border-radius:14px; max-height:min(48vh,460px); }
+      #ct-favorites-panel {
+        border-radius:0 0 12px 12px;
+      }
+
+      #ct-reply-panel {
+        border-radius:14px;
+        max-height:min(48vh,460px);
+      }
 
       .ct-local-head {
         position:sticky;
@@ -501,8 +1813,15 @@
         color:inherit;
       }
 
-      .ct-local-title { font-weight:800; }
-      .ct-local-note { font-size:11px; opacity:.6; margin-top:2px; }
+      .ct-local-title {
+        font-weight:800;
+      }
+
+      .ct-local-note {
+        font-size:11px;
+        opacity:.6;
+        margin-top:2px;
+      }
 
       .ct-local-close {
         border:0;
@@ -514,7 +1833,9 @@
         border-radius:999px;
       }
 
-      .ct-local-close:hover { background:rgba(127,127,127,.14); }
+      .ct-local-close:hover {
+        background:rgba(127,127,127,.14);
+      }
 
       .ct-local-card {
         display:flex;
@@ -524,7 +1845,9 @@
         cursor:pointer;
       }
 
-      .ct-local-card:hover { background:rgba(127,127,127,.08); }
+      .ct-local-card:hover {
+        background:rgba(127,127,127,.08);
+      }
 
       .ct-local-avatar {
         width:40px;
@@ -535,7 +1858,10 @@
         background:rgba(127,127,127,.25);
       }
 
-      .ct-local-main { min-width:0; flex:1; }
+      .ct-local-main {
+        min-width:0;
+        flex:1;
+      }
 
       .ct-local-meta {
         display:flex;
@@ -546,8 +1872,14 @@
         line-height:18px;
       }
 
-      .ct-local-name { font-weight:800; }
-      .ct-local-handle,.ct-local-time { opacity:.62; }
+      .ct-local-name {
+        font-weight:800;
+      }
+
+      .ct-local-handle,
+      .ct-local-time {
+        opacity:.62;
+      }
 
       .ct-local-text {
         margin-top:3px;
@@ -557,66 +1889,16 @@
         line-height:20px;
       }
 
-      .ct-local-empty { padding:28px 18px; text-align:center; opacity:.65; }
-      .ct-reply-kicker { font-size:12px; color:#1d9bf0; margin-bottom:3px; }
-      #ct-media-info-panel {
-        position:fixed;
-        inset:0;
-        z-index:2147483600;
-        display:flex;
-        align-items:flex-end;
-        justify-content:center;
-        padding:16px;
-        background:rgba(0,0,0,.34);
+      .ct-local-empty {
+        padding:28px 18px;
+        text-align:center;
+        opacity:.65;
       }
 
-      .ct-media-info-sheet {
-        box-sizing:border-box;
-        width:min(520px,100%);
-        max-height:72vh;
-        overflow:auto;
-        border-radius:18px;
-        padding:16px;
-        background:var(--ct-media-bg,#fff);
-        color:var(--ct-media-fg,#17202a);
-        box-shadow:0 12px 44px rgba(0,0,0,.34);
-        font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;
-      }
-
-      .ct-media-info-head {
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:12px;
-        margin-bottom:12px;
-      }
-
-      .ct-media-info-title { font-size:17px; font-weight:800; }
-      .ct-media-info-close {
-        border:0;
-        border-radius:999px;
-        background:rgba(127,127,127,.15);
-        color:inherit;
-        width:32px;
-        height:32px;
-        font-size:20px;
-      }
-      .ct-media-info-grid {
-        display:grid;
-        grid-template-columns:auto 1fr;
-        gap:7px 12px;
-      }
-      .ct-media-info-key { opacity:.62; }
-      .ct-media-info-value { min-width:0; overflow-wrap:anywhere; font-weight:650; }
-      .ct-media-info-url {
-        margin-top:12px;
-        padding:10px;
-        border-radius:10px;
-        background:rgba(127,127,127,.10);
-        font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
-        overflow-wrap:anywhere;
-        user-select:text;
-        -webkit-user-select:text;
+      .ct-reply-kicker {
+        font-size:12px;
+        color:#1d9bf0;
+        margin-bottom:3px;
       }
 
       .ct-detail-post-time {
@@ -644,13 +1926,16 @@
       }
     `;
 
-    (document.head || document.documentElement).appendChild(style);
+    (
+      document.head ||
+      document.documentElement
+    ).appendChild(style);
   }
 
   function dynamicJP(t) {
     let m;
 
-    
+
     // Notification grammar normalization
     if ((m = t.match(/^(.+?)さんがあなたを@ツイートしました$/))) {
       return `${m[1]}さんがあなた宛てにツイートしました`;
@@ -673,20 +1958,65 @@
       return `返信先: ${targets}`;
     }
 
-if (/^just\s+now$/i.test(t)) return 'たった今';
+if (/^just\s+now$/i.test(t)) {
+      return 'たった今';
+    }
 
-    if ((m = t.match(/^(\d+)s$/))) return `${m[1]}秒`;
-    if ((m = t.match(/^(\d+)m$/))) return `${m[1]}分`;
-    if ((m = t.match(/^(\d+)h$/))) return `${m[1]}時間`;
-    if ((m = t.match(/^(\d+)d$/))) return `${m[1]}日`;
-    if ((m = t.match(/^Joined\s+(.+)$/i))) return `${m[1]}からTwitterを利用しています`;
-    if ((m = t.match(/^([\d,.]+[KMB]?)\s+Following$/i))) return `${m[1]}人 フォロー中`;
-    if ((m = t.match(/^([\d,.]+[KMB]?)\s+Followers?$/i))) return `${m[1]}人 フォロワー`;
-    if ((m = t.match(/^([\d,.]+[KMB]?)\s+Tweets?$/i))) return `${m[1]} ツイート`;
-    if ((m = t.match(/^Logged in as\s+(.+)$/i))) return `${m[1]}としてログイン中`;
-    if ((m = t.match(/^Version\s+(.+)$/i))) return `バージョン ${m[1]}`;
-    if ((m = t.match(/^and\s+(\d+)\s+others?$/i))) return `とそのほか${m[1]}人`;
-    if ((m = t.match(/^(\d+)\s+others?$/i))) return `そのほか${m[1]}人`;
+    if ((m = t.match(/^(\d+)s$/))) {
+      return `${m[1]}秒`;
+    }
+
+    if ((m = t.match(/^(\d+)m$/))) {
+      return `${m[1]}分`;
+    }
+
+    if ((m = t.match(/^(\d+)h$/))) {
+      return `${m[1]}時間`;
+    }
+
+    if ((m = t.match(/^(\d+)d$/))) {
+      return `${m[1]}日`;
+    }
+
+    if ((m = t.match(/^Joined\s+(.+)$/i))) {
+      return `${m[1]}からTwitterを利用しています`;
+    }
+
+    if ((m = t.match(/^(\d+)\s+codes?\s+remaining$/i))) {
+      return `${m[1]}個のコードが残っています`;
+    }
+
+    if ((m = t.match(/^参加した人数\s+(.+)$/))) {
+      return `${m[1]}からTwitterを利用しています`;
+    }
+
+    if ((m = t.match(/^([\d,.]+[KMB]?)\s+Following$/i))) {
+      return `${m[1]}人 フォロー中`;
+    }
+
+    if ((m = t.match(/^([\d,.]+[KMB]?)\s+Followers?$/i))) {
+      return `${m[1]}人 フォロワー`;
+    }
+
+    if ((m = t.match(/^([\d,.]+[KMB]?)\s+Tweets?$/i))) {
+      return `${m[1]} ツイート`;
+    }
+
+    if ((m = t.match(/^Logged in as\s+(.+)$/i))) {
+      return `${m[1]}としてログイン中`;
+    }
+
+    if ((m = t.match(/^Version\s+(.+)$/i))) {
+      return `バージョン ${m[1]}`;
+    }
+
+    if ((m = t.match(/^and\s+(\d+)\s+others?$/i))) {
+      return `とそのほか${m[1]}人`;
+    }
+
+    if ((m = t.match(/^(\d+)\s+others?$/i))) {
+      return `そのほか${m[1]}人`;
+    }
 
     return null;
   }
@@ -696,7 +2026,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       .replace(/\s+and\s+/gi, '、')
       .replace(/\s*,\s*/g, '、')
       .split('、')
-      .map(x => clean(x).replace(/さん$/, ''))
+      .map(x =>
+        clean(x).replace(/さん$/, '')
+      )
       .filter(Boolean)
       .map(x => `${x}さん`)
       .join('と');
@@ -704,656 +2036,394 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
 
   function translateNotification(t) {
     t = clean(t);
-    if (!t) return null;
+
+    if (!t) {
+      return null;
+    }
 
     let m;
 
     const many = [
-      [/^(.+?)\s+and\s+(\d+)\s+others?\s+(?:liked|favorited) your (?:post|tweet)$/i,
-        (a,n) => `${actorJP(a)}、そのほか${n}人があなたのツイートをお気に入りに登録しました`],
-      [/^(.+?)\s+and\s+(\d+)\s+others?\s+(?:reposted|retweeted) your (?:post|tweet)$/i,
-        (a,n) => `${actorJP(a)}、そのほか${n}人があなたのツイートをリツイートしました`],
-      [/^(.+?)\s+and\s+(\d+)\s+others?\s+followed you$/i,
-        (a,n) => `${actorJP(a)}、そのほか${n}人があなたをフォローしました`],
-      [/^(.+?)\s+and\s+(\d+)\s+others?\s+mentioned you(?: in a (?:post|tweet))?$/i,
-        (a,n) => `${actorJP(a)}、そのほか${n}人があなたを@ツイートしました`],
-      [/^(.+?)\s+and\s+(\d+)\s+others?\s+replied to (?:your (?:post|tweet)|you)$/i,
-        (a,n) => `${actorJP(a)}、そのほか${n}人があなたのツイートに返信しました`]
+      [
+        /^(.+?)\s+and\s+(\d+)\s+others?\s+(?:liked|favorited) your (?:post|tweet)$/i,
+        (a, n) =>
+          `${actorJP(a)}、そのほか${n}人があなたのツイートをお気に入りに登録しました`
+      ],
+
+      [
+        /^(.+?)\s+and\s+(\d+)\s+others?\s+(?:reposted|retweeted) your (?:post|tweet)$/i,
+        (a, n) =>
+          `${actorJP(a)}、そのほか${n}人があなたのツイートをリツイートしました`
+      ],
+
+      [
+        /^(.+?)\s+and\s+(\d+)\s+others?\s+followed you$/i,
+        (a, n) =>
+          `${actorJP(a)}、そのほか${n}人があなたをフォローしました`
+      ],
+
+      [
+        /^(.+?)\s+and\s+(\d+)\s+others?\s+mentioned you(?: in a (?:post|tweet))?$/i,
+        (a, n) =>
+          `${actorJP(a)}、そのほか${n}人があなたを@ツイートしました`
+      ],
+
+      [
+        /^(.+?)\s+and\s+(\d+)\s+others?\s+replied to (?:your (?:post|tweet)|you)$/i,
+        (a, n) =>
+          `${actorJP(a)}、そのほか${n}人があなたのツイートに返信しました`
+      ]
     ];
 
     for (const [re, fn] of many) {
-      if ((m = t.match(re))) return fn(m[1], m[2]);
+      if ((m = t.match(re))) {
+        return fn(
+          m[1],
+          m[2]
+        );
+      }
     }
 
     const one = [
-      [/^(.+?)\s+(?:liked|favorited) your (?:post|tweet)$/i,
-        a => `${actorJP(a)}があなたのツイートをお気に入りに登録しました`],
-      [/^(.+?)\s+(?:reposted|retweeted) your (?:post|tweet)$/i,
-        a => `${actorJP(a)}があなたのツイートをリツイートしました`],
-      [/^(.+?)\s+followed you$/i,
-        a => `${actorJP(a)}があなたをフォローしました`],
-      [/^(.+?)\s+mentioned you(?: in a (?:post|tweet))?$/i,
-        a => `${actorJP(a)}があなたを@ツイートしました`],
-      [/^(.+?)\s+replied to your (?:post|tweet)$/i,
-        a => `${actorJP(a)}があなたのツイートに返信しました`],
-      [/^(.+?)\s+replied to you$/i,
-        a => `${actorJP(a)}があなたに返信しました`],
-      [/^(.+?)\s+(?:liked|favorited) your reply$/i,
-        a => `${actorJP(a)}があなたの返信をお気に入りに登録しました`],
-      [/^(.+?)\s+(?:reposted|retweeted) your reply$/i,
-        a => `${actorJP(a)}があなたの返信をリツイートしました`]
+      [
+        /^(.+?)\s+(?:liked|favorited) your (?:post|tweet)$/i,
+        a =>
+          `${actorJP(a)}があなたのツイートをお気に入りに登録しました`
+      ],
+
+      [
+        /^(.+?)\s+(?:reposted|retweeted) your (?:post|tweet)$/i,
+        a =>
+          `${actorJP(a)}があなたのツイートをリツイートしました`
+      ],
+
+      [
+        /^(.+?)\s+followed you$/i,
+        a =>
+          `${actorJP(a)}があなたをフォローしました`
+      ],
+
+      [
+        /^(.+?)\s+mentioned you(?: in a (?:post|tweet))?$/i,
+        a =>
+          `${actorJP(a)}があなたを@ツイートしました`
+      ],
+
+      [
+        /^(.+?)\s+replied to your (?:post|tweet)$/i,
+        a =>
+          `${actorJP(a)}があなたのツイートに返信しました`
+      ],
+
+      [
+        /^(.+?)\s+replied to you$/i,
+        a =>
+          `${actorJP(a)}があなたに返信しました`
+      ],
+
+      [
+        /^(.+?)\s+(?:liked|favorited) your reply$/i,
+        a =>
+          `${actorJP(a)}があなたの返信をお気に入りに登録しました`
+      ],
+
+      [
+        /^(.+?)\s+(?:reposted|retweeted) your reply$/i,
+        a =>
+          `${actorJP(a)}があなたの返信をリツイートしました`
+      ]
     ];
 
     for (const [re, fn] of one) {
-      if ((m = t.match(re))) return fn(m[1]);
+      if ((m = t.match(re))) {
+        return fn(
+          m[1]
+        );
+      }
     }
 
     return null;
   }
 
-  function translateTextNode(node) {
-    const parent = node?.parentElement;
-    if (!parent?.isConnected) return;
-    if (parent.closest('textarea,input,[contenteditable="true"],script,style')) return;
-
-    const raw = node.nodeValue || '';
-    const t = clean(raw);
-    if (!t || t.length > 500) return;
-
-    let out = null;
-
-    if (location.pathname.startsWith('/notifications')) {
-      let m;
-
-      if (/^and$/i.test(t)) {
-        out = 'と';
-      } else if ((m = t.match(/^and\s+(\d+)\s+others?$/i))) {
-        out = `とそのほか${m[1]}人`;
-      } else if ((m = t.match(/^(\d+)\s+others?$/i))) {
-        out = `そのほか${m[1]}人`;
-      }
-    }
-
-    if (!out) {
-      out = translateNotification(t) || JP.get(t) || dynamicJP(t);
-    }
-
-    if (out && out !== t) {
-      node.nodeValue = raw.replace(t, out);
-    }
-  }
-
-  function patchUI(root = document) {
+  // Only localize application chrome. Text matching alone cannot distinguish a
+  // label from a person's name, a post, a notification preview, or a translation.
+  function localizationScopeNodes(root = document) {
     const host = root instanceof Node ? root : document;
+    if (host.nodeType === Node.TEXT_NODE) return [host];
+    const nodes = [];
     const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
-    const nodes = [];
     let node;
-
     while ((node = walker.nextNode())) nodes.push(node);
-    nodes.forEach(translateTextNode);
-  }
-
-  function notificationTextNodes(root = document) {
-    const main = root instanceof Element && root.matches('main')
-      ? root
-      : root.querySelector?.('main') || document.querySelector('main');
-
-    if (!main) return [];
-
-    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    let node;
-
-    while ((node = walker.nextNode())) {
-      const parent = node.parentElement;
-      if (!parent?.isConnected) continue;
-      if (parent.closest('textarea,input,[contenteditable="true"],script,style')) continue;
-      nodes.push(node);
-    }
-
     return nodes;
   }
 
-  function nearestUsefulSibling(node, direction) {
-    let cur = direction < 0 ? node.previousSibling : node.nextSibling;
+  function isOwnedLocalizationElement(el) {
+    return !!el?.closest('[id^="ct-"],[class^="ct-"],[class*=" ct-"],[data-ct-owned],[data-ct-local-ui]');
+  }
 
-    while (cur) {
-      const text = clean(cur.textContent);
-      if (text) return cur;
-      cur = direction < 0 ? cur.previousSibling : cur.nextSibling;
+  function isNativeSettingsNavigation(el) {
+    if (!/^\/settings\/?$/.test(location.pathname) || !el?.matches('span.truncate')) return false;
+    const button = el.closest('nav button');
+    return !!button?.closest('main') && !!button.querySelector('svg') &&
+      !button.querySelector('img,a,[data-user-content]') &&
+      !/@[A-Za-z0-9_.-]/.test(clean(button.textContent)) &&
+      !button.getAttribute('aria-label')?.startsWith('View @');
+  }
+
+  function isNativeLocalizationTimestamp(el) {
+    if (!el?.matches('span[title]') || !el.closest('article') ||
+        el.closest('button,a,[role="button"]') ||
+        !el.classList.contains('text-tl-app-text-muted') || !el.classList.contains('hover:underline')) return false;
+    const title = el.getAttribute('title');
+    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(title) &&
+      Number.isFinite(Date.parse(title));
+  }
+
+  function isProtectedLocalizationElement(el) {
+    if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
+    if (el.closest(
+      'textarea,input,select,option,script,style,code,pre,kbd,samp,svg,' +
+      '[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,' +
+      '[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],' +
+      '.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
+    )) return true;
+    // Native settings navigation also truncates its static labels. Keep the
+    // protection for profile names and account values everywhere else.
+    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications' }[location.pathname.replace(/\/$/, '')];
+    const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
+      el === document.querySelector('main h2') && !el.closest('article');
+    return !!el.closest('.truncate') && !isNativeSettingsNavigation(el) && !pageTitle;
+  }
+
+  function localizationNotificationRow(el) {
+    if (!location.pathname.startsWith('/notifications')) return null;
+    const row = el?.closest('button,[role="button"]');
+    if (!row?.closest('main') || isOwnedLocalizationElement(row)) return null;
+    // Current tweet.app notification rows are border-separated buttons. Do not
+    // interpret tab buttons or arbitrary paragraphs as notification content.
+    return row.matches('.items-start.border-b,[data-testid="notification-row"]') ? row : null;
+  }
+
+  function localizationNotificationAction(node) {
+    const el = node?.parentElement;
+    if (isProtectedLocalizationElement(el)) return null;
+    const row = localizationNotificationRow(el);
+    const paragraph = el?.closest('p');
+    if (!row || !paragraph || !row.contains(paragraph)) return null;
+    if (el.closest('.font-extrabold,.font-bold,a')) return null;
+    if (!(el === paragraph || el.parentElement === paragraph)) return null;
+    const text = clean(node.nodeValue);
+    if (!/^(?:(?:liked|favorited|reposted|retweeted|quoted) your (?:post|tweet|reply)|followed you|mentioned you(?: in a (?:post|tweet))?|replied to (?:your (?:post|tweet)|you)|flagged your post for review|awarded you a badge|interacted with you|(?:さん)?が?あなた(?:の(?:ツイート|返信)(?:を(?:お気に入りに登録|リツイート|引用)|に返信)|を(?:フォロー|@ツイート)|宛てにツイート|に(?:返信|バッジを贈り))しました)$/i.test(text)) return null;
+    return { row, paragraph, element: el };
+  }
+
+  function isLocalizationUI(node) {
+    const el = node?.parentElement;
+    if (isProtectedLocalizationElement(el)) return false;
+    if (localizationNotificationAction(node)) return true;
+    if (localizationNotificationRow(el)) return false;
+    const text = clean(node.nodeValue);
+    const link = el.closest('a[href]');
+    if (link) {
+      let url;
+      try { url = new URL(link.getAttribute('href'), location.href); } catch { return false; }
+      if (url.origin !== location.origin || !/^\/(?:feed|explore|notifications|settings|profile|compose|bookmarks)\/?$/.test(url.pathname)) return false;
+      return !link.querySelector('img') && !!el.closest('nav,[role="navigation"],header,aside');
     }
+    // A reply target is UI, but its handle must remain byte-for-byte unchanged.
+    if (/^Replying to$/i.test(text) && el.matches('p,button') &&
+        [...el.children].some(child => /^@[A-Za-z0-9_.-]+$/.test(clean(child.textContent)))) return true;
+    const control = el.closest('button,[role="button"],[role="tab"],[role="menuitem"],summary');
+    if (control) {
+      if (control.querySelector('img') || /@[A-Za-z0-9_.-]/.test(clean(control.textContent))) return false;
+      // User cards are buttons too. Paragraphs and styled names inside those
+      // buttons are data, not labels. Real notification actions are handled above.
+      const paragraph = el.closest('p');
+      if ((paragraph && control.contains(paragraph)) || control.querySelector('p')) return false;
+      if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
+      return true;
+    }
+    if (isNativeLocalizationTimestamp(el)) return true;
+    if (el.closest('article')) return false;
+    if (el.closest('label,legend,[role="status"],[role="alert"]')) return true;
+    const inSettings = /^\/settings\/?$/.test(location.pathname);
+    const heading = el.closest('h1,h2,h3') || (inSettings && el.closest('main section h4.font-extrabold'));
+    if (heading) {
+      // Profile headings contain display names; all other static headings are
+      // still restricted to exact dictionary entries by translateTextNode.
+      if (/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname) && heading.tagName !== 'H1') return false;
+      return !heading.querySelector('img');
+    }
+    // Settings descriptions are static text, but account values in dd/input and
+    // profile data are deliberately excluded. Never allow an entire route.
+    if (inSettings && el.matches('main section span.uppercase.tracking-wide')) return true;
+    if (inSettings && el.matches('p,dt')) {
+      if (el.closest('dl') && el.tagName !== 'DT') return false;
+      if (el.classList.contains('leading-relaxed')) {
+        const title = el.previousElementSibling;
+        return !!el.closest('main section') && title?.matches('h4.font-extrabold') &&
+          (JP.has(clean(title.textContent)) || [...JP.values()].includes(clean(title.textContent)));
+      }
+      return !el.closest('a');
+    }
+    // The mobile account menu's counts are spans, unlike profile buttons.
+    if (el.matches('span') && el.closest('[role="dialog"][aria-label="Account menu"]') &&
+        /^(?:Following|Followers)$/.test(text) &&
+        [...el.children].some(child => child.matches('strong') && /^[\d,]+$/.test(clean(child.textContent)))) return true;
+    // Native empty states put text-center on the parent, not the paragraph.
+    return el.matches('p.text-center,div.text-center,[aria-busy="true"]') ||
+      (el.matches('p.text-tl-app-text-muted') && el.parentElement?.matches('div.text-center'));
+  }
 
-    return null;
+  function replaceLocalizationText(node, text) {
+    const raw = node.nodeValue || '';
+    if (clean(raw) === text) return;
+    node.nodeValue = raw.replace(/\S[\s\S]*\S|\S/, () => text);
+  }
+
+  function patchUIAttributes(root = document) {
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const controls = [];
+    if (host instanceof Element && host.matches('button,[role="tab"],[role="menuitem"],input,textarea')) controls.push(host);
+    host?.querySelectorAll?.('button,[role="tab"],[role="menuitem"],input,textarea').forEach(el => controls.push(el));
+    for (const el of controls) {
+      if (isOwnedLocalizationElement(el) ||
+          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
+          el.closest('.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
+      for (const attr of ['aria-label', 'title']) {
+        const value = el.getAttribute(attr);
+        const out = JP.get(value);
+        if (out && value !== out) el.setAttribute(attr, out);
+      }
+    }
+  }
+
+  function translateTextNode(node) {
+    if (!isLocalizationUI(node)) return;
+    const text = clean(node.nodeValue);
+    if (!text || text.length > 500) return;
+    // Dynamic replacements belong to their specific UI contexts. In particular,
+    // never parse actor names or dates from arbitrary text that resembles a UI.
+    const relative = isNativeLocalizationTimestamp(node.parentElement) && text.match(/^(\d+)([smhd])$/);
+    const units = { s: '秒前', m: '分前', h: '時間前', d: '日前' };
+    const out = relative ? relative[1] + units[relative[2]] : JP.get(text);
+    if (out && out !== text) replaceLocalizationText(node, out);
+  }
+
+  function patchUI(root = document) {
+    localizationScopeNodes(root).forEach(translateTextNode);
+    patchUIAttributes(root);
+  }
+
+  function notificationTextNodes(root = document) {
+    return localizationScopeNodes(root).filter(node => localizationNotificationAction(node));
+  }
+
+  function nearestUsefulSibling(node, direction) {
+    let current = direction < 0 ? node.previousSibling : node.nextSibling;
+    while (current && !clean(current.textContent)) current = direction < 0 ? current.previousSibling : current.nextSibling;
+    return current;
   }
 
   function patchNotificationConnectors(root = document) {
+    patchNotificationGrammar(root);
+  }
+
+  function patchNotificationGrammar(root = document) {
     if (!location.pathname.startsWith('/notifications')) return;
-
-    const nodes = notificationTextNodes(root);
-
-    for (const node of nodes) {
-      const raw = node.nodeValue || '';
-      const t = clean(raw);
-      if (!t || t.length > 64) continue;
-
-      let out = null;
-      let m;
-
-      if (/^and$/i.test(t)) {
-        out = 'と';
-      } else if ((m = t.match(/^and\s+(\d+)\s+others?$/i))) {
-        out = `とそのほか${m[1]}人`;
-      } else if ((m = t.match(/^(\d+)\s+others?$/i))) {
-        out = `そのほか${m[1]}人`;
-      }
-
-      if (out) node.nodeValue = raw.replace(t, out);
-    }
-
-    for (const node of nodes) {
-      const t = clean(node.nodeValue || '');
-      if (!t) continue;
-
-      if (/^others?$/i.test(t)) {
-        const parent = node.parentNode;
-        if (!parent) continue;
-
-        const prev = nearestUsefulSibling(node, -1);
-        const pt = clean(prev?.textContent);
-
-        if (/^\d+$/.test(pt)) {
-          const n = pt;
-
-          if (prev.nodeType === Node.TEXT_NODE) {
-            prev.nodeValue = `そのほか${n}人`;
-          } else if (prev instanceof Element && !prev.children.length) {
-            prev.textContent = `そのほか${n}人`;
-          } else {
-            node.nodeValue = `そのほか${n}人`;
-          }
-
-          if (clean(node.nodeValue || '') !== `そのほか${n}人`) {
-            node.nodeValue = '';
-          }
+    for (const action of notificationTextNodes(root)) {
+      const context = localizationNotificationAction(action);
+      const paragraph = context.paragraph;
+      // Mentions/quotes have a separate action paragraph and need no actor
+      // particles. Never reach into a previous notification to find an actor.
+      if (context.element === paragraph) continue;
+      if (!/^(?:さん)?が?あなた/.test(clean(action.nodeValue))) continue;
+      const actorElements = [...paragraph.children].filter(el => el.matches('span.font-extrabold'));
+      if (!actorElements.length) continue;
+      const siblings = [...paragraph.childNodes];
+      const actionIndex = siblings.indexOf(context.element);
+      if (actionIndex < 0) continue;
+      const before = siblings.slice(0, actionIndex);
+      const directText = before.filter(node => node.nodeType === Node.TEXT_NODE);
+      for (const node of directText) {
+        const text = clean(node.nodeValue);
+        if (!text && node.nodeValue) node.nodeValue = '';
+        else if (/^and$/i.test(text)) node.nodeValue = 'さんと';
+        else if (text === ',') node.nodeValue = 'さん、';
+        else {
+          const together = text.match(/^and\s+(\d+)\s+others?$/i);
+          if (together) replaceLocalizationText(node, `さんとそのほか${together[1]}人`);
         }
       }
-
-      if (/^\d+$/.test(t)) {
-        const next = nearestUsefulSibling(node, 1);
-        const nt = clean(next?.textContent);
-
-        if (/^others?$/i.test(nt)) {
-          const n = t;
-          node.nodeValue = `そのほか${n}人`;
-
-          if (next.nodeType === Node.TEXT_NODE) {
-            next.nodeValue = '';
-          } else if (next instanceof Element && !next.children.length) {
-            next.textContent = '';
-          }
+      for (let i = 0; i < before.length; i++) {
+        const node = before[i];
+        if (node.nodeType !== Node.TEXT_NODE || !/^\d+$/.test(clean(node.nodeValue))) continue;
+        const next = before.slice(i + 1).find(sibling => clean(sibling.textContent));
+        if (next?.nodeType === Node.TEXT_NODE && /^others?$/i.test(clean(next.nodeValue))) {
+          replaceLocalizationText(node, `そのほか${clean(node.nodeValue)}人`);
+          next.nodeValue = '';
         }
       }
-    }
-
-    const main = document.querySelector('main');
-    if (!main) return;
-
-    for (const el of main.querySelectorAll('span,small,strong,a,button,div,p')) {
-      if (!el.isConnected || el.closest('textarea,input,[contenteditable="true"]')) continue;
-      if (el.children.length > 1) continue;
-
-      const t = clean(el.textContent);
-      if (!t || t.length > 64) continue;
-
-      let m;
-
-      if ((m = t.match(/^and\s+(\d+)\s+others?$/i))) {
-        el.textContent = `とそのほか${m[1]}人`;
-      } else if ((m = t.match(/^(\d+)\s+others?$/i))) {
-        el.textContent = `そのほか${m[1]}人`;
-      } else if (/^and$/i.test(t)) {
-        el.textContent = 'と';
-      }
-    }
-  }
-
-  function isMobileSafari() {
-    const ua = navigator.userAgent || '';
-
-    return (
-      /Safari/i.test(ua) &&
-      !/CriOS|Chrome|FxiOS|EdgiOS|OPiOS/i.test(ua) &&
-      (
-        /iPhone|iPad|iPod/i.test(ua) ||
-        (
-          navigator.platform === 'MacIntel' &&
-          navigator.maxTouchPoints > 1
-        )
-      )
-    );
-  }
-
-  function patchSafariTopTitle() {
-    if (!isMobileSafari()) return;
-
-    const candidates = [
-      ...document.querySelectorAll(
-        'header h1,header h2,header span,' +
-        'main h1,main h2,' +
-        '[role="banner"] h1,' +
-        '[role="banner"] h2,' +
-        '[role="banner"] span'
-      )
-    ];
-
-    for (const el of candidates) {
-      if (!el.isConnected || el.children.length) continue;
-
-      const rect = el.getBoundingClientRect();
-
-      if (
-        rect.top < 0 ||
-        rect.top > 140 ||
-        rect.width <= 0 ||
-        rect.height <= 0
-      ) {
-        continue;
-      }
-
-      if (clean(el.textContent) === 'ツイート') {
-        el.textContent = 'Twitter';
-      }
+      const actionText = clean(action.nodeValue);
+      if (!/^あなた/.test(actionText)) continue;
+      const previous = before.slice().reverse().find(node => clean(node.textContent));
+      if (!previous) continue;
+      const prefix = previous.nodeType === Node.TEXT_NODE && /そのほか\d+人$/.test(clean(previous.nodeValue)) ? 'が' : 'さんが';
+      replaceLocalizationText(action, prefix + actionText);
     }
   }
 
   function patchNotificationParticles(root = document) {
-    if (!location.pathname.startsWith('/notifications')) return;
-
-    const main =
-      root instanceof Element && root.matches('main')
-        ? root
-        : root.querySelector?.('main') || document.querySelector('main');
-
-    if (!main) return;
-
-    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    let node;
-    while ((node = walker.nextNode())) {
-      const parent = node.parentElement;
-      if (!parent?.isConnected) continue;
-      if (parent.closest('textarea,input,[contenteditable="true"],script,style')) continue;
-      nodes.push(node);
-    }
-
-    const prevUseful = current => {
-      const index = nodes.indexOf(current);
-      for (let i = index - 1; i >= 0; i--) {
-        const t = clean(nodes[i].nodeValue || '');
-        if (t) return { node: nodes[i], text: t };
-      }
-      return null;
-    };
-
-    for (const current of nodes) {
-      const raw = current.nodeValue || '';
-      const t = clean(raw);
-      if (!t) continue;
-
-      let out = null;
-      if (/^と$/u.test(t)) {
-        out = 'さんと';
-      } else if (/^とそのほか(\d+)人$/u.test(t)) {
-        out = t.replace(/^と/u, 'さんと');
-      }
-
-      if (out && out !== t) current.nodeValue = raw.replace(t, out);
-    }
-
-    const actionPatterns = [
-      /^あなたのツイートをお気に入りに登録しました/u,
-      /^あなたのツイートをリツイートしました/u,
-      /^あなたをフォローしました/u,
-      /^あなたを@ツイートしました/u,
-      /^あなたのツイートに返信しました/u,
-      /^あなたに返信しました/u,
-      /^あなたの返信をお気に入りに登録しました/u,
-      /^あなたの返信をリツイートしました/u
-    ];
-
-    for (const current of nodes) {
-      const raw = current.nodeValue || '';
-      const t = clean(raw);
-      if (!t || !actionPatterns.some(re => re.test(t))) continue;
-      if (/^(?:さん)?が/u.test(t)) continue;
-
-      const prev = prevUseful(current);
-      if (!prev) continue;
-
-      const prefix = /人$/u.test(prev.text) || /さん$/u.test(prev.text)
-        ? 'が'
-        : 'さんが';
-
-      current.nodeValue = raw.replace(t, `${prefix}${t}`);
-    }
+    patchNotificationGrammar(root);
   }
 
   function patchNotificationFollowGrammar(root = document) {
-    if (!location.pathname.startsWith('/notifications')) return;
-    const main = root instanceof Element && root.matches('main')
-      ? root
-      : root.querySelector?.('main') || document.querySelector('main');
-    if (!main) return;
-
-    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    let node;
-    while ((node = walker.nextNode())) nodes.push(node);
-
-    // The notification UI splits actor names, "and N others", and the action
-    // into separate text nodes. Follow notifications must read
-    // "AさんとそのほかN人があなたをフォローしました", never "N人さんが".
-    for (const action of nodes) {
-      const t = clean(action.nodeValue);
-      if (!/^あなたをフォローしました$/u.test(t)) continue;
-
-      let previous = null;
-      for (let i = nodes.indexOf(action) - 1; i >= 0; i--) {
-        const pt = clean(nodes[i].nodeValue);
-        if (pt) { previous = nodes[i]; break; }
-      }
-      if (!previous) continue;
-
-      const p = clean(previous.nodeValue);
-      if (/^(?:さんと)?そのほか\d+人(?:さん)?$/u.test(p)) {
-        previous.nodeValue = previous.nodeValue.replace(/さん$/u, '');
-        if (!/^が/u.test(t)) action.nodeValue = action.nodeValue.replace(t, 'があなたをフォローしました');
-      } else if (/人さん$/u.test(p)) {
-        previous.nodeValue = previous.nodeValue.replace(/人さん$/u, '人');
-        if (!/^が/u.test(t)) action.nodeValue = action.nodeValue.replace(t, 'があなたをフォローしました');
-      }
-    }
-
-    // Final cleanup for already-composed follow notification text.
-    for (const n of nodes) {
-      const raw = n.nodeValue || '';
-      if (!/フォローしました/u.test(raw)) continue;
-      n.nodeValue = raw
-        .replace(/そのほか(\d+)人さんがあなたをフォローしました/gu, 'そのほか$1人があなたをフォローしました')
-        .replace(/(\d+)人さんがあなたをフォローしました/gu, '$1人があなたをフォローしました');
-    }
+    patchNotificationGrammar(root);
   }
 
-  function patchReplyingTo(
-    root =
-      document
-  ) {
-    const scope =
-      root instanceof Element
-        ? root
-        : document;
-
-    const labels = [];
-
-    if (
-      scope instanceof Element &&
-      !scope.children.length &&
-      /^(?:Replying\s+to|返信先[:：]?)$/i.test(clean(scope.textContent))
-    ) {
-      labels.push(scope);
-    }
-
-    scope.querySelectorAll?.('span,div,p,small').forEach(
-      el => {
-        if (
-          !el.children.length &&
-          /^(?:Replying\s+to|返信先[:：]?)$/i.test(clean(el.textContent))
-        ) {
-          labels.push(el);
-        }
-      }
-    );
-
-    for (const label of labels) {
-      if (/^Replying\s+to$/i.test(clean(label.textContent))) {
-        label.textContent = '返信先:';
-      }
-
-      let box = label.parentElement;
-
-      for (let depth = 0; box && depth < 4; depth++, box = box.parentElement) {
-        const handles = [
-          ...box.querySelectorAll('a,span,strong')
-        ].filter(
-          el =>
-            !el.children.length &&
-            /^@[A-Za-z0-9_.-]{1,80}(?:さん)?$/.test(clean(el.textContent))
-        );
-
-        if (!handles.length) continue;
-
-        handles.forEach(
-          el => {
-            const handle = clean(el.textContent);
-            if (!/さん$/.test(handle)) {
-              el.textContent = `${handle}さん`;
-            }
-          }
-        );
-
-        break;
+  function patchReplyingTo(root = document) {
+    for (const node of localizationScopeNodes(root)) {
+      if (/^Replying to$/i.test(clean(node.nodeValue)) && isLocalizationUI(node)) {
+        replaceLocalizationText(node, '返信先:');
       }
     }
   }
 
   function patchInputs(root = document) {
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
     const list = [];
-
-    if (root instanceof Element && root.matches('input[placeholder],textarea[placeholder]')) {
-      list.push(root);
-    }
-
-    root.querySelectorAll?.('input[placeholder],textarea[placeholder]').forEach(el => list.push(el));
-
+    if (host instanceof Element && host.matches('input[placeholder],textarea[placeholder]')) list.push(host);
+    host?.querySelectorAll?.('input[placeholder],textarea[placeholder]').forEach(el => list.push(el));
+    const placeholders = new Map([
+      ["What's happening?", 'いまどうしてる？'], ["What's happening?!", 'いまどうしてる？'],
+      ['What’s happening?', 'いまどうしてる？'], ['Post your reply', '返信をツイート'],
+      ['Add your thoughts', 'コメントを追加…'], ['Add your thoughts...', 'コメントを追加…'],
+      ['Add your thoughts…', 'コメントを追加…'], ['Create a post', 'ツイートを作成'],
+      ['Search', '検索'], ['Search Tweet', 'Tweetを検索'], ['Search Twitter', 'Twitterを検索']
+    ]);
     for (const el of list) {
-      const p = el.getAttribute('placeholder') || '';
-
-      if (/what'?s happening/i.test(p)) el.placeholder = '今どうしてる？';
-      else if (/^search/i.test(p)) el.placeholder = '検索';
-      else if (/^post your reply$/i.test(p)) el.placeholder = '返信をツイート';
-      else if (/^add your thoughts/i.test(p)) el.placeholder = 'コメントを追加…';
+      if (isOwnedLocalizationElement(el) ||
+          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
+      const value = el.getAttribute('placeholder');
+      const out = placeholders.get(value) || JP.get(value);
+      if (out && out !== value) el.setAttribute('placeholder', out);
     }
   }
 
-  function hideAffiliation() {
-    document.querySelectorAll('span,p,div,a,small').forEach(el => {
-      if (
-        el.isConnected &&
-        !el.children.length &&
-        /^Not Affiliated with X$/i.test(clean(el.textContent))
-      ) {
-        el.style.setProperty('display', 'none', 'important');
-      }
-    });
-  }
 
-  function patchBrand() {
-    document.querySelectorAll('img').forEach(img => {
-      if (!img.isConnected || img.dataset.ctBrandPatched === '1') return;
-      if (img.closest('article')) return;
-
-      const alt = clean(img.getAttribute('alt') || '');
-      const title = clean(img.getAttribute('title') || '');
-      const rawSrc = img.getAttribute('src') || '';
-
-      let path = '';
-
-      try {
-        path = new URL(rawSrc, location.href).pathname;
-      } catch {
-        path = rawSrc;
-      }
-
-      if (/avatar|profile|media|photo|processed|firebase/i.test(`${alt} ${title} ${path}`)) return;
-
-      const isBrandAsset =
-        /\/assets\/brand\/[^/]*(?:bird|logo|twitter|tweet)[^/]*\.(?:svg|png|webp)$/i
-          .test(path);
-
-      const isExplicitBrandAlt =
-        /^(?:twitter|tweet|twitter logo|tweet logo|brand logo|bird logo)$/i
-          .test(`${alt} ${title}`.trim());
-
-      if (!isBrandAsset && !isExplicitBrandAlt) return;
-
-      const r = img.getBoundingClientRect();
-      if (r.width > 80 || r.height > 80) return;
-
-      img.src = LOGO;
-      img.classList.add('ct-twitter-logo');
-      img.dataset.ctBrandPatched = '1';
-    });
-  }
-
-  function requestJSON(url, headers = {}) {
-    const options = {
-      method: 'GET',
-      url,
-      timeout: 12000,
-      headers: {
-        Accept: 'application/json',
-        ...headers
-      }
-    };
-
-    const runGM = fn => new Promise(resolve => {
-      let settled = false;
-
-      const finish = response => {
-        if (settled) return;
-        settled = true;
-
-        try {
-          resolve(
-            response &&
-            response.status >= 200 &&
-            response.status < 300
-              ? JSON.parse(response.responseText)
-              : null
-          );
-        } catch {
-          resolve(null);
-        }
-      };
-
-      try {
-        const result = fn({
-          ...options,
-          onload: finish,
-          onerror: () => finish(null),
-          ontimeout: () => finish(null)
-        });
-
-        if (result && typeof result.then === 'function') {
-          result.then(finish).catch(() => finish(null));
-        }
-      } catch {
-        finish(null);
-      }
-    });
-
-    if (typeof GM_xmlhttpRequest === 'function') {
-      return runGM(GM_xmlhttpRequest);
-    }
-
-    if (typeof globalThis.GM?.xmlHttpRequest === 'function') {
-      return runGM(globalThis.GM.xmlHttpRequest.bind(globalThis.GM));
-    }
-
-    return fetch(url, {
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        ...headers
-      }
-    })
-      .then(r => r.ok ? r.json() : null)
-      .catch(() => null);
-  }
-
-  async function getCachedAuth(force = false) {
-    const now = Date.now();
-
-    if (
-      !force &&
-      authCacheCheckedAt &&
-      now - authCacheCheckedAt < 5 * 60 * 1000
-    ) {
-      return authCache;
-    }
-
-    if (authCachePending) return authCachePending;
-
-    authCachePending = getAuth()
-      .then(auth => {
-        authCache = auth?.token ? auth : null;
-        authCacheCheckedAt = Date.now();
-        return authCache;
-      })
-      .catch(() => {
-        authCache = null;
-        authCacheCheckedAt = Date.now();
-        return null;
-      })
-      .finally(() => {
-        authCachePending = null;
-      });
-
-    return authCachePending;
-  }
-
-  function fetchProfile(username) {
-  const key = normUser(username);
-  if (!key) return Promise.resolve(null);
-  if (profileCache.has(key)) return Promise.resolve(profileCache.get(key));
-  if (profilePending.has(key)) return profilePending.get(key);
-
-  const promise = getAuth()
-    .then(auth => {
-      if (!auth?.token) return null;
-      return requestJSON(
-        PROFILE_API + encodeURIComponent(username),
-        { Authorization: `Bearer ${auth.token}` }
-      );
-    })
-    .then(json => {
-      const user =
-        json?.user ??
-        json?.profile ??
-        json?.data?.user ??
-        json?.data?.profile ??
-        json?.data ??
-        json;
-
-      if (user) profileCache.set(key, user);
-      profilePending.delete(key);
-      return user || null;
-    })
-    .catch(() => {
-      profilePending.delete(key);
-      return null;
-    });
-
-  profilePending.set(key, promise);
-  return promise;
-}
-
-  function userFromHref(href) {
+  function userFromHref(
+    href
+  ) {
     try {
       const m =
-        new URL(href, location.origin)
+        new URL(
+          href,
+          location.origin
+        )
           .pathname
-          .match(/^\/user\/([^/?#]+)/i);
+          .match(
+            /^\/user\/([^/?#]+)/i
+          );
 
       return m
         ? validUser(
@@ -1362,394 +2432,103 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
             )
           )
         : null;
+
     } catch {
       return null;
     }
   }
 
-  function articleAuthor(article) {
-    if (!article) return null;
+  function articleAuthor(
+    article
+  ) {
+    if (!article) {
+      return null;
+    }
 
-    for (const el of article.querySelectorAll(
-      'button[aria-label],a[href],span,div'
-    )) {
+    for (
+      const el of
+      article.querySelectorAll(
+        'button[aria-label],a[href],span,div'
+      )
+    ) {
       let m =
         (
-          el.getAttribute?.('aria-label') ||
-          ''
+          el.getAttribute?.(
+            'aria-label'
+          ) || ''
         )
-          .match(/^View @(.+?)'s profile$/i);
+          .match(
+            /^View @(.+?)'s profile$/i
+          );
 
-      if (m) return validUser(m[1]);
+      if (m) {
+        return validUser(
+          m[1]
+        );
+      }
 
       const user =
         userFromHref(
-          el.getAttribute?.('href') ||
-          ''
+          el.getAttribute?.(
+            'href'
+          ) || ''
         );
 
-      if (user) return user;
+      if (user) {
+        return user;
+      }
 
       if (
         !el.children.length &&
         (
           m =
-            clean(el.textContent)
+            clean(
+              el.textContent
+            )
               .match(
                 /^@([A-Za-z0-9_.-]{1,80})$/
               )
         )
       ) {
-        return validUser(m[1]);
+        return validUser(
+          m[1]
+        );
       }
     }
 
     return null;
   }
 
-  function founderValue(value) {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ''
-    ) {
-      return null;
-    }
-
-    const raw = String(value).trim();
-
-    if (!/^\d+$/.test(raw)) {
-      return null;
-    }
-
-    return raw.padStart(5, '0');
-  }
-
-  function inspectFounderObject(obj, username) {
-    if (!obj || typeof obj !== 'object') {
-      return null;
-    }
-
-    const wanted = normUser(username);
-
-    if (
-      normUser(obj.authorUsername) === wanted &&
-      (
-        obj.authorFoundingMemberNumber !== undefined ||
-        obj.authorName !== undefined ||
-        obj.authorDisplayName !== undefined
-      )
-    ) {
-      return {
-        number:
-          founderValue(
-            obj.authorFoundingMemberNumber
-          ),
-
-        displayName:
-          clean(
-            obj.authorName ||
-            obj.authorDisplayName ||
-            ''
-          ) || null
-      };
-    }
-
-    if (
-      normUser(obj.username) === wanted &&
-      (
-        obj.foundingMemberNumber !== undefined ||
-        obj.displayName !== undefined ||
-        obj.name !== undefined
-      )
-    ) {
-      return {
-        number:
-          founderValue(
-            obj.foundingMemberNumber
-          ),
-
-        displayName:
-          clean(
-            obj.displayName ||
-            obj.name ||
-            ''
-          ) || null
-      };
-    }
-
-    return null;
-  }
-
-  function searchFounderObject(
-    root,
-    username,
-    maxDepth = 4
-  ) {
-    const seen = new WeakSet();
-    let visited = 0;
-
-    function walk(value, depth) {
-      if (
-        !value ||
-        typeof value !== 'object' ||
-        depth > maxDepth ||
-        visited > 1200 ||
-        seen.has(value)
-      ) {
-        return null;
-      }
-
-      seen.add(value);
-      visited += 1;
-
-      const direct =
-        inspectFounderObject(
-          value,
-          username
-        );
-
-      if (
-        direct?.number ||
-        direct?.displayName
-      ) {
-        return direct;
-      }
-
-      let entries;
-
-      try {
-        entries =
-          Object.entries(value);
-      } catch {
-        return null;
-      }
-
-      const priority =
-        new Set([
-          'tweet',
-          'post',
-          'user',
-          'profile',
-          'data',
-          'item',
-          'notification',
-          'parentPost',
-          'quotedPost',
-          'originalPost'
-        ]);
-
-      for (
-        const [
-          key,
-          child
-        ] of
-        entries
-      ) {
-        if (
-          !priority.has(key) ||
-          !child ||
-          typeof child !==
-            'object'
-        ) {
-          continue;
-        }
-
-        const hit =
-          walk(
-            child,
-            depth + 1
-          );
-
-        if (hit) return hit;
-      }
-
-      for (
-        const [
-          key,
-          child
-        ] of
-        entries
-      ) {
-        if (
-          priority.has(key) ||
-          !child ||
-          typeof child !==
-            'object'
-        ) {
-          continue;
-        }
-
-        const hit =
-          walk(
-            child,
-            depth + 1
-          );
-
-        if (hit) return hit;
-      }
-
-      return null;
-    }
-
-    return walk(root, 0);
-  }
-
-  function reactFounderData(
-    element,
-    username
-  ) {
-    if (
-      !element ||
-      !username
-    ) {
-      return null;
-    }
-
-    const keys =
-      Object.keys(element);
-
-    const propsKey =
-      keys.find(
-        key =>
-          key.startsWith(
-            '__reactProps$'
-          )
-      );
-
-    const fiberKey =
-      keys.find(
-        key =>
-          key.startsWith(
-            '__reactFiber$'
-          )
-      );
-
-    if (propsKey) {
-      const hit =
-        searchFounderObject(
-          element[propsKey],
-          username
-        );
-
-      if (hit) return hit;
-    }
-
-    let fiber =
-      fiberKey
-        ? element[fiberKey]
-        : null;
-
-    for (
-      let depth = 0;
-      fiber && depth < 16;
-      depth += 1,
-      fiber = fiber.return
-    ) {
-      const hit =
-        searchFounderObject(
-          fiber.memoizedProps,
-          username
-        ) ||
-        searchFounderObject(
-          fiber.pendingProps,
-          username
-        );
-
-      if (hit) return hit;
-    }
-
-    return null;
-  }
-
-  function findAuthorLeaf(
-    article,
-    username,
-    displayName = ''
-  ) {
-    const target =
-      normUser(username);
-
-    const display =
-      clean(displayName);
-
-    return [
-      ...article.querySelectorAll(
-        'button,span,a,div,strong'
-      )
-    ]
-      .find(el => {
-        if (
-          !el.isConnected ||
-          el.children.length
-        ) {
-          return false;
-        }
-
-        const t =
-          clean(
-            el.textContent
-          );
-
-        return (
-          normUser(t) === target ||
-          normUser(
-            t.replace(/^@/, '')
-          ) === target ||
-          (
-            display &&
-            t === display
-          )
-        );
-      }) ||
-      null;
-  }
-
-  async function patchArticle(article) {
-    if (!article?.isConnected) return;
-    const username = articleAuthor(article);
-    if (!username) return;
-    const user = await fetchProfile(username);
-    if (!user || !article.isConnected) return;
-    const displayName = clean(user.displayName || user.name || username);
-    const leaf = findAuthorLeaf(article, username);
-    if (!leaf || !displayName) return;
-    leaf.textContent = displayName;
-    leaf.classList.add('ct-author-name');
-    let badge = leaf.parentElement?.querySelector(':scope > .ct-founder');
-    const number = user.foundingMemberNumber;
-    if (number !== null && number !== undefined && number !== '') {
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.className = 'ct-founder';
-        leaf.after(badge);
-      }
-      const founder = String(number).padStart(5, '0');
-      badge.textContent = `#${founder}`;
-      badge.title = `Founder Number #${founder}`;
-    } else {
-      badge?.remove();
-    }
-  }
 
   function collectArticles(
-    root = document
+    root =
+      document
   ) {
     const set =
       new Set();
 
-    if (root instanceof Element) {
+    if (
+      root instanceof Element
+    ) {
       if (
-        root.matches('article')
+        root.matches(
+          'article'
+        )
       ) {
-        set.add(root);
+        set.add(
+          root
+        );
       }
 
       const parent =
-        root.closest('article');
+        root.closest(
+          'article'
+        );
 
       if (parent) {
-        set.add(parent);
+        set.add(
+          parent
+        );
       }
     }
 
@@ -1758,78 +2537,44 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     )
       .forEach(
         article =>
-          set.add(article)
+          set.add(
+            article
+          )
       );
 
     return set;
   }
 
   function patchFeed(
-    root = document
+    root =
+      document
   ) {
     for (
       const article of
-      collectArticles(root)
+      collectArticles(
+        root
+      )
     ) {
-      patchArticle(article);
+      patchArticle(
+        article
+      );
     }
   }
 
-  async function patchRetweetRows(
-    root = document
-  ) {
-    const leaves = [];
-
-    root.querySelectorAll?.(
-      'span,div,p'
-    )
-      .forEach(el => {
-        if (!el.children.length) {
-          leaves.push(el);
-        }
-      });
-
-    for (
-      const el of
-      leaves
-    ) {
-      const t =
-        clean(
-          el.textContent
-        );
-
-      const m =
-        t.match(
-          /^@?([A-Za-z0-9_.-]{1,80})\s+(?:reposted|retweeted)$/i
-        );
-
-      if (!m) continue;
-
-      const username =
-        validUser(
-          m[1]
-        );
-
-      const user =
-        username
-          ? await fetchProfile(
-              username
-            )
-          : null;
-
-      if (
-        !user ||
-        !el.isConnected
-      ) {
-        continue;
+  function patchRetweetRows(root = document) {
+    for (const node of localizationScopeNodes(root)) {
+      const el = node.parentElement;
+      if (isProtectedLocalizationElement(el) || !el.matches('span')) continue;
+      const row = el.parentElement;
+      // In the current client this metadata row is a direct article child,
+      // marked by the repeat icon. Never infer a reposter from post text.
+      if (!row?.parentElement?.matches('article') || !row.querySelector('svg.lucide-repeat')) continue;
+      const text = clean(node.nodeValue);
+      if (text === 'You reposted') replaceLocalizationText(node, 'あなたがリツイートしました');
+      else {
+        const match = text.match(/^(@?[A-Za-z0-9_.-]{1,80})\s+reposted$/i);
+        if (match) replaceLocalizationText(node, `${match[1]}さんがリツイートしました`);
       }
-
-      el.textContent =
-        `${
-          user.displayName ||
-          user.name ||
-          username
-        }さんがリツイートしました`;
     }
   }
 
@@ -1863,7 +2608,11 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         'main span,main a,main div,main p'
       )
     ) {
-      if (el.children.length) continue;
+      if (
+        el.children.length
+      ) {
+        continue;
+      }
 
       const r =
         el.getBoundingClientRect();
@@ -1893,280 +2642,56 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     return null;
   }
 
-  async function patchProfileFounder() {
-    const username =
-      routeUser() ||
-      ownProfileUser();
 
-    if (!username) return;
-
-    const main =
-      document.querySelector(
-        'main'
-      ) ||
-      document;
-
-    const handle =
+  function articleText(
+    article
+  ) {
+    return (
       [
-        ...main.querySelectorAll(
-          'p,span,a,div'
+        ...article.querySelectorAll(
+          'p,div[dir="auto"],span'
         )
       ]
-        .find(el =>
-          !el.children.length &&
-          clean(
-            el.textContent
-          ) ===
-            `@${username}`
-        );
-
-    const embedded =
-      reactFounderData(
-        handle || main,
-        username
-      ) ||
-      reactFounderData(
-        main,
-        username
-      );
-
-    let user = null;
-
-    if (
-      !embedded?.number ||
-      !embedded?.displayName
-    ) {
-      user =
-        await fetchProfile(
-          username
-        );
-    }
-
-    const founder =
-      embedded?.number ||
-      founderValue(
-        user?.foundingMemberNumber
-      );
-
-    if (!founder) return;
-
-    const displayName =
-      clean(
-        embedded?.displayName ||
-        user?.displayName ||
-        user?.name ||
-        username
-      );
-
-    const nameEl =
-      [
-        ...main.querySelectorAll(
-          'h1,h2,h3,span,a,div,strong'
+        .filter(
+          el =>
+            !el.children.length
         )
-      ]
-        .find(el => {
-          if (
-            !el.isConnected ||
-            el.children.length ||
-            el.closest(
-              'article'
-            ) ||
-            el.classList.contains(
-              'ct-profile-founder'
-            )
-          ) {
-            return false;
-          }
-
-          const r =
-            el.getBoundingClientRect();
-
-          if (
-            r.top < 30 ||
-            r.top > 520 ||
-            r.width <= 0 ||
-            r.height <= 0
-          ) {
-            return false;
-          }
-
-          const t =
+        .map(
+          el =>
             clean(
               el.textContent
-            );
-
-          return (
-            t === displayName ||
-            normUser(t) ===
-              normUser(username) ||
-            t === `@${username}`
-          );
-        });
-
-    if (!nameEl) return;
-
-    if (
-      displayName &&
-      !/^@/.test(
-        clean(
-          nameEl.textContent
+            )
         )
-      ) &&
-      clean(
-        nameEl.textContent
-      ) !== displayName
-    ) {
-      nameEl.textContent =
-        displayName;
-    }
-
-    let badge =
-      nameEl.parentElement
-        ?.querySelector(
-          ':scope > .ct-profile-founder'
-        );
-
-    if (!badge) {
-      badge =
-        document.createElement(
-          'span'
-        );
-
-      badge.className =
-        'ct-profile-founder';
-
-      nameEl.after(
-        badge
-      );
-    }
-
-    badge.textContent =
-      `#${founder}`;
-
-    badge.title =
-      ` #${founder}`;
-  }
-
-  function articleId(article) {
-    for (
-      const el of
-      article.querySelectorAll(
-        'a[href]'
-      )
-    ) {
-      const href =
-        el.getAttribute(
-          'href'
-        ) ||
-        '';
-
-      const m =
-        href.match(
-          /\/(?:post|status|tweet)\/([^/?#]+)/i
-        );
-
-      if (m) return m[1];
-    }
-
-    return (
-      article.getAttribute(
-        'data-post-id'
-      ) ||
-      article.getAttribute(
-        'data-tweet-id'
-      ) ||
+        .filter(
+          t =>
+            t.length > 2 &&
+            !/^@/.test(t) &&
+            !/^\d+[smhd]$/.test(t) &&
+            !JP.has(t)
+        )
+        .sort(
+          (a, b) =>
+            b.length -
+            a.length
+        )[0]
+      ||
       ''
     );
   }
 
-  function articleText(article) {
-    return [
-      ...article.querySelectorAll(
-        'p,div[dir="auto"],span'
-      )
-    ]
-      .filter(
-        el =>
-          !el.children.length
-      )
-      .map(
-        el =>
-          clean(
-            el.textContent
-          )
-      )
-      .filter(
-        t =>
-          t.length > 2 &&
-          !/^@/.test(t) &&
-          !/^\d+[smhd]$/.test(t) &&
-          !JP.has(t)
-      )
-      .sort(
-        (a,b) =>
-          b.length -
-          a.length
-      )[0] ||
-      '';
-  }
-
-  function articleAvatar(article) {
+  function articleAvatar(
+    article
+  ) {
     return (
       article.querySelector(
         'img[src*="avatar"],img[alt*="profile" i]'
-      )?.src ||
+      )
+        ?.src
+      ||
       ''
     );
   }
 
-  function snapshotFavorite(article) {
-    const id =
-      articleId(article);
-
-    if (!id) return null;
-
-    const username =
-      articleAuthor(article) ||
-      '';
-
-    const name =
-      clean(
-        article.querySelector(
-          '.ct-author-name,strong'
-        )?.textContent
-      ) ||
-      username;
-
-    const href =
-      [
-        ...article.querySelectorAll(
-          'a[href]'
-        )
-      ]
-        .map(
-          el =>
-            el.href
-        )
-        .find(
-          h =>
-            /(post|status|tweet)\//i
-              .test(h)
-        ) ||
-      '';
-
-    return {
-      id,
-      username,
-      name,
-      text:
-        articleText(article),
-      avatar:
-        articleAvatar(article),
-      href,
-      savedAt:
-        Date.now()
-    };
-  }
 
   function loadFavorites() {
     const items =
@@ -2175,13 +2700,21 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         []
       );
 
-    return Array.isArray(items)
+    return Array.isArray(
+      items
+    )
       ? items
       : [];
   }
 
-  function saveFavorite(item) {
-    if (!item?.id) return;
+  function saveFavorite(
+    item
+  ) {
+    if (
+      !item?.id
+    ) {
+      return;
+    }
 
     saveJSON(
       KEY.favorites,
@@ -2201,7 +2734,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     );
   }
 
-  function removeFavorite(id) {
+  function removeFavorite(
+    id
+  ) {
     saveJSON(
       KEY.favorites,
       loadFavorites()
@@ -2221,14 +2756,18 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
             '[data-testid="tweet-like-action"]'
           );
 
-      if (!button) return;
+      if (!button) {
+        return;
+      }
 
       const article =
         button.closest(
           'article'
         );
 
-      if (!article) return;
+      if (!article) {
+        return;
+      }
 
       const snapshot =
         snapshotFavorite(
@@ -2236,10 +2775,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         );
 
       const wasLiked =
-        button.getAttribute(
-          'aria-pressed'
-        ) ===
-        'true';
+        ctIsLiked(button);
 
       button.classList.remove(
         'ct-star-pop'
@@ -2262,10 +2798,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       setTimeout(
         () => {
           const nowLiked =
-            button.getAttribute(
-              'aria-pressed'
-            ) ===
-            'true';
+            ctIsLiked(button);
 
           if (
             !wasLiked &&
@@ -2285,7 +2818,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
             );
           }
 
-          if (favoritesActive) {
+          if (
+            favoritesActive
+          ) {
             renderFavoritesPanel();
           }
         },
@@ -2295,67 +2830,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     true
   );
 
-  function patchFavoriteButtons(
-    root = document
-  ) {
-    root.querySelectorAll?.(
-      '[data-testid="tweet-like-action"]'
-    )
-      .forEach(
-        button => {
-          const liked =
-            button.getAttribute(
-              'aria-pressed'
-            ) ===
-            'true';
 
-          button.title =
-            liked
-              ? 'お気に入りを解除'
-              : 'お気に入り';
-
-          const aria =
-            button.getAttribute(
-              'aria-label'
-            ) ||
-            '';
-
-          button.setAttribute(
-            'aria-label',
-            aria
-              .replace(
-                /^Like,/i,
-                'お気に入り,'
-              )
-              .replace(
-                /^Unlike,/i,
-                'お気に入りを解除,'
-              )
-          );
-
-          if (liked) {
-            const article =
-              button.closest(
-                'article'
-              );
-
-            const snapshot =
-              article &&
-              snapshotFavorite(
-                article
-              );
-
-            if (snapshot) {
-              saveFavorite(
-                snapshot
-              );
-            }
-          }
-        }
-      );
-  }
-
-  let favoritesActive = false;
+  let favoritesActive =
+    false;
 
   function findRepostTab() {
     if (
@@ -2365,21 +2842,24 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       return null;
     }
 
-    return [
-      ...document.querySelectorAll(
-        'main a,main button,main [role="tab"]'
-      )
-    ]
-      .find(
-        el =>
-          /^(Reposts|Retweets|リツイート)$/i
-            .test(
-              clean(
-                el.textContent
+    return (
+      [
+        ...document.querySelectorAll(
+          'main a,main button,main [role="tab"]'
+        )
+      ]
+        .find(
+          el =>
+            /^(Reposts|Retweets|リツイート)$/i
+              .test(
+                clean(
+                  el.textContent
+                )
               )
-            )
-      ) ||
-      null;
+        )
+      ||
+      null
+    );
   }
 
   function patchFavoriteProfileTab() {
@@ -2393,8 +2873,12 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       '/profile'
     ) {
       tab?.remove();
-      favoritesActive = false;
+
+      favoritesActive =
+        false;
+
       closeFavoritesPanel();
+
       return;
     }
 
@@ -2424,7 +2908,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       const parent =
         ref.parentElement;
 
-      if (!parent) return;
+      if (!parent) {
+        return;
+      }
 
       parent.appendChild(
         tab
@@ -2459,7 +2945,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         'main'
       );
 
-    if (!main) return null;
+    if (!main) {
+      return null;
+    }
 
     const r =
       main.getBoundingClientRect();
@@ -2543,7 +3031,8 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
 
   function localCard(
     item,
-    reply = false
+    reply =
+      false
   ) {
     const row =
       document.createElement(
@@ -2616,10 +3105,14 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       'ct-local-name';
 
     name.textContent =
-      item.name ||
-      item.authorName ||
-      item.username ||
-      item.authorUsername ||
+      item.name
+      ||
+      item.authorName
+      ||
+      item.username
+      ||
+      item.authorUsername
+      ||
       '';
 
     meta.appendChild(
@@ -2627,7 +3120,8 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     );
 
     const username =
-      item.username ||
+      item.username
+      ||
       item.authorUsername;
 
     if (username) {
@@ -2678,14 +3172,15 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   function closeFavoritesPanel() {
     document.getElementById(
       'ct-favorites-panel'
-    )?.remove();
+    )
+      ?.remove();
   }
 
   function renderFavoritesPanel() {
     if (
       !favoritesActive ||
       location.pathname !==
-      '/profile'
+        '/profile'
     ) {
       closeFavoritesPanel();
       return;
@@ -2694,7 +3189,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     const r =
       centerRect();
 
-    if (!r) return;
+    if (!r) {
+      return;
+    }
 
     let panel =
       document.getElementById(
@@ -2710,14 +3207,15 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       panel.id =
         'ct-favorites-panel';
 
-      document.body
-        .appendChild(
-          panel
-        );
+      document.body.appendChild(
+        panel
+      );
     }
 
     panel.style.left =
-      `${Math.round(r.left)}px`;
+      `${Math.round(
+        r.left
+      )}px`;
 
     panel.style.top =
       `${
@@ -2730,7 +3228,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       }px`;
 
     panel.style.width =
-      `${Math.round(r.width)}px`;
+      `${Math.round(
+        r.width
+      )}px`;
 
     panel.style.maxHeight =
       `calc(100vh - ${
@@ -2749,6 +3249,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       panelHead(
         '★ お気に入り',
         'このブラウザだけに保存されます',
+
         () => {
           favoritesActive =
             false;
@@ -2790,10 +3291,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       return;
     }
 
-    for (
-      const item of
-      data
-    ) {
+    for (const item of data) {
       const row =
         localCard(
           item,
@@ -2814,353 +3312,41 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     }
   }
 
-  function notificationLeaves(
-    root = document
-  ) {
-    const out = [];
-
-    root.querySelectorAll?.(
-      'main p,main span,main div'
-    )
-      .forEach(
-        el => {
-          if (!el.children.length) {
-            const t =
-              clean(
-                el.textContent
-              );
-
-            if (
-              t &&
-              t.length < 500
-            ) {
-              out.push(el);
-            }
-          }
-        }
-      );
-
-    return out;
+  function notificationLeaves(root = document) {
+    return [...new Set(notificationTextNodes(root).map(node => node.parentElement))];
   }
 
-  function patchNotifications(
-    root = document
-  ) {
-    if (
-      !location.pathname
-        .startsWith(
-          '/notifications'
-        )
-    ) {
-      return;
-    }
-
-    patchNotificationConnectors(
-      root
-    );
-
-    patchNotificationParticles(
-      root
-    );
-
-    for (
-      const el of
-      notificationLeaves(root)
-    ) {
-      const t =
-        clean(
-          el.textContent
-        );
-
-      if (!t) continue;
-
-      const out =
-        translateNotification(t) ||
-        JP.get(t) ||
-        dynamicJP(t);
-
-      if (
-        out &&
-        out !== t
-      ) {
-        el.textContent =
-          out;
-      }
-
-      const finalText =
-        out ||
-        t;
-
-      if (
-        /お気に入りに登録しました/
-          .test(
-            finalText
-          )
-      ) {
-        const row =
-          el.closest(
-            'button,[role="button"]'
-          ) ||
-          el.parentElement;
-
-        const svg =
-          row?.querySelector(
-            'svg'
-          );
-
-        if (svg) {
-          svg.parentElement
-            ?.classList.add(
-              'ct-notification-fav-icon'
-            );
-        }
+  function patchNotifications(root = document) {
+    if (!location.pathname.startsWith('/notifications')) return;
+    for (const node of notificationTextNodes(root)) {
+      const context = localizationNotificationAction(node);
+      translateTextNode(node);
+      if (/お気に入りに登録しました/.test(clean(node.nodeValue))) {
+        context.row.querySelector('svg')?.parentElement?.classList.add('ct-notification-fav-icon');
       }
     }
-
-    patchNotificationConnectors(
-      document
-    );
+    patchNotificationGrammar(root);
   }
 
-  function findAuth(
-    value,
-    depth = 0,
-    seen = new WeakSet()
-  ) {
-    if (
-      !value ||
-      typeof value !==
-        'object' ||
-      depth > 7 ||
-      seen.has(value)
-    ) {
-      return null;
-    }
-
-    seen.add(value);
-
-    const token =
-      value?.stsTokenManager
-        ?.accessToken ||
-      value?.accessToken ||
-      value?.tokenManager
-        ?.accessToken ||
-      null;
-
-    const uid =
-      value?.uid ||
-      value?.user?.uid ||
-      value?.userId ||
-      null;
-
-    if (
-      typeof token === 'string' &&
-      token.length > 40
-    ) {
-      return {
-        token,
-        uid
-      };
-    }
-
-    let values = [];
-
-    try {
-      values =
-        Object.values(value);
-    } catch {
-      return null;
-    }
-
-    for (
-      const child of
-      values
-    ) {
-      if (
-        child &&
-        typeof child ===
-          'object'
-      ) {
-        const hit =
-          findAuth(
-            child,
-            depth + 1,
-            seen
-          );
-
-        if (hit) return hit;
-      }
-    }
-
-    return null;
-  }
-
-  function getAuth() {
-    return new Promise(
-      resolve => {
-        let done = false;
-
-        const finish =
-          value => {
-            if (!done) {
-              done = true;
-
-              resolve(
-                value ||
-                null
-              );
-            }
-          };
-
-        for (
-          const storage of
-          [
-            localStorage,
-            sessionStorage
-          ]
-        ) {
-          try {
-            for (
-              let i = 0;
-              i < storage.length;
-              i += 1
-            ) {
-              const key =
-                storage.key(i);
-
-              if (
-                !key ||
-                !/firebase|auth/i
-                  .test(key)
-              ) {
-                continue;
-              }
-
-              const raw =
-                storage.getItem(
-                  key
-                );
-
-              if (!raw) continue;
-
-              let value = raw;
-
-              try {
-                value =
-                  JSON.parse(raw);
-              } catch {}
-
-              const hit =
-                findAuth(value);
-
-              if (hit) {
-                return finish(
-                  hit
-                );
-              }
-            }
-          } catch {}
-        }
-
-        try {
-          const request =
-            indexedDB.open(
-              'firebaseLocalStorageDb'
-            );
-
-          request.onerror =
-            () =>
-              finish(null);
-
-          request.onsuccess =
-            () => {
-              const db =
-                request.result;
-
-              try {
-                if (
-                  !db.objectStoreNames
-                    .contains(
-                      'firebaseLocalStorage'
-                    )
-                ) {
-                  return finish(
-                    null
-                  );
-                }
-
-                const tx =
-                  db.transaction(
-                    'firebaseLocalStorage',
-                    'readonly'
-                  );
-
-                const all =
-                  tx.objectStore(
-                    'firebaseLocalStorage'
-                  )
-                    .getAll();
-
-                all.onerror =
-                  () =>
-                    finish(
-                      null
-                    );
-
-                all.onsuccess =
-                  () => {
-                    for (
-                      const row of
-                      all.result ||
-                      []
-                    ) {
-                      const hit =
-                        findAuth(
-                          row?.value ??
-                          row
-                        );
-
-                      if (hit) {
-                        return finish(
-                          hit
-                        );
-                      }
-                    }
-
-                    finish(null);
-                  };
-              } catch {
-                finish(null);
-              }
-            };
-
-          setTimeout(
-            () =>
-              finish(null),
-            2500
-          );
-        } catch {
-          finish(null);
-        }
-      }
-    );
-  }
 
   function authJSON(
     path,
     auth
   ) {
-    if (!auth?.token) {
+    if (
+      !auth?.token
+    ) {
       return Promise.resolve(
         null
       );
     }
 
     return requestJSON(
-      path.startsWith('http')
+      path.startsWith(
+        'http'
+      )
         ? path
-        : API_ORIGIN +
-          path,
+        : API_ORIGIN + path,
 
       {
         Authorization:
@@ -3174,7 +3360,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     keys = []
   ) {
     if (
-      Array.isArray(json)
+      Array.isArray(
+        json
+      )
     ) {
       return json;
     }
@@ -3218,9 +3406,12 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   const postId =
     post =>
       String(
-        post?.originalPostId ||
-        post?.postId ||
-        post?.id ||
+        post?.originalPostId
+        ||
+        post?.postId
+        ||
+        post?.id
+        ||
         ''
       )
         .trim();
@@ -3228,63 +3419,84 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   const replyCount =
     post =>
       Number(
-        post?.replyCount ??
-        post?.comments ??
-        post?.commentCount ??
-        post?.repliesCount ??
-        post?.reply_count ??
+        post?.replyCount
+        ??
+        post?.comments
+        ??
+        post?.commentCount
+        ??
+        post?.repliesCount
+        ??
+        post?.reply_count
+        ??
         0
-      ) ||
+      )
+      ||
       0;
 
   const author =
     post =>
       validUser(
-        post?.authorUsername ||
-        post?.authorHandle ||
-        post?.author
-          ?.username ||
+        post?.authorUsername
+        ||
+        post?.authorHandle
+        ||
+        post?.author?.username
+        ||
         post?.username
       );
 
   const postText =
     post =>
       String(
-        post?.text ||
-        post?.body ||
-        post?.content ||
-        post?.replyText ||
+        post?.text
+        ||
+        post?.body
+        ||
+        post?.content
+        ||
+        post?.replyText
+        ||
         ''
       );
 
   const postName =
     post =>
       String(
-        post?.authorName ||
-        post?.actorName ||
-        post?.author
-          ?.displayName ||
-        author(post) ||
+        post?.authorName
+        ||
+        post?.actorName
+        ||
+        post?.author?.displayName
+        ||
+        author(post)
+        ||
         ''
       );
 
   const postAvatar =
     post =>
       String(
-        post?.authorAvatar ||
-        post?.actorAvatar ||
-        post?.author
-          ?.avatarUrl ||
-        post?.avatarUrl ||
+        post?.authorAvatar
+        ||
+        post?.actorAvatar
+        ||
+        post?.author?.avatarUrl
+        ||
+        post?.avatarUrl
+        ||
         ''
       );
 
   const postCreated =
     post =>
       String(
-        post?.createdAt ||
-        post?.created_at ||
-        post?.timestamp ||
+        post?.createdAt
+        ||
+        post?.created_at
+        ||
+        post?.timestamp
+        ||
         ''
       );
 
@@ -3295,7 +3507,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         []
       );
 
-    return Array.isArray(list)
+    return Array.isArray(
+      list
+    )
       ? list
       : [];
   }
@@ -3305,12 +3519,19 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     parentId = ''
   ) {
     const id =
-      postId(reply);
+      postId(
+        reply
+      );
 
     const username =
-      author(reply);
+      author(
+        reply
+      );
 
-    if (!id || !username) {
+    if (
+      !id ||
+      !username
+    ) {
       return;
     }
 
@@ -3328,9 +3549,12 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
 
       parentId:
         String(
-          reply?.parentPostId ||
-          reply?.parentId ||
-          parentId ||
+          reply?.parentPostId
+          ||
+          reply?.parentId
+          ||
+          parentId
+          ||
           ''
         ),
 
@@ -3338,7 +3562,8 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         username,
 
       authorName:
-        postName(reply) ||
+        postName(reply)
+        ||
         username,
 
       authorAvatar:
@@ -3348,7 +3573,8 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         postText(reply),
 
       createdAt:
-        postCreated(reply) ||
+        postCreated(reply)
+        ||
         new Date()
           .toISOString(),
 
@@ -3356,8 +3582,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         Date.now(),
 
       read:
-        old?.read ||
-        false
+        old?.read || false
     };
 
     saveJSON(
@@ -3370,11 +3595,12 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         )
       ]
         .sort(
-          (a,b) =>
+          (a, b) =>
             new Date(
               b.createdAt ||
               b.detectedAt
-            ) -
+            )
+            -
             new Date(
               a.createdAt ||
               a.detectedAt
@@ -3387,7 +3613,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     );
   }
 
-  function markReplyRead(id) {
+  function markReplyRead(
+    id
+  ) {
     const list =
       loadReplyNotices();
 
@@ -3408,19 +3636,27 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     );
   }
 
-  let replyBusy = false;
-  let lastFull = 0;
+  let replyBusy =
+    false;
+
+  let lastFull =
+    0;
 
   async function replyWatchTick() {
-    if (replyBusy) return;
+    if (replyBusy) {
+      return;
+    }
 
-    replyBusy = true;
+    replyBusy =
+      true;
 
     try {
       const auth =
         await getAuth();
 
-      if (!auth?.token) {
+      if (
+        !auth?.token
+      ) {
         return;
       }
 
@@ -3432,9 +3668,12 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
 
       const myHandle =
         validUser(
-          me?.username ||
-          me?.handle ||
-          me?.user?.username ||
+          me?.username
+          ||
+          me?.handle
+          ||
+          me?.user?.username
+          ||
           me?.profile?.username
         );
 
@@ -3448,59 +3687,79 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         const notification of
         items(
           notificationsJson,
-          [
-            'notifications'
-          ]
+          ['notifications']
         )
       ) {
         const type =
           String(
-            notification?.type ||
-            notification?.eventType ||
-            notification?.kind ||
-            notification?.notificationType ||
+            notification?.type
+            ||
+            notification?.eventType
+            ||
+            notification?.kind
+            ||
+            notification?.notificationType
+            ||
             ''
           )
             .toUpperCase();
 
         const message =
           String(
-            notification?.message ||
-            notification?.text ||
+            notification?.message
+            ||
+            notification?.text
+            ||
             ''
           );
 
         if (
           !type.includes(
             'REPLY'
-          ) &&
-          !/replied to|返信/i
-            .test(message)
+          )
+          &&
+          !/replied to|返信/i.test(
+            message
+          )
         ) {
           continue;
         }
 
         const object =
-          notification?.reply ||
-          notification?.post ||
-          notification?.tweet ||
+          notification?.reply
+          ||
+          notification?.post
+          ||
+          notification?.tweet
+          ||
           notification;
 
         const id =
-          postId(object) ||
+          postId(
+            object
+          )
+          ||
           String(
-            notification?.postId ||
-            notification?.replyPostId ||
-            notification?.id ||
+            notification?.postId
+            ||
+            notification?.replyPostId
+            ||
+            notification?.id
+            ||
             ''
           );
 
         const username =
           validUser(
-            notification?.actorHandle ||
-            notification?.actorUsername ||
-            notification?.actor?.username ||
-            author(object)
+            notification?.actorHandle
+            ||
+            notification?.actorUsername
+            ||
+            notification?.actor?.username
+            ||
+            author(
+              object
+            )
           );
 
         if (
@@ -3510,38 +3769,57 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
           saveReplyNotice(
             {
               ...object,
+
               id,
 
               authorUsername:
                 username,
 
               authorName:
-                notification?.actorName ||
-                notification?.actorDisplayName ||
-                notification?.actor?.displayName ||
-                postName(object) ||
+                notification?.actorName
+                ||
+                notification?.actorDisplayName
+                ||
+                notification?.actor?.displayName
+                ||
+                postName(
+                  object
+                )
+                ||
                 username,
 
               authorAvatar:
-                notification?.actorAvatar ||
-                notification?.actor?.avatarUrl ||
-                postAvatar(object),
+                notification?.actorAvatar
+                ||
+                notification?.actor?.avatarUrl
+                ||
+                postAvatar(
+                  object
+                ),
 
               text:
-                notification?.replyText ||
-                notification?.postText ||
-                postText(object),
+                notification?.replyText
+                ||
+                notification?.postText
+                ||
+                postText(
+                  object
+                ),
 
               createdAt:
-                notification?.createdAt ||
-                notification?.created_at ||
-                postCreated(object)
+                notification?.createdAt
+                ||
+                notification?.created_at
+                ||
+                postCreated(
+                  object
+                )
             },
 
-            notification
-              ?.parentPostId ||
-            notification
-              ?.targetPostId ||
+            notification?.parentPostId
+            ||
+            notification?.targetPostId
+            ||
             ''
           );
         }
@@ -3557,50 +3835,52 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         postsJson,
         repliesJson
       ] =
-        await Promise.all(
-          [
-            authJSON(
-              `/api/users/${encodeURIComponent(myHandle)}/posts?limit=24`,
-              auth
-            ),
+        await Promise.all([
+          authJSON(
+            `/api/users/${
+              encodeURIComponent(
+                myHandle
+              )
+            }/posts?limit=24`,
+            auth
+          ),
 
-            authJSON(
-              `/api/users/${encodeURIComponent(myHandle)}/replies`,
-              auth
-            )
-          ]
-        );
+          authJSON(
+            `/api/users/${
+              encodeURIComponent(
+                myHandle
+              )
+            }/replies`,
+            auth
+          )
+        ]);
 
       const parents =
         [
           ...items(
             postsJson,
-            [
-              'posts'
-            ]
+            ['posts']
           ),
 
           ...items(
             repliesJson,
-            [
-              'replies'
-            ]
+            ['replies']
           )
         ]
           .filter(
             post =>
-              postId(post) &&
+              postId(post)
+              &&
               replyCount(post) > 0
           )
           .sort(
-            (a,b) =>
+            (a, b) =>
               new Date(
-                postCreated(b) ||
-                0
-              ) -
+                postCreated(b) || 0
+              )
+              -
               new Date(
-                postCreated(a) ||
-                0
+                postCreated(a) || 0
               )
           )
           .slice(
@@ -3625,12 +3905,13 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       const initialized =
         localStorage.getItem(
           KEY.replyInit
-        ) ===
-        '1';
+        ) === '1';
 
       const force =
-        Date.now() -
-        lastFull >
+        Date.now()
+        -
+        lastFull
+        >
         10 *
         60 *
         1000;
@@ -3645,23 +3926,30 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
         parents
       ) {
         const pid =
-          postId(parent);
+          postId(
+            parent
+          );
 
         const count =
-          replyCount(parent);
+          replyCount(
+            parent
+          );
 
         if (
           !force &&
           initialized &&
-          counts[pid] ===
-          count
+          counts[pid] === count
         ) {
           continue;
         }
 
         const replyJson =
           await authJSON(
-            `/api/posts/${encodeURIComponent(pid)}/replies?limit=50`,
+            `/api/posts/${
+              encodeURIComponent(
+                pid
+              )
+            }/replies?limit=50`,
             auth
           );
 
@@ -3669,34 +3957,42 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
           const reply of
           items(
             replyJson,
-            [
-              'replies'
-            ]
+            ['replies']
           )
         ) {
           const rid =
-            postId(reply);
+            postId(
+              reply
+            );
 
           if (
             !rid ||
-            seen.has(rid)
+            seen.has(
+              rid
+            )
           ) {
             continue;
           }
 
           const username =
-            author(reply);
+            author(
+              reply
+            );
 
           if (
-            !username ||
+            !username
+            ||
             normUser(
               username
             ) ===
-            normUser(
-              myHandle
-            )
+              normUser(
+                myHandle
+              )
           ) {
-            seen.add(rid);
+            seen.add(
+              rid
+            );
+
             continue;
           }
 
@@ -3707,7 +4003,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
             );
           }
 
-          seen.add(rid);
+          seen.add(
+            rid
+          );
         }
 
         counts[pid] =
@@ -3734,28 +4032,31 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
 
       renderReplyPanel();
       patchReplyBadge();
-    } catch (error) {
+
+    } catch(error) {
       console.debug(
         '[Classic Twitter JP reply watcher]',
         error
       );
+
     } finally {
-      replyBusy = false;
+      replyBusy =
+        false;
     }
   }
 
   function closeReplyPanel() {
     document.getElementById(
       'ct-reply-panel'
-    )?.remove();
+    )
+      ?.remove();
   }
 
   function renderReplyPanel() {
     if (
-      !location.pathname
-        .startsWith(
-          '/notifications'
-        )
+      !location.pathname.startsWith(
+        '/notifications'
+      )
     ) {
       closeReplyPanel();
       return;
@@ -3776,7 +4077,9 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     const r =
       centerRect();
 
-    if (!r) return;
+    if (!r) {
+      return;
+    }
 
     let panel =
       document.getElementById(
@@ -3792,14 +4095,15 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       panel.id =
         'ct-reply-panel';
 
-      document.body
-        .appendChild(
-          panel
-        );
+      document.body.appendChild(
+        panel
+      );
     }
 
     panel.style.left =
-      `${Math.round(r.left + 12)}px`;
+      `${Math.round(
+        r.left + 12
+      )}px`;
 
     panel.style.top =
       `${
@@ -3828,6 +4132,7 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       panelHead(
         '↩ 新しい返信',
         'tweet.app本体で表示されない返信を補完しています',
+
         () => {
           data.forEach(
             item =>
@@ -3860,7 +4165,11 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
 
           if (item.id) {
             location.href =
-              `/post/${encodeURIComponent(item.id)}`;
+              `/post/${
+                encodeURIComponent(
+                  item.id
+                )
+              }`;
           }
 
           renderReplyPanel();
@@ -3920,289 +4229,46 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
       badge.id =
         'ct-reply-badge';
 
-      document.body
-        .appendChild(
-          badge
-        );
+      document.body.appendChild(
+        badge
+      );
     }
 
     const r =
       link.getBoundingClientRect();
 
     badge.textContent =
-      String(count);
+      String(
+        count
+      );
 
     badge.style.left =
-      `${Math.round(r.right - 8)}px`;
+      `${Math.round(
+        r.right - 8
+      )}px`;
 
     badge.style.top =
-      `${Math.round(r.top + 2)}px`;
-  }
-
-
-  function ctPostHref(href) {
-    try {
-      const u = new URL(href, location.origin);
-      return /\/(?:post|status|tweet)\/[^/?#]+/i.test(u.pathname) ? u.href : '';
-    } catch {
-      return '';
-    }
-  }
-
-  function ctUserFromContainer(el) {
-    let box = el;
-    for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
-      const links = [...box.querySelectorAll?.('a[href]') || []];
-      for (const link of links) {
-        const user = userFromHref(link.getAttribute('href') || '');
-        if (user) return user;
-      }
-      const m = clean(box.textContent).match(/@([A-Za-z0-9_.-]{1,80})/);
-      if (m) return validUser(m[1]);
-    }
-    return null;
-  }
-
-  async function patchRetweetNavigation(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const leaves = [];
-    if (scope instanceof Element && !scope.children.length) leaves.push(scope);
-    scope.querySelectorAll?.('span,div,p,small').forEach(el => {
-      if (!el.children.length) leaves.push(el);
-    });
-
-    for (const el of leaves) {
-      if (!el.isConnected || el.dataset.ctRetweeterLink === '1') continue;
-      const t = clean(el.textContent);
-      if (!t) continue;
-      const isJP = /さんがリツイートしました$/u.test(t);
-      const isEN = /\b(?:retweeted|reposted)$/i.test(t);
-      if (!isJP && !isEN) continue;
-
-      const username = ctUserFromContainer(el);
-      if (!username) continue;
-
-      el.dataset.ctRetweeterLink = '1';
-      el.setAttribute('role', 'link');
-      el.setAttribute('tabindex', '0');
-      el.style.cursor = 'pointer';
-      el.title = `@${username}`;
-
-      const go = event => {
-        if (event) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-        location.href = `/user/${encodeURIComponent(username)}`;
-      };
-
-      el.addEventListener('click', go);
-      el.addEventListener('keydown', event => {
-        if (event.key === 'Enter' || event.key === ' ') go(event);
-      });
-    }
-  }
-
-  async function patchQuotedTweets(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const articles = new Set();
-
-    if (scope instanceof Element) {
-      if (scope.matches('article')) articles.add(scope);
-      const parent = scope.closest('article');
-      if (parent) articles.add(parent);
-    }
-    scope.querySelectorAll?.('article').forEach(a => articles.add(a));
-
-    for (const article of articles) {
-      if (!article.isConnected) continue;
-      const mainId = String(articleId(article) || '');
-      const postLinks = [...article.querySelectorAll('a[href]')]
-        .map(a => ({ a, href: ctPostHref(a.getAttribute('href') || '') }))
-        .filter(x => x.href);
-
-      for (const item of postLinks) {
-        let id = '';
-        try {
-          id = new URL(item.href).pathname.match(/\/(?:post|status|tweet)\/([^/?#]+)/i)?.[1] || '';
-        } catch {}
-        if (!id || (mainId && id === mainId)) continue;
-
-        let card = item.a.closest('[role="link"],blockquote');
-        if (!card || card === article) {
-          card = item.a.parentElement;
-          for (let depth = 0; card && card.parentElement !== article && depth < 4; depth++) {
-            const parent = card.parentElement;
-            if (!parent) break;
-            const userLinks = parent.querySelectorAll('a[href*="/user/"]').length;
-            const textLen = clean(parent.textContent).length;
-            if (userLinks && textLen >= 8) card = parent;
-            else break;
-          }
-        }
-        if (!card || card === article) continue;
-
-        if (card.dataset.ctQuoteCard !== '1') {
-          card.dataset.ctQuoteCard = '1';
-          card.style.cursor = 'pointer';
-          card.addEventListener('click', event => {
-            if (event.target.closest('button,input,textarea,select')) return;
-            const link = event.target.closest('a[href]');
-            if (link && link !== item.a) return;
-            event.preventDefault();
-            event.stopPropagation();
-            location.href = item.href;
-          });
-        }
-
-        const userLinks = [...card.querySelectorAll('a[href]')];
-        for (const userLink of userLinks) {
-          const username = userFromHref(userLink.getAttribute('href') || '');
-          if (!username) continue;
-          const user = await fetchProfile(username);
-          if (!user || !card.isConnected) continue;
-          const displayName = clean(user.displayName || user.name || username);
-          if (!displayName) continue;
-
-          const leaves = [...card.querySelectorAll('span,strong,div,p,a')].filter(el =>
-            el.isConnected &&
-            !el.children.length &&
-            (clean(el.textContent) === `@${username}` || clean(el.textContent) === username)
-          );
-          for (const leaf of leaves) {
-            leaf.textContent = displayName;
-            leaf.classList.add('ct-quote-display-name');
-          }
-        }
-      }
-    }
-  }
-
-  function removeInlineFollowBadges(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const controls = [];
-    if (scope instanceof Element && scope.matches('button,[role="button"]')) controls.push(scope);
-    scope.querySelectorAll?.('button,[role="button"]').forEach(el => controls.push(el));
-
-    for (const el of controls) {
-      if (!el.isConnected) continue;
-      const text = clean(el.textContent);
-      const aria = clean(el.getAttribute('aria-label') || '');
-      const title = clean(el.getAttribute('title') || '');
-
-      const profileFollowButton =
-        !el.closest('article') &&
-        /^(?:Follow|Unfollow|フォロー|フォロー解除)$/i.test(text) &&
-        (/^\/user\//.test(location.pathname) || location.pathname === '/profile');
-
-      if (profileFollowButton) {
-        el.dataset.ctKeepProfileFollow = '1';
-        el.style.removeProperty('display');
-        continue;
-      }
-
-      const followLabel = /^(?:follow|フォロー)(?:\s|@|$)/i.test(`${aria} ${title}`.trim());
-      const plusOnly = /^[+＋]$/.test(text);
-      const iconOnly = !text || plusOnly;
-      const r = el.getBoundingClientRect();
-      const small = (!r.width || r.width <= 48) && (!r.height || r.height <= 48);
-      const nearAvatar = !!el.parentElement?.querySelector('img');
-
-      if ((followLabel && (iconOnly || small || nearAvatar)) || (plusOnly && small && nearAvatar)) {
-        el.dataset.ctInlineFollow = '1';
-        el.style.setProperty('display', 'none', 'important');
-      }
-    }
+      `${Math.round(
+        r.top + 2
+      )}px`;
   }
 
 
   function patchComposeJapanese(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const leaves = [];
-    if (scope instanceof Element && !scope.children.length) leaves.push(scope);
-    scope.querySelectorAll?.('button,span,div,p').forEach(el => {
-      if (!el.children.length) leaves.push(el);
-    });
-    for (const el of leaves) {
-      if (!el.isConnected) continue;
-      const t = clean(el.textContent);
-      if (t === '今どうしてる？') el.textContent = 'いまどうしてる？';
-    }
-    const buttons = [];
-    if (scope instanceof Element && scope.matches('button')) buttons.push(scope);
-    scope.querySelectorAll?.('button').forEach(el => buttons.push(el));
-    for (const button of buttons) {
-      if (!button.isConnected) continue;
-      if (clean(button.textContent) === 'ツイート') button.textContent = 'ツイートする';
+    for (const node of localizationScopeNodes(root)) {
+      if (!isLocalizationUI(node)) continue;
+      const text = clean(node.nodeValue);
+      const button = node.parentElement.closest('button');
+      if (text === '今どうしてる？') replaceLocalizationText(node, 'いまどうしてる？');
+      // Change only a composer submit/navigation control, preserving its icon
+      // and React-managed children rather than assigning button.textContent.
+      if (text === 'ツイート' && button && (
+        button.id === 'public-sidebar-compose-btn' ||
+        button.closest('form,[role="dialog"]')?.querySelector('textarea')
+      )) replaceLocalizationText(node, 'ツイートする');
     }
   }
 
-  function notificationRowFor(el) {
-    let cur = el;
-    for (let depth = 0; cur && depth < 9; depth++, cur = cur.parentElement) {
-      const t = clean(cur.textContent);
-      if (/(あなたのツイート|あなたをフォロー|お気に入り|リツイート|返信|followed you|favorited|retweeted|replied)/i.test(t)) {
-        if ((cur.querySelectorAll?.('img').length || 0) >= 1) return cur;
-      }
-    }
-    return null;
-  }
-
-  function patchNotificationAvatarLinks(root = document) {
-    if (!location.pathname.startsWith('/notifications')) return;
-    const scope = root instanceof Element ? root : document;
-    const images = [];
-    if (scope instanceof HTMLImageElement) images.push(scope);
-    scope.querySelectorAll?.('img').forEach(img => images.push(img));
-
-    const rows = new Set();
-    for (const img of images) {
-      if (!img.isConnected) continue;
-      const row = notificationRowFor(img);
-      if (row) rows.add(row);
-    }
-
-    for (const row of rows) {
-      const avatars = [...row.querySelectorAll('img')].filter(img => {
-        const r = img.getBoundingClientRect();
-        return (!r.width || r.width <= 64) && (!r.height || r.height <= 64);
-      });
-      if (!avatars.length) continue;
-
-      const userLinks = [];
-      const seen = new Set();
-      for (const a of row.querySelectorAll('a[href]')) {
-        const username = userFromHref(a.getAttribute('href') || '');
-        if (!username) continue;
-        const key = normUser(username);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        userLinks.push({ username, href: `/user/${encodeURIComponent(username)}` });
-      }
-      if (!userLinks.length) continue;
-
-      avatars.forEach((img, index) => {
-        const anchor = img.closest('a[href]');
-        const anchorUser = anchor ? userFromHref(anchor.getAttribute('href') || '') : null;
-        const target = userLinks[index] || (anchorUser ? { username: anchorUser, href: `/user/${encodeURIComponent(anchorUser)}` } : null);
-        if (!target) return;
-
-        const clickable = img.closest('a,button,[role="button"]') || img;
-        clickable.dataset.ctAvatarTarget = target.username;
-        clickable.style.cursor = 'pointer';
-        if (clickable.tagName === 'A') clickable.setAttribute('href', target.href);
-        if (clickable.dataset.ctAvatarBound === '1') return;
-        clickable.dataset.ctAvatarBound = '1';
-        clickable.addEventListener('click', event => {
-          const username = clickable.dataset.ctAvatarTarget;
-          if (!username) return;
-          event.preventDefault();
-          event.stopPropagation();
-          location.href = `/user/${encodeURIComponent(username)}`;
-        }, true);
-      });
-    }
-  }
 
   function ctTranslationButtonText(el) {
     return clean(el?.textContent || el?.getAttribute?.('aria-label') || el?.getAttribute?.('title') || '');
@@ -4270,190 +4336,6 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     return 'other';
   }
 
-  function autoTranslationEnabled() {
-    return loadJSON(KEY.autoTranslate, true) !== false;
-  }
-
-  function patchAutoTranslation(root = document, nativeLanguage = 'ja') {
-    const controls = ctTranslationControls(root);
-
-    if (!autoTranslationEnabled()) {
-      for (const control of controls) {
-        control.style.removeProperty('display');
-        delete control.dataset.ctAutoTranslated;
-      }
-      return;
-    }
-
-    for (const control of controls) {
-      if (!control.isConnected) continue;
-      const article = control.closest('article');
-      if (!article) continue;
-      const text = ctPostTextForTranslation(control);
-      const lang = ctLikelyLanguage(text, article);
-      const isNative = nativeLanguage === 'ja' ? lang === 'ja' : lang === 'en';
-      if (isNative || lang === 'unknown') {
-        control.style.setProperty('display','none','important');
-        continue;
-      }
-      control.style.removeProperty('display');
-      if (control.dataset.ctAutoTranslated === '1') continue;
-      control.dataset.ctAutoTranslated = '1';
-      setTimeout(() => {
-        if (!control.isConnected) return;
-        if (!/^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(control))) return;
-        control.click();
-      }, 40);
-    }
-  }
-
-
-  function ctFormatBytes(bytes) {
-    const n = Number(bytes);
-    if (!Number.isFinite(n) || n <= 0) return '取得できません';
-    const units = ['B','KB','MB','GB'];
-    let value = n, i = 0;
-    while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-    return `${value >= 10 || i === 0 ? value.toFixed(i === 0 ? 0 : 1) : value.toFixed(2)} ${units[i]}`;
-  }
-
-  function ctMediaFormat(src, contentType = '') {
-    const type = clean(contentType).split(';')[0].toLowerCase();
-    if (type.includes('/')) return type.split('/')[1].toUpperCase().replace('QUICKTIME','MOV').replace('JPEG','JPG');
-    try {
-      const path = decodeURIComponent(new URL(src, location.href).pathname).toLowerCase();
-      const m = path.match(/\.([a-z0-9]{2,5})$/);
-      if (m) return m[1].toUpperCase();
-    } catch {}
-    return '不明';
-  }
-
-  function ctHeadMedia(src) {
-    return new Promise(resolve => {
-      const done = (headers = '') => {
-        const text = String(headers || '');
-        const len = text.match(/^content-length:\s*(\d+)/im)?.[1] || '';
-        const type = text.match(/^content-type:\s*([^\r\n]+)/im)?.[1] || '';
-        resolve({ bytes: len ? Number(len) : null, contentType: type.trim() });
-      };
-      const gm = typeof GM_xmlhttpRequest === 'function'
-        ? GM_xmlhttpRequest
-        : (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest : null);
-      if (!gm) { resolve({ bytes:null, contentType:'' }); return; }
-      try {
-        gm({
-          method:'HEAD',
-          url:src,
-          timeout:8000,
-          onload:r => done(r.responseHeaders),
-          onerror:() => resolve({ bytes:null, contentType:'' }),
-          ontimeout:() => resolve({ bytes:null, contentType:'' })
-        });
-      } catch {
-        resolve({ bytes:null, contentType:'' });
-      }
-    });
-  }
-
-  async function ctShowMediaInfo(media) {
-    document.getElementById('ct-media-info-panel')?.remove();
-    const src = media.currentSrc || media.src || '';
-    const isVideo = media instanceof HTMLVideoElement;
-    const width = isVideo ? media.videoWidth : media.naturalWidth;
-    const height = isVideo ? media.videoHeight : media.naturalHeight;
-    const duration = isVideo && Number.isFinite(media.duration) ? media.duration : null;
-    const head = src ? await ctHeadMedia(src) : { bytes:null, contentType:'' };
-
-    const overlay = document.createElement('div');
-    overlay.id = 'ct-media-info-panel';
-    const dark = matchMedia?.('(prefers-color-scheme: dark)')?.matches;
-    overlay.style.setProperty('--ct-media-bg', dark ? '#15202b' : '#fff');
-    overlay.style.setProperty('--ct-media-fg', dark ? '#f1f5f9' : '#17202a');
-
-    const sheet = document.createElement('div');
-    sheet.className = 'ct-media-info-sheet';
-    const headRow = document.createElement('div');
-    headRow.className = 'ct-media-info-head';
-    const title = document.createElement('div');
-    title.className = 'ct-media-info-title';
-    title.textContent = isVideo ? '🎬 動画情報' : '📸 写真情報';
-    const close = document.createElement('button');
-    close.className = 'ct-media-info-close';
-    close.type = 'button';
-    close.textContent = '×';
-    headRow.append(title, close);
-
-    const grid = document.createElement('div');
-    grid.className = 'ct-media-info-grid';
-    const rows = [
-      ['実解像度', width && height ? `${width} × ${height} px` : '読み込み待ち'],
-      ['形式', ctMediaFormat(src, head.contentType)],
-      ['配信ファイル容量', ctFormatBytes(head.bytes)]
-    ];
-    if (isVideo) rows.push(['長さ', duration != null ? `${duration.toFixed(2)} 秒` : '読み込み待ち']);
-    for (const [key, value] of rows) {
-      const k = document.createElement('div'); k.className = 'ct-media-info-key'; k.textContent = key;
-      const v = document.createElement('div'); v.className = 'ct-media-info-value'; v.textContent = value;
-      grid.append(k, v);
-    }
-
-    const url = document.createElement('div');
-    url.className = 'ct-media-info-url';
-    url.textContent = src || 'URLを取得できません';
-
-    sheet.append(headRow, grid, url);
-    overlay.append(sheet);
-    document.body.append(overlay);
-    const dismiss = () => overlay.remove();
-    close.onclick = dismiss;
-    overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
-  }
-
-  function patchMediaInfo(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const media = [];
-    if (scope instanceof HTMLImageElement || scope instanceof HTMLVideoElement) media.push(scope);
-    scope.querySelectorAll?.('article img, article video').forEach(el => media.push(el));
-
-    for (const el of media) {
-      if (!el.isConnected || el.dataset.ctMediaInfo === '1') continue;
-      if (el instanceof HTMLImageElement) {
-        const alt = clean(el.alt || '').toLowerCase();
-        const r = el.getBoundingClientRect();
-        if (/avatar|profile/.test(alt) || (r.width && r.width <= 96 && r.height <= 96)) continue;
-      }
-
-      let timer = null;
-      let startX = 0;
-      let startY = 0;
-      const cancel = () => {
-        if (timer) clearTimeout(timer);
-        timer = null;
-      };
-
-      el.addEventListener('touchstart', event => {
-        const touch = event.touches?.[0];
-        if (!touch) return;
-        startX = touch.clientX;
-        startY = touch.clientY;
-        cancel();
-        timer = setTimeout(() => {
-          timer = null;
-          ctShowMediaInfo(el);
-        }, 650);
-      }, { passive:true });
-
-      el.addEventListener('touchmove', event => {
-        const touch = event.touches?.[0];
-        if (!touch) return;
-        if (Math.abs(touch.clientX - startX) > 12 || Math.abs(touch.clientY - startY) > 12) cancel();
-      }, { passive:true });
-
-      el.addEventListener('touchend', cancel, { passive:true });
-      el.addEventListener('touchcancel', cancel, { passive:true });
-      el.dataset.ctMediaInfo = '1';
-    }
-  }
 
   function patchExactPostTime(root = document) {
     const scope = root instanceof Element ? root : document;
@@ -4504,167 +4386,85 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
   }
 
   function patchProfileJoinedDate(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    let node;
-    while ((node = walker.nextNode())) nodes.push(node);
-
-    const isInviteContext = n => {
-      let el = n.parentElement;
-      for (let i = 0; el && i < 7; i++, el = el.parentElement) {
-        const txt = clean(el.textContent);
-        if (/Wing|招待リンク|リンクを開いた人数|登録した人数|参加した友だち|Friends who joined|Signed up|Link opens/i.test(txt)) return true;
-      }
-      return false;
-    };
-
-    // Single text node: "Joined September 2026" / legacy translated form.
-    for (const n of nodes) {
-      const t = clean(n.nodeValue);
-      let m = t.match(/^Joined\s+(.+)$/i);
-      if (!m) m = t.match(/^参加した人数\s+(.+)$/);
-      if (!m || isInviteContext(n)) continue;
-      n.nodeValue = n.nodeValue.replace(t, `${m[1]}からTwitterを利用しています`);
-    }
-
-    // tweet.app currently renders "Joined" and the date as separate DOM text nodes.
-    // Older versions of this script may already have changed only the label to "参加した人数".
-    for (const label of nodes) {
-      const labelText = clean(label.nodeValue);
-      if (!/^(?:Joined|参加した人数)$/i.test(labelText) || isInviteContext(label)) continue;
-
-      let container = label.parentElement;
-      for (let depth = 0; container && depth < 4; depth++, container = container.parentElement) {
-        const allText = clean(container.textContent);
-        const dateMatch = allText.match(/(?:Joined|参加した人数)\s+(.+?)(?=\s+(?:Founder|#\d+)|$)/i);
-        if (!dateMatch) continue;
-
-        const dateText = clean(dateMatch[1]);
-        const dateNode = nodes.find(n => n !== label && container.contains(n) && clean(n.nodeValue) === dateText);
-        if (dateNode) {
-          label.nodeValue = label.nodeValue.replace(labelText, '');
-          dateNode.nodeValue = dateNode.nodeValue.replace(dateText, `${dateText}からTwitterを利用しています`);
-        } else {
-          label.nodeValue = label.nodeValue.replace(labelText, `${dateText}からTwitterを利用しています`);
-        }
-        break;
-      }
+    if (!/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname)) return;
+    for (const node of localizationScopeNodes(root)) {
+      const el = node.parentElement;
+      if (isProtectedLocalizationElement(el) || el.closest('article')) continue;
+      // The profile metadata uses a calendar icon. Location/bio/name strings
+      // resembling "Joined ..." must never be interpreted as metadata.
+      if (!el.matches('span.inline-flex') || !el.querySelector('svg.lucide-calendar')) continue;
+      const text = clean(node.nodeValue);
+      if (/^(?:Joined|参加した人数)$/i.test(text)) replaceLocalizationText(node, '登録日:');
+      else if (/^Joined\s+/i.test(text)) replaceLocalizationText(node, text.replace(/^Joined\s+/i, '登録日: '));
     }
   }
 
   function patchInviteJoinedLabels(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    let node;
-    while ((node = walker.nextNode())) nodes.push(node);
-    for (const n of nodes) {
-      if (clean(n.nodeValue) !== 'Joined') continue;
-      let el = n.parentElement, inviteContext = false;
-      for (let i=0; el && i<7; i++, el=el.parentElement) {
-        const txt = clean(el.textContent);
-        if (/Wing|招待|Link opens|Signed up|Friends who joined/i.test(txt)) { inviteContext=true; break; }
-      }
-      if (inviteContext) n.nodeValue = n.nodeValue.replace(/Joined/, '参加した人数');
+    if (!location.pathname.startsWith('/settings')) return;
+    for (const node of localizationScopeNodes(root)) {
+      const el = node.parentElement;
+      if (clean(node.nodeValue) !== 'Joined' || isProtectedLocalizationElement(el)) continue;
+      if (el.matches('dt') && el.closest('dl')) replaceLocalizationText(node, '参加した人数');
     }
   }
 
-  function patchAutoTranslateSetting() {
-    const main = document.querySelector('main');
-    const old = document.getElementById('ct-auto-translate-setting');
-    if (!main) { old?.remove(); return; }
-
-    const settingsTitle = [...main.querySelectorAll('h1,h2,h3,div,span')]
-      .some(el => !el.children.length && /^(?:設定|Settings)$/i.test(clean(el.textContent)));
-    const inviteItem = [...main.querySelectorAll('button,a,[role="button"],div')]
-      .some(el => /友だちを招待しよう！/.test(clean(el.textContent)));
-
-    if (!settingsTitle || !inviteItem) {
-      old?.remove();
-      return;
-    }
-    if (old?.isConnected && old.parentElement === main) return;
-    old?.remove();
-
-    const section = document.createElement('section');
-    section.id = 'ct-auto-translate-setting';
-    section.style.cssText = 'margin:18px 20px 12px;padding:14px 16px;border:1px solid rgba(127,127,127,.22);border-radius:14px;';
-
-    const heading = document.createElement('div');
-    heading.textContent = '拡張機能設定';
-    heading.style.cssText = 'font-size:13px;font-weight:800;margin-bottom:8px;';
-
-    const row = document.createElement('label');
-    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;';
-    const copy = document.createElement('div');
-    const title = document.createElement('div');
-    title.textContent = 'ツイートを自動翻訳';
-    title.style.cssText = 'font-weight:700;font-size:14px;';
-    const desc = document.createElement('div');
-    desc.textContent = '日本語以外のツイートを自動的に翻訳します。';
-    desc.style.cssText = 'font-size:12px;opacity:.65;margin-top:3px;';
-    copy.append(title, desc);
-
-    const toggle = document.createElement('input');
-    toggle.type = 'checkbox';
-    toggle.checked = autoTranslationEnabled();
-    toggle.setAttribute('aria-label', 'ツイートの自動翻訳');
-    toggle.style.cssText = 'width:20px;height:20px;cursor:pointer;flex:0 0 auto;';
-    toggle.addEventListener('change', () => {
-      saveJSON(KEY.autoTranslate, toggle.checked);
-      document.querySelectorAll('[data-ct-auto-translated]').forEach(el => {
-        delete el.dataset.ctAutoTranslated;
-        el.style.removeProperty('display');
-      });
-      scan(document);
-    });
-
-    row.append(copy, toggle);
-    section.append(heading, row);
-    main.append(section);
-  }
 
   function scan(
-    root = document
+    root =
+      document
   ) {
     try {
       installStyle();
-      hideAffiliation();
-      patchBrand();
-      patchUI(root);
+      if (typeof installSafariStyle === 'function') installSafariStyle();
+      if (typeof patchMediaInfo === 'function') patchMediaInfo(root);
+
+      patchUI(
+        root
+      );
 
       patchReplyingTo(root);
-      patchSafariTopTitle();
-      patchInputs(root);
-      patchNotifications(root);
-      patchFavoriteButtons(root);
-      patchFeed(root);
-      patchRetweetRows(root);
 
-      patchRetweetNavigation(root);
-      patchQuotedTweets(root);
-      removeInlineFollowBadges(root);
+      patchInputs(
+        root
+      );
+
+      patchNotifications(
+        root
+      );
+
+      patchFavoriteButtons(
+        root
+      );
+
+      patchFeed(
+        root
+      );
+
+      patchRetweetRows(
+        root
+      );
       patchComposeJapanese(root);
       patchNotificationFollowGrammar(root);
-      patchNotificationAvatarLinks(root);
       patchAutoTranslation(root, 'ja');
       patchExactPostTime(root);
-      patchAutoTranslateSetting();
       patchInviteJoinedLabels(root);
       patchProfileJoinedDate(root);
-      patchMediaInfo(root);
+
       patchProfileFounder();
+
       patchFavoriteProfileTab();
 
-      if (favoritesActive) {
+      if (
+        favoritesActive
+      ) {
         renderFavoritesPanel();
       }
 
       renderReplyPanel();
+
       patchReplyBadge();
 
-    } catch (error) {
+    } catch(error) {
       console.debug(
         '[Classic Twitter JP]',
         error
@@ -4672,175 +4472,23 @@ if (/^just\s+now$/i.test(t)) return 'たった今';
     }
   }
 
-  let scanTimer = null;
-
-  const observer =
-    new MutationObserver(
-      mutations => {
-        clearTimeout(
-          scanTimer
-        );
-
-        scanTimer =
-          setTimeout(
-            () => {
-              const roots =
-                new Set();
-
-              for (
-                const mutation of
-                mutations
-              ) {
-                if (
-                  mutation.target instanceof
-                  Element
-                ) {
-                  roots.add(
-                    mutation.target
-                  );
-                }
-
-                for (
-                  const node of
-                  mutation.addedNodes
-                ) {
-                  if (
-                    node.nodeType ===
-                    Node.ELEMENT_NODE
-                  ) {
-                    roots.add(
-                      node
-                    );
-                  }
-                }
-              }
-
-              roots.forEach(
-                scan
-              );
-
-              scan(document);
-            },
-            120
-          );
-      }
-    );
-
-  function startObserver() {
-    if (
-      !document.documentElement
-    ) {
-      setTimeout(
-        startObserver,
-        0
-      );
-
-      return;
-    }
-
-    observer.observe(
-      document.documentElement,
-      {
-        childList:true,
-        subtree:true,
-        characterData:true,
-        attributes:true,
-        attributeFilter:[
-          'aria-pressed',
-          'aria-checked'
-        ]
-      }
-    );
-  }
-
-  startObserver();
-
-  let layoutRaf = 0;
-
-  function syncPanels() {
-    cancelAnimationFrame(
-      layoutRaf
-    );
-
-    layoutRaf =
-      requestAnimationFrame(
-        () => {
-          if (favoritesActive) {
-            renderFavoritesPanel();
-          }
-
-          renderReplyPanel();
-          patchReplyBadge();
-        }
-      );
-  }
-
-  window.addEventListener(
-    'resize',
-    syncPanels,
-    {
-      passive:true
-    }
-  );
-
-  window.addEventListener(
-    'scroll',
-    syncPanels,
-    {
-      passive:true
-    }
-  );
-
-  function start() {
-    scan(document);
-
-    [
-      300,
-      800,
-      1600
-    ]
-      .forEach(
-        delay =>
-          setTimeout(
-            () =>
-              scan(document),
-            delay
-          )
-      );
-
-    setInterval(
-      () =>
-        scan(document),
-      3000
-    );
-
-    setTimeout(
-      replyWatchTick,
-      1800
-    );
-
-    setInterval(
-      replyWatchTick,
-      45000
-    );
-  }
-
   if (
     document.readyState ===
-      'loading'
+    'loading'
   ) {
     document.addEventListener(
       'DOMContentLoaded',
       start,
       {
-        once:true
+        once: true
       }
     );
+
   } else {
     start();
   }
 
   console.log(
-    '🐦 Classic Twitter JP Safari v6.6.2 loaded'
+    '🐦 Classic Twitter JP v6.7.0 loaded'
   );
 })();
