@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.7.2
+// @version      6.7.3
 // @description  Classic interface for tweet.app, preserving posts and names. Reply inbox, individual notification-avatar links, high-resolution badges, star Favorites, saved searches, local saved posts and optional keyword filters.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1049,7 +1049,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.7.2';
+    document.documentElement.dataset.ctActiveVersion = '6.7.3';
     ctStarted = true;
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
@@ -1576,7 +1576,19 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     return typeof value === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(value.trim()) ? value.trim().toLowerCase() : null;
   }
   function ctNativeAvatar(wrapper) {
-    return [...wrapper.children].find(el => el.matches('img.rounded-full.object-cover,div[role="img"].rounded-full')) || null;
+    const avatarSelector = 'img.rounded-full.object-cover,div[role="img"].rounded-full';
+    for (const child of wrapper.children) {
+      if (child.matches(avatarSelector)) return child;
+      // Uo renders the same avatar directly in notifications, but wraps it in a
+      // profile button in feeds, post details and replies. Inspect only this
+      // verified native button, never arbitrary descendants or ordinary Follow.
+      if (child.matches('button.rounded-full[aria-label]') &&
+          /^View @[a-zA-Z0-9_.-]{1,80}'s profile$/.test(child.getAttribute('aria-label') || '')) {
+        const avatar = [...child.children].find(el => el.matches(avatarSelector));
+        if (avatar) return avatar;
+      }
+    }
+    return null;
   }
   function ctNativeAvatarFollow(wrapper) {
     return [...wrapper.children].find(el => el.matches(ctNativeFollowSelector) &&
@@ -2961,5 +2973,5 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.7.2 loaded');
+  console.log('🐦 Classic Twitter EN v6.7.3 loaded');
 })();

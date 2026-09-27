@@ -4,7 +4,7 @@
 
 ## インストール・更新
 
-現在の版は **6.7.2** です。使う環境に合った **1本だけ** を有効にしてください。
+現在の版は **6.7.3** です。使う環境に合った **1本だけ** を有効にしてください。
 
 | 環境 | Greasy Fork | ファイル |
 |---|---|---|
@@ -13,6 +13,12 @@
 | English | [English version](https://greasyfork.org/en/scripts/594603) | `classic-twitter-en.user.js` |
 
 Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込みしてください。既存のスクリプト名とnamespaceを維持しています。重複する旧版やテスト版は無効にしてください。ニュース試験版はこのリリースの対象外です。
+
+## 6.7.3 の修正
+
+- ホーム・投稿詳細・返信・おすすめユーザーで再表示されていた、アイコン上の「＋」フォローボタンを非表示にしました。通常のフォローボタンとアイコンからのプロフィール移動は維持します。
+- 設定・招待の説明、操作状態、入力欄の案内など、UI保護の範囲を広げた際に英語へ戻った箇所を修正します。投稿本文・表示名・入力中の文章は引き続き変更しません。
+- 実際のプロフィールボタン内に画像が入った構造を、3配布版の起動テストにも追加しました。
 
 ## 6.7.2 の改善
 
@@ -73,6 +79,8 @@ npm run check
 バグ報告にはブラウザ・スクリプト版・画面名・操作手順を記載してください。認証情報や非公開の投稿内容を含めないでください。
 
 ## English
+
+Version 6.7.3 fixes avatar-follow overlays that remained on feeds, post details, replies and user suggestions because the avatar was nested inside a profile button. Regular Follow buttons and profile navigation remain available. Japanese UI coverage in settings and invitations is restored while preserving user content.
 
 Version 6.7.2 adds individual notification-avatar profile links, a browser-local reply inbox, and official high-resolution badges beside reply authors and mobile account names. Tiny avatar follow overlays are hidden; regular Follow buttons remain. Reply checks run in batches every 90 seconds while this tab is visible, covering the latest 24 own posts/replies. This is not background push notification delivery. Reply history is stored separately per account.
 

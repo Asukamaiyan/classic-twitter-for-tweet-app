@@ -8,7 +8,7 @@ const root = path.join(__dirname, '..');
 for (const file of ['classic-twitter-ja.user.js', 'classic-twitter-ja-safari.user.js', 'classic-twitter-en.user.js']) {
   test(`${file}: full startup preserves content and settles when idle`, async () => {
     const dom = new JSDOM(`<!doctype html><html><head></head><body><nav><button>Settings</button></nav><main>
-      <article><div><button aria-label="View @someone's profile"><img alt="someone avatar"></button><button class="truncate font-bold">someone</button>
+      <article><div><div class="relative inline-flex shrink-0 isolate"><button class="rounded-full" aria-label="View @someone's profile"><img class="rounded-full object-cover" alt="someone avatar"></button><span role="button" tabindex="0" aria-label="Follow @someone" class="absolute -bottom-0.5 -right-0.5"><svg class="lucide-plus"></svg></span></div><button class="truncate font-bold">someone</button>
       <p aria-live="polite"><button>Show translation</button></p></div>
       <p class="break-words whitespace-pre-wrap">Home Like Post Following</p>
       <div class="tweet-action-bar" data-testid="tweet-action-bar"><button data-testid="tweet-like-action" aria-label="Like, 3 likes">Like</button></div></article>
@@ -30,6 +30,10 @@ for (const file of ['classic-twitter-ja.user.js', 'classic-twitter-ja-safari.use
     assert.deepEqual(errors, []);
     assert.equal(window.document.querySelector('article p.break-words').textContent, 'Home Like Post Following');
     assert.equal(window.document.querySelector('textarea').value, 'Post Home');
+    const avatarFollow = window.document.querySelector('[aria-label="Follow @someone"]');
+    assert.equal(window.getComputedStyle(avatarFollow).display, 'none', 'the native wrapped-avatar plus stays hidden in every distribution');
+    assert.equal(avatarFollow.tabIndex, -1);
+    assert.equal(window.document.querySelector('[aria-label="View @someone\'s profile"]').hidden, false);
     assert.equal(window.document.querySelector('button.truncate').textContent, 'someone');
     assert.equal(window.document.querySelector('nav button').textContent, file.includes('-en.') ? 'Settings' : '設定');
     assert.equal(window.document.querySelector('[aria-live] button').style.display, '');

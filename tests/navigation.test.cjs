@@ -201,6 +201,80 @@ test('feed avatars hide follow overlays while retaining their native profile act
   assert.equal(f.state.requests.length, 0);
 });
 
+function profileAvatar(handle, { placeholder = false, overlay = true } = {}) {
+  // Current native Uo markup differs from notification avatars: Lr is inside
+  // the profile button, while the small follow span is its sibling.
+  return `<div class="relative inline-flex shrink-0 isolate" style="width:48px;height:48px">
+    <button type="button" class="rounded-full focus:outline-none" aria-label="View @${handle}'s profile">${placeholder
+      ? `<div role="img" class="rounded-full border" aria-label="${handle} avatar placeholder"></div>`
+      : `<img class="rounded-full border object-cover shrink-0" alt="${handle} avatar" src="https://cdn.example/${handle}.jpg">`}</button>
+    ${overlay ? `<span role="button" tabindex="0" aria-disabled="false" aria-label="Follow @${handle}" class="absolute -bottom-0.5 -right-0.5 z-[1] flex items-center justify-center rounded-full" style="width:17px;height:17px"><svg class="lucide lucide-plus"></svg></span>` : ''}
+  </div>`;
+}
+
+for (const [surface, route, placeholder] of [
+  ['feed', '/feed', false], ['post detail', '/post/example', false], ['reply', '/post/example', true]
+]) {
+  test(`${surface} profile-button avatars hide the plus without changing profile or ordinary Follow actions`, async t => {
+    const f = harness(t, '');
+    f.window.history.replaceState({}, '', route);
+    f.document.querySelector('main').innerHTML = `<article>${profileAvatar('alice', { placeholder })}
+      <button id="ordinary-follow" aria-label="Follow @alice">Follow</button></article>`;
+    const profile = f.document.querySelector('button.rounded-full');
+    const overlay = f.document.querySelector('span[role="button"]');
+    const ordinary = f.document.getElementById('ordinary-follow');
+    let profileClicks = 0;
+    let ordinaryClicks = 0;
+    profile.addEventListener('click', () => profileClicks++);
+    ordinary.addEventListener('click', () => ordinaryClicks++);
+    await f.patch();
+    assert.equal(f.window.getComputedStyle(overlay).display, 'none');
+    assert.equal(overlay.getAttribute('tabindex'), '-1');
+    assert.equal(overlay.getAttribute('aria-hidden'), 'true');
+    assert.equal(profile.classList.contains('ct-avatar-follow-hidden'), false);
+    assert.equal(ordinary.className, '');
+    assert.equal(f.links().length, 0);
+    assert.equal(f.state.requests.length, 0);
+    f.event(profile.querySelector('img,[role="img"]'));
+    f.event(ordinary);
+    assert.equal(profileClicks, 1);
+    assert.equal(ordinaryClicks, 1);
+    f.qa.destroyNativeNavigation();
+    assert.equal(overlay.getAttribute('tabindex'), '0');
+    assert.equal(overlay.hasAttribute('aria-hidden'), false);
+    assert.equal(overlay.classList.contains('ct-avatar-follow-hidden'), false);
+  });
+}
+
+test('follow overlays mounted after a feed avatar or replaced by React stay hidden', async t => {
+  const f = harness(t, '');
+  f.window.history.replaceState({}, '', '/feed');
+  f.document.querySelector('main').innerHTML = `<article>${profileAvatar('alice', { overlay: false })}</article>`;
+  await f.patch();
+  const article = f.document.querySelector('article');
+  article.innerHTML = profileAvatar('alice');
+  await f.patch();
+  const first = article.querySelector('span[role="button"]');
+  assert.equal(f.window.getComputedStyle(first).display, 'none');
+  article.innerHTML = profileAvatar('bob');
+  await f.patch();
+  const second = article.querySelector('span[role="button"]');
+  assert.equal(f.window.getComputedStyle(second).display, 'none');
+  assert.equal(f.qa.ctNavigationState.overlays.has(first), false);
+  assert.equal(f.qa.ctNavigationState.overlays.size, 1);
+});
+
+test('unrelated image controls and editable profile avatars do not qualify as native follow avatars', async t => {
+  const f = harness(t, '');
+  f.window.history.replaceState({}, '', '/settings');
+  f.document.querySelector('main').innerHTML = `<div class="relative inline-flex shrink-0 isolate">
+    <button class="rounded-full" aria-label="Edit profile photo"><img class="rounded-full object-cover"></button>
+    <span role="button" tabindex="0" aria-label="Follow @alice" class="absolute -bottom-0.5 -right-0.5">Follow</span></div>`;
+  await f.patch();
+  assert.equal(f.document.querySelector('.ct-avatar-follow-hidden'), null);
+  assert.equal(f.document.querySelector('span').getAttribute('tabindex'), '0');
+});
+
 test('the native default avatar URL maps to its placeholder while duplicate default identities stay disabled', async t => {
   const defaultURL = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150';
   const f = harness(t, avatar('Alice', { placeholder: true }) + avatar('Shared', { placeholder: true }), [

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.7.2
+// @version      6.7.3
 // @description  tweet.appのUIを日本語化。投稿本文・名前を保持。リプライ通知、通知アイコンの個別リンク、高画質バッジ、星のお気に入り、保存検索・投稿保存・キーワード折りたたみ。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1050,7 +1050,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.7.2';
+    document.documentElement.dataset.ctActiveVersion = '6.7.3';
     ctStarted = true;
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
@@ -1577,7 +1577,19 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     return typeof value === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(value.trim()) ? value.trim().toLowerCase() : null;
   }
   function ctNativeAvatar(wrapper) {
-    return [...wrapper.children].find(el => el.matches('img.rounded-full.object-cover,div[role="img"].rounded-full')) || null;
+    const avatarSelector = 'img.rounded-full.object-cover,div[role="img"].rounded-full';
+    for (const child of wrapper.children) {
+      if (child.matches(avatarSelector)) return child;
+      // Uo renders the same avatar directly in notifications, but wraps it in a
+      // profile button in feeds, post details and replies. Inspect only this
+      // verified native button, never arbitrary descendants or ordinary Follow.
+      if (child.matches('button.rounded-full[aria-label]') &&
+          /^View @[a-zA-Z0-9_.-]{1,80}'s profile$/.test(child.getAttribute('aria-label') || '')) {
+        const avatar = [...child.children].find(el => el.matches(avatarSelector));
+        if (avatar) return avatar;
+      }
+    }
+    return null;
   }
   function ctNativeAvatarFollow(wrapper) {
     return [...wrapper.children].find(el => el.matches(ctNativeFollowSelector) &&
@@ -2256,6 +2268,25 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     ['Notifications', '通知'],
     ['Profile', 'プロフィール'],
     ['Settings', '設定'],
+    ['Terms', '利用規約'],
+    ['Rules', 'ルール'],
+    ['About', 'サービスについて'],
+    ['Change', '変更'],
+    ['Turn off', 'オフにする'],
+    ['Show more', 'さらに表示'],
+    ['Show less', '表示を減らす'],
+    ['Loading...', '読み込み中…'],
+    ['Loading more...', 'さらに読み込み中…'],
+    ['No unused codes', '未使用のコードはありません'],
+    ['How the Wing badge works', 'Wingバッジの獲得方法'],
+    ['Copied', 'コピーしました'],
+    ['No people found.', 'ユーザーが見つかりません。'],
+    ['No photos found.', '画像が見つかりません。'],
+    ['No posts to explore yet.', '表示できるツイートはまだありません。'],
+    ['flagged your post for review', 'あなたのツイートを確認対象にしました'],
+    ['interacted with you', 'あなたに反応しました'],
+    ['Post options', 'ツイートのメニュー'],
+    ['Open profile menu', 'プロフィールメニューを開く'],
 
     ['For you', 'おすすめ'],
     ['Following', 'フォロー中'],
@@ -3117,6 +3148,31 @@ if (/^just\s+now$/i.test(t)) {
       !button.getAttribute('aria-label')?.startsWith('View @');
   }
 
+  function isNativeSettingsValue(el) {
+    if (!/^\/settings\/?$/.test(location.pathname) ||
+        !el?.matches('main section span.truncate')) return false;
+    const label = el.previousElementSibling;
+    if (!label?.matches('span.uppercase.tracking-wide')) return false;
+    const name = clean(label.textContent);
+    return /^(?:Backup codes|バックアップコード)$/.test(name) ||
+      (/^(?:Authentication app|認証アプリ|Text message|SMS)$/.test(name) && /^(?:On|Off|オン|オフ)$/.test(clean(el.textContent)));
+  }
+
+  function isNativeLocalizationHelp(el) {
+    return !!el?.matches('p,li') &&
+      !!el.closest('[role="region"][aria-label="How the Wing badge works"]') &&
+      !el.closest('article,button,a,[data-user-content]');
+  }
+
+  function isNativeNotificationTimestamp(el) {
+    if (!el?.matches('span.text-tl-app-text-soft') || !localizationNotificationRow(el)) return false;
+    const paragraph = el.parentElement;
+    return paragraph?.matches('p') && [...paragraph.childNodes].some(node =>
+      node.nodeType === Node.TEXT_NODE ? !!localizationNotificationAction(node) :
+        [...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && localizationNotificationAction(child))
+    );
+  }
+
   function isNativeLocalizationTimestamp(el) {
     if (!el?.matches('span[title]') || !el.closest('article') ||
         el.closest('button,a,[role="button"]') ||
@@ -3138,8 +3194,13 @@ if (/^just\s+now$/i.test(t)) {
     // protection for profile names and account values everywhere else.
     const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications' }[location.pathname.replace(/\/$/, '')];
     const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
-      el === document.querySelector('main h2') && !el.closest('article');
-    return !!el.closest('.truncate') && !isNativeSettingsNavigation(el) && !pageTitle;
+      el === [...document.querySelectorAll('main h2')].find(heading => {
+        for (let parent = heading; parent; parent = parent.parentElement) {
+          if (parent.hidden || parent.getAttribute('aria-hidden') === 'true' || parent.style.display === 'none') return false;
+        }
+        return !heading.closest('article');
+      }) && !el.closest('article');
+    return !!el.closest('.truncate') && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle;
   }
 
   function localizationNotificationRow(el) {
@@ -3167,8 +3228,9 @@ if (/^just\s+now$/i.test(t)) {
   function isLocalizationUI(node) {
     const el = node?.parentElement;
     if (isProtectedLocalizationElement(el)) return false;
-    if (localizationNotificationAction(node)) return true;
+    if (localizationNotificationAction(node) || isNativeNotificationTimestamp(el)) return true;
     if (localizationNotificationRow(el)) return false;
+    if (isNativeSettingsValue(el) || isNativeLocalizationHelp(el)) return true;
     const text = clean(node.nodeValue);
     const link = el.closest('a[href]');
     if (link) {
@@ -3191,10 +3253,12 @@ if (/^just\s+now$/i.test(t)) {
       return true;
     }
     if (isNativeLocalizationTimestamp(el)) return true;
+    if (el.closest('[role="status"],[role="alert"]')) return true;
     if (el.closest('article')) return false;
-    if (el.closest('label,legend,[role="status"],[role="alert"]')) return true;
+    if (el.closest('label,legend')) return true;
     const inSettings = /^\/settings\/?$/.test(location.pathname);
-    const heading = el.closest('h1,h2,h3') || (inSettings && el.closest('main section h4.font-extrabold'));
+    const heading = el.closest('h1,h2,h3') || (inSettings && el.closest('main section h4.font-extrabold')) ||
+      (inSettings && el.matches('main section h4.font-bold') && /^(?:Friends who joined|参加した友だち)$/.test(text) && el);
     if (heading) {
       // Profile headings contain display names; all other static headings are
       // still restricted to exact dictionary entries by translateTextNode.
@@ -3208,11 +3272,17 @@ if (/^just\s+now$/i.test(t)) {
       if (el.closest('dl') && el.tagName !== 'DT') return false;
       if (el.classList.contains('leading-relaxed')) {
         const title = el.previousElementSibling;
-        return !!el.closest('main section') && title?.matches('h4.font-extrabold') &&
-          (JP.has(clean(title.textContent)) || [...JP.values()].includes(clean(title.textContent)));
+        if (!el.closest('main section')) return false;
+        const label = title?.matches('h4.font-extrabold,span.uppercase.tracking-wide') ? title :
+          title?.matches('div') && el.matches('.px-4.py-3.text-tl-app-text-muted') ?
+            title.querySelector('span.uppercase.tracking-wide') : null;
+        return !!label && (JP.has(clean(label.textContent)) || [...JP.values()].includes(clean(label.textContent)));
       }
       return !el.closest('a');
     }
+    // Native loading text is paired with a spinner; ordinary adjacent text is not UI.
+    if (el.matches('span.text-xs.font-semibold') && el.parentElement?.matches('div.flex.items-center.justify-center') &&
+        el.parentElement.querySelector('svg.animate-spin') && /^Loading(?:[ .]|$)/.test(text)) return true;
     // The mobile account menu's counts are spans, unlike profile buttons.
     if (el.matches('span') && el.closest('[role="dialog"][aria-label="Account menu"]') &&
         /^(?:Following|Followers)$/.test(text) &&
@@ -3251,9 +3321,18 @@ if (/^just\s+now$/i.test(t)) {
     if (!text || text.length > 500) return;
     // Dynamic replacements belong to their specific UI contexts. In particular,
     // never parse actor names or dates from arbitrary text that resembles a UI.
-    const relative = isNativeLocalizationTimestamp(node.parentElement) && text.match(/^(\d+)([smhd])$/);
+    const el = node.parentElement;
+    const relative = (isNativeLocalizationTimestamp(el) || isNativeNotificationTimestamp(el)) && text.match(/^(\d+)([smhd])$/);
+    const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const units = { s: '秒前', m: '分前', h: '時間前', d: '日前' };
-    const out = relative ? relative[1] + units[relative[2]] : JP.get(text);
+    let out = relative ? relative[1] + units[relative[2]] :
+      remaining ? `${remaining[1]}個のコードが残っています` : JP.get(text);
+    // The native help list splits this sentence around a React-owned counter.
+    // Keep its text nodes and the counter so later updates still work.
+    if (isNativeLocalizationHelp(el) && el.matches('li')) {
+      if (text === 'Get') out = '友だちが';
+      if (text === 'friends → get a Wing badge!') out = '人参加すると、Wingバッジを獲得できます！';
+    }
     if (out && out !== text) replaceLocalizationText(node, out);
   }
 
@@ -3362,7 +3441,9 @@ if (/^just\s+now$/i.test(t)) {
       if (isOwnedLocalizationElement(el) ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
       const value = el.getAttribute('placeholder');
-      const out = placeholders.get(value) || JP.get(value);
+      const personalized = el.matches('textarea#public-tweet-input') &&
+        value?.match(/^What['’]s happening, ([\s\S]+)\?$/);
+      const out = personalized ? `${personalized[1]}、いまどうしてる？` : placeholders.get(value) || JP.get(value);
       if (out && out !== value) el.setAttribute('placeholder', out);
     }
   }
@@ -4523,6 +4604,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.7.2 loaded'
+    '🐦 Classic Twitter JP v6.7.3 loaded'
   );
 })();
