@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.7.0
+// @version      6.7.1
 // @description  Classic interface terminology for tweet.app, preserving posts and names. Display names, Founder Number, star Favorites, saved searches, local saved posts and optional keyword filters.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1262,5 +1262,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.7.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.7.1 loaded');
 })();

@@ -1,3 +1,20 @@
+# 6.7.1 検証記録
+
+確認日: 2026-09-27（日本時間）。ユーザー指定のAGENTS.mdを開発・UI・検証の基準にして、既存機能と保存形式を維持しました。
+
+- `npm run check`: **98件成功、失敗0件**。3版の生成・構文検査を含みます。
+- 新たに再現した不具合: 別タブの保存を古いタブが上書き、プロフィール変更後の古い番号残留、SafariメディアHEAD応答の順序逆転による重複表示。修正後の回帰テストを追加しました。
+- フォーカス、入力説明とエラー、保存結果、VisualViewportの縮小・スクロール・ズーム時の扱い・後片付けを検証しました。
+- 実tweet.appへの日本語Chrome版の一時注入で、本文20件の不変、閉じる操作からTabで自動翻訳チェックボックスへ進めること、ネイティブ投稿ダイアログがツールより前面になることを確認しました。投稿・いいね・フォロー操作は行っていません。
+- Chromiumの合成画面でSafari版を幅320×568・ダークテーマで確認。横幅はみ出しなし、パネルはx12〜308/y20〜440、エラーを表示する下部領域はy379〜439。エラー対象へのフォーカスとEscape復帰も確認。
+- 英語版の画面と、`prefers-reduced-motion: reduce`でパネルのanimationがnoneになることを確認しました。
+
+キーボードの実機表示は模擬テストと同一ではありません。Tampermonkey経由のインストール、iPhone／iPad Safari＋Stay、実機キーボードと長押しは未検証です。サイトが将来DOMやAPIを変更した場合の動作を保証するものではありません。
+
+設計参照: [W3C Disclosure Pattern](https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/)の展開状態と操作、[MDN Reduced Motion](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-reduced-motion)の利用者設定を参照。サイトの配色は公式クライアントの`index-eD6wHGfB.css`で確認した`--color-tl-app-*`を使用しています。
+
+---
+
 # 6.7.0 検証記録
 
 確認日: 2026-09-27（日本時間）。この記録は修正中の3配布ファイルを対象とします。公開先への反映確認とは別です。

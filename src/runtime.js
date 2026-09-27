@@ -179,7 +179,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.7.0';
+    document.documentElement.dataset.ctActiveVersion = '6.7.1';
     ctStarted = true;
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,

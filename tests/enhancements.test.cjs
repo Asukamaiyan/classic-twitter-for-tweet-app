@@ -33,14 +33,48 @@ test('filters are opt-in and tools are keyboard-accessible', t => {
   assert.equal(document.querySelector('.ct-keyword-collapsed'), null);
   const toggle = document.getElementById('ct-local-tools-toggle');
   const panel = document.getElementById('ct-local-tools-panel');
+  const close = panel.querySelector('header button');
+  assert.ok(toggle.compareDocumentPosition(panel) & window.Node.DOCUMENT_POSITION_FOLLOWING,
+    'Tab order must enter the revealed panel after its toggle');
+  assert.equal(panel.getAttribute('role'), 'region');
+  assert.ok(document.getElementById(panel.getAttribute('aria-labelledby'))?.textContent);
   assert.equal(panel.hidden, true);
+  toggle.focus();
   toggle.click();
   assert.equal(panel.hidden, false);
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(document.activeElement, close, 'Opening must make panel controls reachable immediately');
+  close.click();
+  assert.equal(panel.hidden, true);
+  assert.equal(document.activeElement, toggle);
+  toggle.click();
   document.getElementById('ct-local-keywords').focus();
   document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   assert.equal(panel.hidden, true);
   assert.equal(document.activeElement, toggle);
+});
+
+test('save feedback stays outside the scrolling form body and inputs reference visible help', t => {
+  const { document, window } = setup(t);
+  const panel = document.getElementById('ct-local-tools-panel');
+  const body = document.getElementById('ct-local-tools-body');
+  const status = document.getElementById('ct-local-tools-status');
+  assert.ok(body && panel.contains(body));
+  assert.equal(body.contains(status), false, 'Feedback must remain visible when the forms scroll');
+  assert.equal(status.closest('footer')?.parentElement, panel);
+  assert.equal(status.getAttribute('role'), 'status');
+  assert.equal(status.getAttribute('aria-live'), 'polite');
+  for (const id of ['ct-local-keywords', 'ct-local-search-input', 'ct-local-bookmark-input']) {
+    const input = document.getElementById(id);
+    const descriptions = (input.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+    assert.ok(descriptions.some(id => document.getElementById(id)?.textContent.trim()), `${id} needs readable guidance`);
+    assert.ok(body.contains(input));
+  }
+  const searchInput = document.getElementById('ct-local-search-input');
+  searchInput.value = 'cats';
+  submit(window, searchInput);
+  assert.equal(status.closest('footer').hidden, false);
+  assert.match(status.textContent, /saved/i);
 });
 
 test('filter matches only native post body, ignoring authors, controls, editors and nested replies', t => {
@@ -283,17 +317,21 @@ test('saved search recovers when native value tracking attaches after the first 
 
 test('a DOM value without native acknowledgement is not reported as a successful search', async t => {
   const { document, window } = setup(t, {
-    html: '<input type="text" placeholder="Search Tweet">',
+    html: '<input type="text" placeholder="Search Tweet"><textarea aria-label="Draft">Unsent draft</textarea>',
     url: 'https://tweet.app/explore?ct_search=cats',
     beforeInstall(window) {
       const nativeTimeout = window.setTimeout.bind(window);
       window.setTimeout = (callback, delay, ...args) => nativeTimeout(callback, delay === 15000 ? 380 : delay, ...args);
     },
   });
+  const draft = document.querySelector('main textarea');
+  draft.focus();
   await new Promise(resolve => window.setTimeout(resolve, 450));
   assert.equal(window.location.search, '?ct_search=cats');
   assert.match(document.getElementById('ct-local-tools-status').textContent, /Could not start.*cats/);
   assert.equal(document.getElementById('ct-local-tools-panel').hidden, false);
+  assert.equal(document.activeElement, draft, 'A delayed search error must not steal focus from current work');
+  assert.equal(draft.value, 'Unsent draft');
 });
 
 test('an existing search query is preserved while waiting to apply a saved search', async t => {
@@ -317,6 +355,61 @@ test('malformed storage and write errors are visible and do not partially enable
   submit(window, words);
   assert.match(document.getElementById('ct-local-tools-status').textContent, /Could not save/);
   assert.equal(document.querySelector('.ct-keyword-collapsed'), null);
+});
+
+test('saving detects a newer stored value before its storage event arrives and preserves other-tab posts', t => {
+  const initial = state({ bookmarks: [] });
+  const { document, window } = setup(t, { settings: initial });
+  const otherTab = state({ bookmarks: [{ path: '/post/other-tab', label: 'Saved in another tab' }] });
+  const externalRaw = JSON.stringify(otherTab);
+  window.localStorage.setItem(KEY, externalRaw);
+  // Cross-tab event delivery is asynchronous; the write itself must detect this conflict.
+  const input = document.getElementById('ct-local-search-input');
+  input.value = 'My unsaved search';
+  submit(window, input);
+  assert.equal(window.localStorage.getItem(KEY), externalRaw);
+  assert.equal(input.value, 'My unsaved search');
+  const status = document.getElementById('ct-local-tools-status');
+  assert.equal(status.dataset.error, 'true');
+  assert.match(status.textContent, /reload/i);
+  assert.equal(document.querySelector('#ct-local-tools a'), null, 'A rejected save must not become a local success');
+});
+
+test('a storage event preserves editable filter drafts and rejects stale filter saves without folding posts', t => {
+  const { document, window } = setup(t, {
+    html: post('a', 'spoilers'), settings: state({ bookmarks: [] }),
+  });
+  const input = document.getElementById('ct-local-keywords');
+  input.value = 'spoilers';
+  document.getElementById('ct-local-filter-enabled').checked = true;
+  const externalRaw = JSON.stringify(state({ searches: ['cats'], bookmarks: [{ path: '/post/external', label: 'External' }] }));
+  window.localStorage.setItem(KEY, externalRaw);
+  window.dispatchEvent(new window.StorageEvent('storage', { key: KEY, newValue: externalRaw, storageArea: window.localStorage }));
+  assert.equal(input.value, 'spoilers');
+  assert.equal(document.getElementById('ct-local-filter-enabled').checked, true);
+  submit(window, input);
+  assert.equal(window.localStorage.getItem(KEY), externalRaw);
+  assert.equal(document.querySelector('.ct-keyword-collapsed'), null);
+  assert.equal(input.value, 'spoilers');
+  assert.equal(document.getElementById('ct-local-tools-status').dataset.error, 'true');
+});
+
+test('storage.clear events warn and stale bookmark saves cannot resurrect deleted settings', t => {
+  const { document, window } = setup(t, {
+    html: post('a', 'Post body'), url: 'https://tweet.app/post/new-post',
+    settings: state({ bookmarks: [{ path: '/post/existing-post', label: 'Existing post' }] }),
+  });
+  const input = document.getElementById('ct-local-bookmark-input');
+  input.value = 'Unsaved bookmark note';
+  window.localStorage.clear();
+  window.dispatchEvent(new window.StorageEvent('storage', { key: null, newValue: null, storageArea: window.localStorage }));
+  const status = document.getElementById('ct-local-tools-status');
+  assert.match(status.textContent, /reload/i);
+  submit(window, input);
+  assert.equal(window.localStorage.getItem(KEY), null);
+  assert.equal(input.value, 'Unsaved bookmark note');
+  assert.equal(status.dataset.error, 'true');
+  assert.deepEqual([...document.querySelectorAll('#ct-local-bookmarks a')].map(link => link.getAttribute('href')), ['/post/existing-post']);
 });
 
 test('automatic translation hook preserves failed state and supports Japanese copy', t => {
@@ -434,4 +527,27 @@ test('overlong filters are rejected before any storage write or DOM collapse', t
   assert.equal(window.localStorage.getItem(KEY), null);
   assert.equal(document.querySelector('.ct-keyword-collapsed'), null);
   assert.match(document.getElementById('ct-local-tools-status').textContent, /80 characters/);
+});
+
+test('invalid form values identify and focus the field, then clear invalid state when edited', t => {
+  for (const [id, invalidValue] of [
+    ['ct-local-keywords', 'x'.repeat(81)],
+    ['ct-local-search-input', '   '],
+    ['ct-local-bookmark-input', 'x'.repeat(201)],
+  ]) {
+    const { document, window } = setup(t, {
+      html: post('a', 'Post body'), url: 'https://tweet.app/post/current-post',
+    });
+    document.getElementById('ct-local-tools-toggle').click();
+    const input = document.getElementById(id);
+    input.value = invalidValue;
+    submit(window, input);
+    assert.equal(input.getAttribute('aria-invalid'), 'true', id);
+    assert.equal(document.activeElement, input, id);
+    assert.equal(input.value, invalidValue, 'Validation must preserve what the user typed');
+    assert.equal(window.localStorage.getItem(KEY), null);
+    input.value = 'Corrected text';
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    assert.notEqual(input.getAttribute('aria-invalid'), 'true', id);
+  }
 });

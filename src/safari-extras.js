@@ -48,14 +48,20 @@
     });
   }
 
+  let ctMediaInfoRequest = 0;
+  let ctMediaInfoPreviousFocus = null;
   async function ctShowMediaInfo(media) {
-    document.getElementById('ct-media-info-panel')?.remove();
+    const request = ++ctMediaInfoRequest;
+    const previousOverlay = document.getElementById('ct-media-info-panel');
+    const previousFocus = previousOverlay?.contains(document.activeElement) && ctMediaInfoPreviousFocus?.isConnected
+      ? ctMediaInfoPreviousFocus : document.activeElement;
+    ctMediaInfoPreviousFocus = previousFocus;
+    previousOverlay?.remove();
     const src = media.currentSrc || media.src || '';
     const isVideo = media instanceof HTMLVideoElement;
     const width = isVideo ? media.videoWidth : media.naturalWidth;
     const height = isVideo ? media.videoHeight : media.naturalHeight;
     const duration = isVideo && Number.isFinite(media.duration) ? media.duration : null;
-    const head = src ? await ctHeadMedia(src) : { bytes:null, contentType:'' };
 
     const overlay = document.createElement('div');
     overlay.id = 'ct-media-info-panel';
@@ -63,8 +69,8 @@
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-label', isVideo ? '動画情報' : '写真情報');
     const dark = matchMedia?.('(prefers-color-scheme: dark)')?.matches;
-    overlay.style.setProperty('--ct-media-bg', dark ? '#15202b' : '#fff');
-    overlay.style.setProperty('--ct-media-fg', dark ? '#f1f5f9' : '#17202a');
+    overlay.style.setProperty('--ct-media-bg', `var(--color-tl-app-card, ${dark ? '#15202b' : '#fff'})`);
+    overlay.style.setProperty('--ct-media-fg', `var(--color-tl-app-text, ${dark ? '#f1f5f9' : '#17202a'})`);
 
     const sheet = document.createElement('div');
     sheet.className = 'ct-media-info-sheet';
@@ -84,13 +90,15 @@
     grid.className = 'ct-media-info-grid';
     const rows = [
       ['実解像度', width && height ? `${width} × ${height} px` : '読み込み待ち'],
-      ['形式', ctMediaFormat(src, head.contentType)],
-      ['配信ファイル容量', ctFormatBytes(head.bytes)]
+      ['形式', ctMediaFormat(src)],
+      ['配信ファイル容量', src ? '取得中…' : '取得できません']
     ];
     if (isVideo) rows.push(['長さ', duration != null ? `${duration.toFixed(2)} 秒` : '読み込み待ち']);
+    const values = new Map();
     for (const [key, value] of rows) {
       const k = document.createElement('div'); k.className = 'ct-media-info-key'; k.textContent = key;
       const v = document.createElement('div'); v.className = 'ct-media-info-value'; v.textContent = value;
+      values.set(key, v);
       grid.append(k, v);
     }
 
@@ -101,12 +109,31 @@
     sheet.append(headRow, grid, url);
     overlay.append(sheet);
     document.body.append(overlay);
-    const previousFocus = document.activeElement;
-    const dismiss = () => { overlay.remove(); previousFocus?.focus?.(); };
-    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') dismiss(); });
+    const dismiss = () => {
+      const current = request === ctMediaInfoRequest;
+      if (current) ctMediaInfoRequest++;
+      overlay.remove();
+      if (current) {
+        ctMediaInfoPreviousFocus = null;
+        if (previousFocus?.isConnected) previousFocus.focus?.();
+      }
+    };
+    overlay.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      dismiss();
+    });
     close.focus();
     close.onclick = dismiss;
     overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
+
+    // Show the sheet immediately, then update only this still-open request.
+    // Closing it or opening another media item cannot be undone by a late HEAD.
+    const head = src ? await ctHeadMedia(src) : { bytes: null, contentType: '' };
+    if (request !== ctMediaInfoRequest || !overlay.isConnected) return;
+    values.get('形式').textContent = ctMediaFormat(src, head.contentType);
+    values.get('配信ファイル容量').textContent = ctFormatBytes(head.bytes);
   }
 
   function patchMediaInfo(root = document) {
