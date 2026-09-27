@@ -31,6 +31,7 @@ function fixture(language, html, route = '/feed') {
     'patchNotifications', 'patchRetweetRows'
   ];
   const japanese = [
+    'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
     'notificationTextNodes', 'patchNotificationGrammar', 'patchNotificationConnectors',
     'patchNotificationParticles', 'patchNotificationFollowGrammar', 'patchReplyingTo',
     'patchComposeJapanese', 'patchProfileJoinedDate', 'patchInviteJoinedLabels'
@@ -331,5 +332,122 @@ test('ja: grouped notifications recover when React changes only the count and re
   assert.equal(f.text('actorB'), 'Actor B');
   const stable = f.document.body.innerHTML;
   f.run(); assert.equal(f.document.body.innerHTML, stable);
+  f.dom.window.close();
+});
+
+
+test('ja: settings row notes and finite security states translate without touching account values', () => {
+  const f = fixture('ja', `<main><section>
+    <div><div><span class="uppercase tracking-wide">Username</span><span class="truncate" id="name">On</span></div><button id="change">Change</button></div>
+    <p class="px-4 py-3 text-tl-app-text-muted leading-relaxed" id="note">Your username was set when you created your account and cannot be changed here.</p>
+    <div><span class="uppercase tracking-wide">Founding plan</span><p class="text-tl-app-text-muted leading-relaxed" id="plan">You have Centurion.</p></div>
+    <div><span class="uppercase tracking-wide">Authentication app</span><span class="truncate" id="auth">On</span></div>
+    <div><span class="uppercase tracking-wide">Text message</span><span class="truncate" id="sms">Off</span><button id="off">Turn off</button></div>
+    <div><div><span class="uppercase tracking-wide">Backup codes</span><span class="truncate" id="codes">10 codes remaining</span></div></div>
+    <p class="px-4 py-3 text-tl-app-text-muted leading-relaxed" id="warning">Generating new codes invalidates any unused codes you already have.</p>
+    <div><span class="uppercase tracking-wide">Display name</span><span class="truncate" id="display">10 codes remaining</span></div>
+    <div>Unrelated content</div><p class="px-4 py-3 text-tl-app-text-muted leading-relaxed" id="unknown">Home</p>
+    <h4 class="font-bold" id="joined-title">Friends who joined</h4><ul><li id="joined-user">@Home</li></ul>
+  </section></main>`, '/settings');
+  f.run();
+  assert.equal(f.text('name'), 'On');
+  assert.equal(f.text('display'), '10 codes remaining');
+  assert.equal(f.text('change'), '変更');
+  assert.equal(f.text('note'), 'ユーザー名はアカウント作成時に設定されたため、ここでは変更できません。');
+  assert.equal(f.text('plan'), 'Centurionを利用中です。');
+  assert.equal(f.text('auth'), 'オン');
+  assert.equal(f.text('sms'), 'オフ');
+  assert.equal(f.text('off'), 'オフにする');
+  assert.equal(f.text('codes'), '10個のコードが残っています');
+  assert.equal(f.text('warning'), '新しいコードを生成すると、現在お持ちの未使用コードはすべて無効になります。');
+  assert.equal(f.text('joined-title'), '参加した友だち');
+  assert.equal(f.text('joined-user'), '@Home');
+  // An unrelated paragraph still does not gain access to dictionary matching.
+  assert.equal(f.text('unknown'), 'Home');
+  f.document.getElementById('codes').firstChild.nodeValue = '1 code remaining';
+  f.run(); assert.equal(f.text('codes'), '1個のコードが残っています');
+  f.document.getElementById('codes').firstChild.nodeValue = 'No unused codes';
+  f.run(); assert.equal(f.text('codes'), '未使用のコードはありません');
+  const before = f.document.body.innerHTML;
+  f.run(); assert.equal(f.document.body.innerHTML, before);
+  f.dom.window.close();
+});
+
+test('ja: native invite help preserves React counters and never translates user list items', () => {
+  const f = fixture('ja', `<div role="region" aria-label="How the Wing badge works">
+    <p id="title">Earn a Wing badge!</p><p id="how">How it works:</p>
+    <ol><li id="share">Share your invite link with friends.</li><li id="get"></li></ol>
+  </div><ul><li id="name">Share your invite link with friends.</li></ul>
+  <article><div role="region" aria-label="How the Wing badge works"><li id="post">Share your invite link with friends.</li></div></article>`);
+  const counter = f.document.createTextNode('5');
+  f.document.getElementById('get').append(f.document.createTextNode('Get '), counter, f.document.createTextNode(' friends → get a Wing badge!'));
+  f.run();
+  assert.equal(f.text('title'), 'Wingバッジを獲得しよう！');
+  assert.equal(f.text('how'), '仕組み:');
+  assert.equal(f.text('share'), '招待リンクを友だちにシェアします。');
+  assert.match(f.text('get'), /友だちが 5 人参加すると、Wingバッジを獲得できます！/);
+  assert.equal(f.document.getElementById('get').childNodes[1], counter);
+  counter.nodeValue = '6'; f.run();
+  assert.match(f.text('get'), /友だちが 6 人参加すると、Wingバッジを獲得できます！/);
+  assert.equal(f.text('name'), 'Share your invite link with friends.');
+  assert.equal(f.text('post'), 'Share your invite link with friends.');
+  f.dom.window.close();
+});
+
+test('ja: personalized native composer prompt preserves the name and draft', () => {
+  const f = fixture('ja', `<textarea id="public-tweet-input" placeholder="What's happening, Home 🫍?">Keep my draft</textarea>
+    <textarea id="other" placeholder="What's happening, Home 🫍?">Another draft</textarea>`);
+  f.run();
+  assert.equal(f.document.getElementById('public-tweet-input').placeholder, 'Home 🫍、いまどうしてる？');
+  assert.equal(f.document.getElementById('public-tweet-input').value, 'Keep my draft');
+  assert.equal(f.document.getElementById('other').placeholder, "What's happening, Home 🫍?");
+  assert.equal(f.document.getElementById('other').value, 'Another draft');
+  f.dom.window.close();
+});
+
+test('ja: visible native route title translates when React keeps the previous feed hidden', () => {
+  const f = fixture('ja', `<main><div style="display: none"><h2>Home</h2></div>
+    <div><h2 class="truncate" id="title">Notifications</h2></div>
+    <article><h2 class="truncate" id="name">Notifications</h2></article></main>`, '/notifications');
+  f.run();
+  assert.equal(f.text('title'), '通知');
+  assert.equal(f.text('name'), 'Notifications');
+  f.dom.window.close();
+});
+
+test('ja: native notification timestamps and spinner labels localize in their exact contexts', () => {
+  const f = fixture('ja', `<main><button class="items-start border-b"><p><span class="font-extrabold" id="name">Just now</span>
+    <span>followed you</span><span class="text-tl-app-text-soft" id="stamp"></span></p><p class="line-clamp-2" id="preview">3h</p></button>
+    <span class="text-tl-app-text-soft" id="unscoped">3h</span>
+    <div class="flex items-center justify-center"><svg class="animate-spin"></svg><span class="text-xs font-semibold" id="loading">Loading account...</span></div>
+    <span class="text-xs font-semibold" id="plain">Loading account...</span>
+  </main>`, '/notifications');
+  f.document.getElementById('stamp').append(f.document.createTextNode('· '), f.document.createTextNode('3h'));
+  f.run();
+  assert.equal(f.text('name'), 'Just now');
+  assert.equal(f.text('stamp'), '· 3時間前');
+  assert.equal(f.text('preview'), '3h');
+  assert.equal(f.text('unscoped'), '3h');
+  assert.equal(f.text('loading'), 'アカウント情報を読み込み中…');
+  assert.equal(f.text('plain'), 'Loading account...');
+  const before = f.document.body.innerHTML;
+  f.run(); assert.equal(f.document.body.innerHTML, before);
+  f.dom.window.close();
+});
+
+
+test('ja: native translation errors and footer controls translate without changing post content', () => {
+  const f = fixture('ja', `<aside><button id="terms">Terms</button><button id="rules">Rules</button><button id="about">About</button></aside>
+    <article><p role="alert" id="error">Couldn’t translate. Try again.</p>
+      <p class="whitespace-pre-wrap" id="post">Couldn’t translate. Try again.</p>
+      <p class="whitespace-pre-wrap"><span role="alert" id="nested-post">Terms</span></p>
+    </article>`);
+  f.run();
+  assert.equal(f.text('terms'), '利用規約');
+  assert.equal(f.text('rules'), 'ルール');
+  assert.equal(f.text('about'), 'サービスについて');
+  assert.equal(f.text('error'), '翻訳できませんでした。もう一度お試しください。');
+  assert.equal(f.text('post'), 'Couldn’t translate. Try again.');
+  assert.equal(f.text('nested-post'), 'Terms');
   f.dom.window.close();
 });

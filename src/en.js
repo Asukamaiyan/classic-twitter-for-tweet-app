@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.7.2
+// @version      6.7.3
 // @description  Classic interface for tweet.app, preserving posts and names. Reply inbox, individual notification-avatar links, high-resolution badges, star Favorites, saved searches, local saved posts and optional keyword filters.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -980,5 +980,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.7.2 loaded');
+  console.log('🐦 Classic Twitter EN v6.7.3 loaded');
 })();
