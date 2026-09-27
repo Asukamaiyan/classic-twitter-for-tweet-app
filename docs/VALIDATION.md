@@ -19,6 +19,20 @@
 
 これらはCodex内のChromiumへ配布コードを注入した確認です。実Tampermonkey経由のインストール、iPhone／iPad Safari＋Stay、実機のタッチ・長押しは未検証です。サイトを閉じている間のプッシュ通知は提供しません。新着の生成は合成API応答で検証し、確認のための実投稿は行っていません。
 
+
+## 6.7.2 公開先照合
+
+[PR #3](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/3)をmainへマージ済み（`497d82472897ff548df6737e1cc677589663dd9c`）。最終PRコミットとマージ後のGitHub Actionsは成功しました。
+
+Greasy Forkの3版すべてで6.7.2の掲載表示を確認。通常のインストールURLから取得したコードは、Greasy Forkが追加したdownloadURL/updateURLメタデータと改行差を除き、検証済みファイルと一致しました。既存のUnlisted設定を維持しています。
+
+| Greasy Fork ID | 配布内容 SHA-256 |
+|---|---|
+| 594601 | `27f0e9a87d1f52b2cfaaf2b978fae1668249b137bce459200ac95459e9205b9a` |
+| 594602 | `1d2f281d1246e3b2c810ad437a9c9c1549a341ae510ca9cfc4d601f105e17dd4` |
+| 594603 | `9b0f69b08a4a8f66d391eabfe289ed086d7be69eac73a65104fd95282513f687` |
+
+
 ---
 
 # 6.7.1 検証記録
