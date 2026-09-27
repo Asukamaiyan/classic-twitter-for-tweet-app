@@ -12,6 +12,20 @@
 
 ブラウザ検証はCodexのChromium内へコードを一時注入したものです。実Tampermonkeyインストール、iPhone/iPad Safari＋Stayの実機受け入れは未検証です。既存の返信通知・個別プロフィールリンク・公式96pxバッジ・保存機能は維持しています。
 
+
+## 6.7.3 公開先照合
+
+[PR #4](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/4)をmainへマージ済み（`361b8b9b82c6df9345d89f5d3f54fc2f2f2da6dc`）。最終PRコミットとマージ後のGitHub Actionsが成功しました。
+
+Greasy Forkの3版すべてで6.7.3の掲載を確認。通常のインストールURLから取得した配布コードは、Greasy Fork追加の更新URLメタデータと改行差を除き、検証済みファイルと一致しました。既存のUnlisted設定を維持しました。
+
+| Greasy Fork ID | 配布内容 SHA-256 |
+|---|---|
+| 594601 | `c064c76f52d0d333c4ff30431d3474c486d1d8903304b0bfb4dd90173bee8c90` |
+| 594602 | `51dfda34697467f9b9c634f4b8004a7e277c985b2980c86bda9009758e7d291e` |
+| 594603 | `7d49374b985f15ad4d5b7d4ede1448baf970237818d9b81edb27ed3dc0a26262` |
+
+
 ---
 
 # 6.7.2 検証記録
