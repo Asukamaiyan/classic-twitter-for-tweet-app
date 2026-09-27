@@ -30,22 +30,43 @@
     } else { badge?.remove(); }
   }
 
+  let ctProfileFounderRequest = 0;
+  function ctClearProfileFounders(keep = null) {
+    document.querySelectorAll('.ct-profile-founder').forEach(badge => {
+      if (badge !== keep) badge.remove();
+    });
+  }
+
   async function patchProfileFounder() {
-    if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) return;
+    const request = ++ctProfileFounderRequest;
+    if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) {
+      ctClearProfileFounders();
+      return;
+    }
     const path = location.pathname;
     const username = routeUser() || ownProfileUser();
-    if (!username) return;
+    if (!username) { ctClearProfileFounders(); return; }
+    // React may reuse the heading container when a different profile opens.
+    // Remove the previous identity's badge before the new request completes.
+    document.querySelectorAll('.ct-profile-founder').forEach(badge => {
+      if (badge.dataset.ctFounderUser !== normUser(username) || badge.dataset.ctFounderPath !== path) badge.remove();
+    });
     const user = await fetchProfile(username);
-    if (!user || location.pathname !== path) return;
+    if (request !== ctProfileFounderRequest || location.pathname !== path ||
+        normUser(routeUser() || ownProfileUser()) !== normUser(username)) return;
+    if (!user) return;
     const number = user.foundingMemberNumber;
-    if (number == null || !/^\d+$/.test(String(number))) return;
+    if (number == null || !/^\d+$/.test(String(number))) { ctClearProfileFounders(); return; }
     const displayName = clean(user.displayName || user.name || username);
     const heading = [...document.querySelectorAll('main h1,main h2')].find(el =>
       !el.closest('article,[data-ct-owned]') &&
       [displayName, username, `@${username}`].includes(clean(el.textContent)));
-    if (!heading) return;
+    if (!heading) { ctClearProfileFounders(); return; }
     let badge = heading.parentElement.querySelector(':scope > .ct-profile-founder');
     if (!badge) { badge = document.createElement('span'); badge.className = 'ct-profile-founder'; heading.after(badge); }
+    ctClearProfileFounders(badge);
+    badge.dataset.ctFounderUser = normUser(username);
+    badge.dataset.ctFounderPath = path;
     const label = `#${String(number).padStart(5, '0')}`;
     if (badge.textContent !== label) badge.textContent = label;
   }

@@ -4,7 +4,7 @@
 
 ## インストール・更新
 
-現在の版は **6.7.0** です。使う環境に合った **1本だけ** を有効にしてください。
+現在の版は **6.7.1** です。使う環境に合った **1本だけ** を有効にしてください。
 
 | 環境 | Greasy Fork | ファイル |
 |---|---|---|
@@ -13,6 +13,14 @@
 | English | [English version](https://greasyfork.org/en/scripts/594603) | `classic-twitter-en.user.js` |
 
 Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込みしてください。既存のスクリプト名とnamespaceを維持しています。重複する旧版やテスト版は無効にしてください。ニュース試験版はこのリリースの対象外です。
+
+## 6.7.1 の改善
+
+- 便利ツールの開閉・Tab移動・入力エラー時のフォーカスを改善。保存結果はスクロールしても下部に表示します。
+- 本体のダイアログを遮らない表示順、44px以上のボタン、ライト／ダークテーマの色、短い開閉表示に調整。「動きを減らす」設定を尊重します。
+- 画面内キーボードで表示領域が縮んだとき、ツールの位置と高さを補正します。実機Safariの受け入れは未検証です。
+- 別タブで保存内容が変わっていた場合、古いタブからの上書きを止めて入力中の内容を保持します。案内が出たら入力を控えてから再読み込みしてください。
+- プロフィール移動後の古いFounder Number残留、Safariの連続長押しによる情報シート重複・閉じた後の再表示を修正しました。
 
 ## 6.7.0 の変更
 
@@ -57,7 +65,7 @@ npm run check
 
 ## English
 
-Version 6.7.0 limits terminology changes to interface controls. Post bodies, quotes, names, bios, drafts and native manual translation controls are preserved. Automatic translation is off until explicitly enabled in **Tools**; the native translator follows the browser language.
+Version 6.7.1 limits terminology changes to interface controls. Post bodies, quotes, names, bios, drafts and native manual translation controls are preserved. Automatic translation is off until explicitly enabled in **Tools**; the native translator follows the browser language.
 
 Tools provides browser-local saved searches, optional reversible keyword filters, and saved post links from a post detail page. Saved data is shared by accounts in this browser and is not synced across devices. See the validation record for tested environments and the remaining physical Safari/Stay checks.
 

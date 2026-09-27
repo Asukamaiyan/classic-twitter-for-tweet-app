@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.7.0
+// @version      6.7.1
 // @description  tweet.appのUIを安全に日本語化。投稿本文・名前を保持し、表示名・Founder Number・星のお気に入り、保存検索・投稿保存・任意のキーワード折りたたみに対応。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -3262,6 +3262,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.7.0 loaded'
+    '🐦 Classic Twitter JP v6.7.1 loaded'
   );
 })();

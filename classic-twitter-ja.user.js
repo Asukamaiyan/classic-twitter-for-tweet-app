@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.7.0
+// @version      6.7.1
 // @description  tweet.appのUIを安全に日本語化。投稿本文・名前を保持し、表示名・Founder Number・星のお気に入り、保存検索・投稿保存・任意のキーワード折りたたみに対応。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -302,7 +302,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
   const copy = ja ? {
-    tools: '便利ツール', title: 'このブラウザの設定', close: '閉じる',
+    tools: '便利ツール', title: '便利ツール', close: '閉じる',
     scope: 'このブラウザ内でのみ保存されます。同じブラウザの別アカウントにも適用されます。',
     filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
     words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
@@ -314,6 +314,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     invalidSearch: '検索語は 1〜200 文字、保存は 20 件以内です。',
     duplicate: 'この検索語は保存済みです。',
     storageError: 'このブラウザに保存できませんでした。設定は変更されていません。ブラウザの保存設定を確認してください。',
+    storageConflict: '別のタブで保存内容が変更されました。上書きを防ぐため保存を中止しました。入力中の内容を控えてから再読み込みしてください。',
     readError: '保存済み設定を読み込めませんでした。初期設定で開始しました。',
     searchError: '自動検索を開始できませんでした。検索画面で次の検索語を入力してください：',
     automatic: '投稿を自動翻訳する', autoHelp: '有効にすると、サイトの翻訳機能を自動で呼び出します。',
@@ -324,7 +325,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     bookmarkFull: '投稿は 50 件まで、メモは 200 文字以内です。', bookmarkDuplicate: 'この投稿は保存済みです。',
     post: '投稿',
   } : {
-    tools: 'Tools', title: 'Settings for this browser', close: 'Close',
+    tools: 'Tools', title: 'Tools', close: 'Close',
     scope: 'Saved only in this browser. Applies to other accounts in the same browser, too.',
     filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
     words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
@@ -336,6 +337,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     invalidSearch: 'Use 1–200 characters per search, and save up to 20 searches.',
     duplicate: 'This search is already saved.',
     storageError: 'Could not save in this browser. Settings have not changed. Check browser storage settings.',
+    storageConflict: 'Saved data changed in another tab. Nothing was overwritten. Keep a copy of your edits, then reload before saving.',
     readError: 'Could not read saved settings. Started with the defaults.',
     searchError: 'Could not start the search automatically. Enter this query in Explore:',
     automatic: 'Automatically translate posts', autoHelp: 'Calls the site’s translation feature automatically when enabled.',
@@ -354,8 +356,10 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   const postPathPattern = /^\/post\/[A-Za-z0-9_-]{1,200}$/;
   let state = { version: 1, enabled: false, keywords: [], searches: [], bookmarks: [] };
   let loadError = '';
+  let lastSavedRaw = null;
   try {
     const raw = window.localStorage.getItem(storageKey);
+    lastSavedRaw = raw;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (!parsed || parsed.version !== 1 || typeof parsed.enabled !== 'boolean' ||
@@ -385,54 +389,69 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   const style = element('style');
   style.id = 'ct-local-tools-style';
   style.textContent = `
-    #ct-local-tools { position:fixed; right:max(12px, env(safe-area-inset-right)); bottom:calc(76px + env(safe-area-inset-bottom)); z-index:70; font:14px/1.5 system-ui,sans-serif; color:var(--color-tl-app-text, #17202a); }
+    #ct-local-tools { --ct-base-gap:76px; position:fixed; right:max(12px, env(safe-area-inset-right)); bottom:calc(var(--ct-root-gap, var(--ct-base-gap)) + var(--ct-keyboard-offset, 0px) + env(safe-area-inset-bottom)); z-index:40; font:14px/1.5 system-ui,sans-serif; color:var(--color-tl-app-text, #17202a); }
     #ct-local-tools * { box-sizing:border-box; }
     #ct-local-tools button, #ct-local-tools a, .ct-keyword-notice button { font:inherit; cursor:pointer; }
-    #ct-local-tools button, .ct-keyword-notice button { border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:10px; padding:8px 12px; color:inherit; background:var(--color-tl-app-card, #fff); min-height:40px; }
-    #ct-local-tools button:focus-visible, #ct-local-tools a:focus-visible, .ct-keyword-notice button:focus-visible { outline:3px solid #1688d4; outline-offset:2px; }
+    #ct-local-tools button, .ct-keyword-notice button { border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:8px; padding:9px 12px; color:inherit; background:var(--color-tl-app-card, #fff); min-height:44px; }
+    #ct-local-tools button:focus-visible, #ct-local-tools a:focus-visible, #ct-local-tools input:focus-visible, #ct-local-tools textarea:focus-visible, .ct-keyword-notice button:focus-visible { outline:3px solid var(--color-tl-app-primary, #1688d4); outline-offset:2px; }
+    #ct-local-tools button:active:not(:disabled) { transform:translateY(1px); }
+    #ct-local-tools button[type=submit] { border-color:var(--color-tl-app-primary, #1688d4); font-weight:650; }
     #ct-local-tools button:disabled { opacity:.55; cursor:default; }
-    #ct-local-tools-toggle { box-shadow:0 2px 12px #0002; }
-    #ct-local-tools-panel { position:absolute; bottom:48px; right:0; width:min(350px, calc(100vw - 24px)); max-height:calc(100dvh - 156px - env(safe-area-inset-bottom)); overflow:auto; overscroll-behavior:contain; border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:14px; background:var(--color-tl-app-card, #fff); box-shadow:0 6px 28px #0003; padding:16px; }
+    #ct-local-tools-toggle { box-shadow:0 2px 12px #0002; font-weight:650; }
+    #ct-local-tools-panel { display:flex; flex-direction:column; position:absolute; bottom:52px; right:0; width:min(370px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right))); max-height:calc(var(--ct-view-height, 100dvh) - var(--ct-root-gap, var(--ct-base-gap)) - 72px - env(safe-area-inset-bottom)); overflow:hidden; border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:12px; background:var(--color-tl-app-card, #fff); box-shadow:0 6px 28px #0003; animation:ct-tools-enter 160ms ease-out; }
     #ct-local-tools [hidden] { display:none !important; }
-    #ct-local-tools header { display:flex; gap:12px; align-items:center; justify-content:space-between; }
+    #ct-local-tools header { display:flex; flex-shrink:0; gap:12px; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--color-tl-app-border, #b8c5d1); }
+    #ct-local-tools-body { min-height:0; overflow:auto; overscroll-behavior:contain; padding:0 16px 16px; scroll-padding:12px; }
+    #ct-local-tools footer { flex-shrink:0; max-height:calc(var(--ct-view-height, 100dvh) * .25); overflow:auto; padding:10px 16px; border-top:1px solid var(--color-tl-app-border, #b8c5d1); }
     #ct-local-tools h2, #ct-local-tools h3 { margin:0; font-size:16px; font-weight:700; }
     #ct-local-tools section { margin-top:16px; padding-top:16px; border-top:1px solid var(--color-tl-app-border, #b8c5d1); }
     #ct-local-tools p { margin:6px 0; }
-    #ct-local-tools .ct-local-note { font-size:12px; opacity:.85; }
+    #ct-local-tools .ct-local-note { font-size:12px; color:var(--color-tl-app-text-muted, #536471); }
     #ct-local-tools label { display:block; margin:10px 0 5px; }
-    #ct-local-tools input[type=text], #ct-local-tools textarea { display:block; width:100%; padding:9px; border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:8px; font:16px/1.5 system-ui,sans-serif; color:inherit; background:var(--color-tl-app-bg, #fff); }
+    #ct-local-tools input[type=text], #ct-local-tools textarea { display:block; width:100%; padding:9px; border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:8px; font:16px/1.5 system-ui,sans-serif; color:inherit; background:var(--color-tl-app-input-bg, #fff); }
     #ct-local-tools textarea { min-height:85px; resize:vertical; }
-    #ct-local-tools input[type=checkbox] { display:inline-block; width:auto; height:auto; padding:0; vertical-align:middle; margin-inline-end:8px; accent-color:#1688d4; }
+    #ct-local-tools input[type=checkbox] { display:inline-block; width:18px; height:18px; padding:0; vertical-align:middle; margin-inline-end:8px; accent-color:var(--color-tl-app-primary, #1688d4); }
+    #ct-local-tools label:has(input[type=checkbox]) { display:flex; align-items:center; min-height:44px; margin:4px 0; cursor:pointer; }
+    #ct-local-tools [aria-invalid=true] { border-color:var(--color-tl-app-danger, #c23636); }
     #ct-local-tools form > button { margin-top:8px; }
     #ct-local-tools ul { padding:0; margin:8px 0; list-style:none; }
     #ct-local-tools li { display:flex; align-items:center; gap:10px; padding:5px 0; }
-    #ct-local-tools li a { flex:1; min-width:0; overflow-wrap:anywhere; color:inherit; text-decoration:underline; padding:5px 0; }
-    #ct-local-tools-status { font-size:13px; overflow-wrap:anywhere; }
-    #ct-local-tools-status[data-error=true] { color:#c23636; }
+    #ct-local-tools li a { display:flex; align-items:center; flex:1; min-width:0; min-height:44px; overflow-wrap:anywhere; color:inherit; text-decoration:underline; padding:5px 0; }
+    #ct-local-tools #ct-local-tools-status { margin:0; font-size:13px; overflow-wrap:anywhere; }
+    #ct-local-tools-status[data-error=true] { color:var(--color-tl-app-danger, #c23636); }
     article.ct-keyword-collapsed > :not(.ct-keyword-notice) { display:none !important; }
     .ct-keyword-notice { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 0; font:13px/1.5 system-ui,sans-serif; }
     .ct-keyword-notice span { flex:1; min-width:140px; }
-    @media (min-width:1024px) { #ct-local-tools { bottom:20px; } #ct-local-tools-panel { max-height:calc(100dvh - 90px); } }
+    @media (min-width:1024px) { #ct-local-tools { --ct-base-gap:20px; } }
+    @media (hover:hover) { #ct-local-tools button:hover:not(:disabled) { background:var(--color-tl-app-secondary-button-bg, #f1f5f9); } }
+    @keyframes ct-tools-enter { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+    @media (prefers-reduced-motion:reduce) { #ct-local-tools-panel { animation:none; } #ct-local-tools button:active:not(:disabled) { transform:none; } }
   `;
   document.head.append(style);
   const root = element('aside', undefined, { id: 'ct-local-tools', 'data-ct-local-ui': '', 'aria-label': copy.tools });
   const toggle = element('button', copy.tools, { id: 'ct-local-tools-toggle', type: 'button', 'aria-expanded': 'false', 'aria-controls': 'ct-local-tools-panel' });
-  const panel = element('div', undefined, { id: 'ct-local-tools-panel' });
+  const panel = element('div', undefined, { id: 'ct-local-tools-panel', role: 'region', 'aria-labelledby': 'ct-local-tools-title' });
   panel.hidden = true;
   const header = element('header');
-  const title = element('h2', copy.title);
+  const title = element('h2', copy.title, { id: 'ct-local-tools-title' });
   const close = element('button', copy.close, { type: 'button' });
   header.append(title, close);
   const status = element('p', loadError, { id: 'ct-local-tools-status', role: 'status', 'aria-live': 'polite' });
   if (loadError) status.dataset.error = 'true';
-  panel.append(header, element('p', copy.scope, { class: 'ct-local-note' }), status);
-  root.append(panel, toggle);
+  const body = element('div', undefined, { id: 'ct-local-tools-body' });
+  const footer = element('footer', undefined, { tabindex: '0', 'aria-labelledby': 'ct-local-tools-status' });
+  footer.append(status);
+  footer.hidden = !loadError;
+  body.append(element('p', copy.scope, { class: 'ct-local-note' }));
+  panel.append(header, body, footer);
+  root.append(toggle, panel);
   document.body.append(root);
 
-  function openPanel(open) {
+  function openPanel(open, moveFocus = true) {
     if (open) updateBookmarkControl();
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
+    if (open && moveFocus) close.focus({ preventScroll: true });
     if (!open && panel.contains(document.activeElement)) toggle.focus();
   }
   toggle.addEventListener('click', () => openPanel(panel.hidden));
@@ -443,14 +462,30 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   function announce(message, error = false) {
     status.textContent = message;
     status.dataset.error = String(error);
+    footer.hidden = !message;
   }
   function persist(next) {
-    try { window.localStorage.setItem(storageKey, JSON.stringify(next)); }
+    try {
+      // A stale tab must not erase another tab's searches, bookmarks or filters.
+      if (window.localStorage.getItem(storageKey) !== lastSavedRaw) {
+        announce(copy.storageConflict, true);
+        return false;
+      }
+      const raw = JSON.stringify(next);
+      window.localStorage.setItem(storageKey, raw);
+      lastSavedRaw = raw;
+    }
     catch { announce(copy.storageError, true); return false; }
     state = next;
     announce(copy.saved);
     return true;
   }
+  function invalidInput(input, message) {
+    input.setAttribute('aria-invalid', 'true');
+    announce(message, true);
+    input.focus();
+  }
+  function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
 
   if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {
     const automatic = element('section');
@@ -469,7 +504,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
         announce(copy.autoError, true);
       }
     });
-    panel.append(automatic);
+    body.append(automatic);
   }
 
   const filterSection = element('section');
@@ -478,20 +513,22 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   const enabled = element('input', undefined, { type: 'checkbox', id: 'ct-local-filter-enabled' });
   enabled.checked = state.enabled;
   enabledLabel.append(enabled, document.createTextNode(copy.enabled));
-  const keywords = element('textarea', undefined, { id: 'ct-local-keywords', rows: '3', 'aria-describedby': 'ct-local-keyword-help', spellcheck: 'false' });
+  const keywords = element('textarea', undefined, { id: 'ct-local-keywords', rows: '3', 'aria-describedby': 'ct-local-keyword-help ct-local-tools-status', spellcheck: 'false' });
+  keywords.addEventListener('input', clearInvalid);
   keywords.value = state.keywords.join('\n');
   filterForm.append(enabledLabel, element('label', copy.words, { for: keywords.id }), keywords,
     element('p', copy.help, { id: 'ct-local-keyword-help', class: 'ct-local-note' }), element('button', copy.save, { type: 'submit' }));
   filterSection.append(element('h3', copy.filters), filterForm);
-  panel.append(filterSection);
+  body.append(filterSection);
 
   const searchSection = element('section');
   const searchForm = element('form');
-  const searchInput = element('input', undefined, { id: 'ct-local-search-input', type: 'text', maxlength: '200', autocomplete: 'off' });
+  const searchInput = element('input', undefined, { id: 'ct-local-search-input', type: 'text', maxlength: '200', autocomplete: 'off', 'aria-describedby': 'ct-local-search-help ct-local-tools-status' });
+  searchInput.addEventListener('input', clearInvalid);
   searchForm.append(element('label', copy.query, { for: searchInput.id }), searchInput, element('button', copy.add, { type: 'submit' }));
   const searches = element('ul');
-  searchSection.append(element('h3', copy.searches), element('p', copy.searchHelp, { class: 'ct-local-note' }), searchForm, searches);
-  panel.append(searchSection);
+  searchSection.append(element('h3', copy.searches), element('p', copy.searchHelp, { id: 'ct-local-search-help', class: 'ct-local-note' }), searchForm, searches);
+  body.append(searchSection);
   function renderSearches() {
     searches.replaceChildren();
     if (!state.searches.length) searches.append(element('li', copy.noSearches));
@@ -532,8 +569,9 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   searchForm.addEventListener('submit', event => {
     event.preventDefault();
     const query = searchInput.value.trim();
-    if (!query || query.length > 200 || state.searches.length >= 20) { announce(copy.invalidSearch, true); return; }
-    if (state.searches.some(item => normalize(item) === normalize(query))) { announce(copy.duplicate, true); return; }
+    if (!query || query.length > 200 || state.searches.length >= 20) { invalidInput(searchInput, copy.invalidSearch); return; }
+    if (state.searches.some(item => normalize(item) === normalize(query))) { invalidInput(searchInput, copy.duplicate); return; }
+    searchInput.removeAttribute('aria-invalid');
     if (persist({ ...state, searches: [...state.searches, query] })) {
       searchInput.value = '';
       renderSearches();
@@ -542,13 +580,14 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
 
   const bookmarkSection = element('section');
   const bookmarkForm = element('form');
-  const bookmarkInput = element('input', undefined, { id: 'ct-local-bookmark-input', type: 'text', maxlength: '200' });
+  const bookmarkInput = element('input', undefined, { id: 'ct-local-bookmark-input', type: 'text', maxlength: '200', 'aria-describedby': 'ct-local-bookmark-help ct-local-tools-status' });
+  bookmarkInput.addEventListener('input', clearInvalid);
   const bookmarkSave = element('button', copy.bookmarkSave, { type: 'submit', 'aria-describedby': 'ct-local-bookmark-help' });
   bookmarkForm.append(element('label', copy.bookmarkLabel, { for: bookmarkInput.id }), bookmarkInput, bookmarkSave);
   const bookmarks = element('ul', undefined, { id: 'ct-local-bookmarks' });
   bookmarkSection.append(element('h3', copy.bookmarks),
     element('p', copy.bookmarkHelp, { id: 'ct-local-bookmark-help', class: 'ct-local-note' }), bookmarkForm, bookmarks);
-  panel.append(bookmarkSection);
+  body.append(bookmarkSection);
   function currentPost() {
     const path = window.location.pathname.replace(/\/$/, '');
     if (!postPathPattern.test(path)) return null;
@@ -586,8 +625,9 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     const current = currentPost();
     if (!current) { announce(copy.bookmarkMissing, true); return; }
     const label = bookmarkInput.value.trim() || current.label;
-    if (label.length > 200 || state.bookmarks.length >= 50) { announce(copy.bookmarkFull, true); return; }
+    if (label.length > 200 || state.bookmarks.length >= 50) { invalidInput(bookmarkInput, copy.bookmarkFull); return; }
     if (state.bookmarks.some(item => item.path === current.path)) { announce(copy.bookmarkDuplicate, true); return; }
+    bookmarkInput.removeAttribute('aria-invalid');
     if (persist({ ...state, bookmarks: [...state.bookmarks, { path: current.path, label }] })) {
       bookmarkInput.value = '';
       renderBookmarks();
@@ -643,7 +683,8 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   filterForm.addEventListener('submit', event => {
     event.preventDefault();
     const words = keywords.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
-    if (words.length > 30 || words.some(value => value.length > 80)) { announce(copy.invalidWords, true); return; }
+    if (words.length > 30 || words.some(value => value.length > 80)) { invalidInput(keywords, copy.invalidWords); return; }
+    keywords.removeAttribute('aria-invalid');
     if (persist({ ...state, enabled: enabled.checked, keywords: unique(words) })) {
       keywords.value = state.keywords.join('\n');
       reveals = new WeakMap();
@@ -684,7 +725,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     stopPendingSearch();
     if (!query) return;
     announce(`${copy.searchError} ${query}`, true);
-    openPanel(true);
+    openPanel(true, false);
   }
   function nativeSearchInput() {
     // Verified in tweet.app's Explore component. Placeholder may have been
@@ -775,10 +816,33 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   function onStorage(event) {
     // An open tab keeps its own unsaved edits. Tell the user to reload instead
     // of silently replacing the form and possibly changing visible posts.
-    if (event.key === storageKey) announce(ja ? '別のタブで設定が更新されました。反映するには再読み込みしてください。' : 'Settings changed in another tab. Reload to apply them.');
+    if (event.key === storageKey || event.key === null) announce(copy.storageConflict, true);
   }
   window.addEventListener('storage', onStorage);
   window.addEventListener('popstate', refresh);
+  // iOS keyboards can shrink the visual viewport without changing 100dvh.
+  // Bound only our floating UI; never change page zoom or native layout.
+  const viewport = window.visualViewport;
+  let viewportFrame;
+  function updateViewport() {
+    viewportFrame = null;
+    if (!viewport || (viewport.scale && Math.abs(viewport.scale - 1) > 0.01)) {
+      for (const name of ['--ct-view-height', '--ct-keyboard-offset', '--ct-root-gap']) root.style.removeProperty(name);
+      return;
+    }
+    const covered = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+    root.style.setProperty('--ct-view-height', `${viewport.height}px`);
+    root.style.setProperty('--ct-keyboard-offset', `${covered}px`);
+    if (covered > 100) root.style.setProperty('--ct-root-gap', '12px');
+    else root.style.removeProperty('--ct-root-gap');
+  }
+  function queueViewport() {
+    if (viewportFrame == null) viewportFrame = window.requestAnimationFrame(updateViewport);
+  }
+  viewport?.addEventListener('resize', queueViewport);
+  viewport?.addEventListener('scroll', queueViewport);
+  window.addEventListener('resize', queueViewport);
+  updateViewport();
   refresh();
   const controller = { root, panel, refresh, destroy() {
     destroyed = true;
@@ -789,6 +853,10 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     document.removeEventListener('input', onSearchUserInput, true);
     window.removeEventListener('storage', onStorage);
     window.removeEventListener('popstate', refresh);
+    viewport?.removeEventListener('resize', queueViewport);
+    viewport?.removeEventListener('scroll', queueViewport);
+    window.removeEventListener('resize', queueViewport);
+    if (viewportFrame != null) window.cancelAnimationFrame(viewportFrame);
     for (const article of [...collapsed]) uncollapse(article);
     root.remove();
     style.remove();
@@ -978,7 +1046,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.7.0';
+    document.documentElement.dataset.ctActiveVersion = '6.7.1';
     ctStarted = true;
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
@@ -1056,22 +1124,43 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     } else { badge?.remove(); }
   }
 
+  let ctProfileFounderRequest = 0;
+  function ctClearProfileFounders(keep = null) {
+    document.querySelectorAll('.ct-profile-founder').forEach(badge => {
+      if (badge !== keep) badge.remove();
+    });
+  }
+
   async function patchProfileFounder() {
-    if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) return;
+    const request = ++ctProfileFounderRequest;
+    if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) {
+      ctClearProfileFounders();
+      return;
+    }
     const path = location.pathname;
     const username = routeUser() || ownProfileUser();
-    if (!username) return;
+    if (!username) { ctClearProfileFounders(); return; }
+    // React may reuse the heading container when a different profile opens.
+    // Remove the previous identity's badge before the new request completes.
+    document.querySelectorAll('.ct-profile-founder').forEach(badge => {
+      if (badge.dataset.ctFounderUser !== normUser(username) || badge.dataset.ctFounderPath !== path) badge.remove();
+    });
     const user = await fetchProfile(username);
-    if (!user || location.pathname !== path) return;
+    if (request !== ctProfileFounderRequest || location.pathname !== path ||
+        normUser(routeUser() || ownProfileUser()) !== normUser(username)) return;
+    if (!user) return;
     const number = user.foundingMemberNumber;
-    if (number == null || !/^\d+$/.test(String(number))) return;
+    if (number == null || !/^\d+$/.test(String(number))) { ctClearProfileFounders(); return; }
     const displayName = clean(user.displayName || user.name || username);
     const heading = [...document.querySelectorAll('main h1,main h2')].find(el =>
       !el.closest('article,[data-ct-owned]') &&
       [displayName, username, `@${username}`].includes(clean(el.textContent)));
-    if (!heading) return;
+    if (!heading) { ctClearProfileFounders(); return; }
     let badge = heading.parentElement.querySelector(':scope > .ct-profile-founder');
     if (!badge) { badge = document.createElement('span'); badge.className = 'ct-profile-founder'; heading.after(badge); }
+    ctClearProfileFounders(badge);
+    badge.dataset.ctFounderUser = normUser(username);
+    badge.dataset.ctFounderPath = path;
     const label = `#${String(number).padStart(5, '0')}`;
     if (badge.textContent !== label) badge.textContent = label;
   }
@@ -4326,6 +4415,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.7.0 loaded'
+    '🐦 Classic Twitter JP v6.7.1 loaded'
   );
 })();

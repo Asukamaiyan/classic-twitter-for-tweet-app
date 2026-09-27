@@ -1,7 +1,7 @@
 {
   "name": "classic-twitter-for-tweet-app",
   "private": true,
-  "version": "6.7.0",
+  "version": "6.7.1",
   "scripts": {
     "build": "node scripts/build.cjs",
     "test": "node --test tests/*.test.cjs",
