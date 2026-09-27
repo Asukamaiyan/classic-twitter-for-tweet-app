@@ -179,7 +179,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.7.1';
+    document.documentElement.dataset.ctActiveVersion = '6.7.2';
     ctStarted = true;
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
@@ -193,6 +193,7 @@
     document.addEventListener('click', ctRememberTranslationChoice, true);
     ctRunScan();
     ctStartReplyInterval();
+    replyWatchTick();
     window.addEventListener('popstate', ctScheduleScan);
     for (const name of ['pushState', 'replaceState']) {
       const original = history[name];
@@ -204,7 +205,7 @@
     }
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) ctCancelTranslations();
-      else ctScheduleScan();
+      else { ctScheduleScan(); replyWatchTick(); }
     });
     window.addEventListener('pagehide', () => {
       ctPageActive = false;
@@ -221,6 +222,7 @@
         ctObserve();
         ctScheduleScan();
         ctStartReplyInterval();
+        replyWatchTick();
       }
     });
   }

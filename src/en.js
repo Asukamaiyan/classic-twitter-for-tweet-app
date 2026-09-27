@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.7.1
-// @description  Classic interface terminology for tweet.app, preserving posts and names. Display names, Founder Number, star Favorites, saved searches, local saved posts and optional keyword filters.
+// @version      6.7.2
+// @description  Classic interface for tweet.app, preserving posts and names. Reply inbox, individual notification-avatar links, high-resolution badges, star Favorites, saved searches, local saved posts and optional keyword filters.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -23,6 +23,9 @@
   /* @include enhancements */
   /* @include runtime */
   /* @include presentation */
+  /* @include replies */
+  /* @include navigation */
+  /* @include badges */
   /* @include safari */
 
   const API_ORIGIN = 'https://api.tweet.app';
@@ -854,293 +857,6 @@
   }
 
 
-  function authJSON(path, auth) {
-    if (!auth?.token) return Promise.resolve(null);
-    return requestJSON(path.startsWith('http') ? path : API_ORIGIN + path, {
-      Authorization: `Bearer ${auth.token}`
-    });
-  }
-
-  function items(json, keys = []) {
-    if (Array.isArray(json)) return json;
-    if (!json || typeof json !== 'object') return [];
-
-    for (const key of [...keys, 'items', 'notifications', 'posts', 'replies', 'results']) {
-      if (Array.isArray(json[key])) return json[key];
-    }
-
-    return json.data ? items(json.data, keys) : [];
-  }
-
-  const postId = post => String(post?.originalPostId || post?.postId || post?.id || '').trim();
-  const replyCount = post =>
-    Number(
-      post?.replyCount ??
-        post?.comments ??
-        post?.commentCount ??
-        post?.repliesCount ??
-        post?.reply_count ??
-        0
-    ) || 0;
-  const author = post =>
-    validUser(post?.authorUsername || post?.authorHandle || post?.author?.username || post?.username);
-  const postText = post => String(post?.text || post?.body || post?.content || post?.replyText || '');
-  const postName = post =>
-    String(post?.authorName || post?.actorName || post?.author?.displayName || author(post) || '');
-  const postAvatar = post =>
-    String(post?.authorAvatar || post?.actorAvatar || post?.author?.avatarUrl || post?.avatarUrl || '');
-  const postCreated = post => String(post?.createdAt || post?.created_at || post?.timestamp || '');
-
-  function loadReplyNotices() {
-    const list = loadJSON(KEY.replyNotices, []);
-    return Array.isArray(list) ? list : [];
-  }
-
-  function saveReplyNotice(reply, parentId = '') {
-    const id = postId(reply);
-    const username = author(reply);
-    if (!id || !username) return;
-
-    const list = loadReplyNotices();
-    const old = list.find(x => x.id === id);
-
-    const record = {
-      id,
-      parentId: String(reply?.parentPostId || reply?.parentId || parentId || ''),
-      authorUsername: username,
-      authorName: postName(reply) || username,
-      authorAvatar: postAvatar(reply),
-      text: postText(reply),
-      createdAt: postCreated(reply) || new Date().toISOString(),
-      detectedAt: Date.now(),
-      read: old?.read || false
-    };
-
-    saveJSON(
-      KEY.replyNotices,
-      [record, ...list.filter(x => x.id !== id)]
-        .sort(
-          (a, b) =>
-            new Date(b.createdAt || b.detectedAt) - new Date(a.createdAt || a.detectedAt)
-        )
-        .slice(0, 100)
-    );
-  }
-
-  function markReplyRead(id) {
-    const list = loadReplyNotices();
-    list.forEach(item => {
-      if (item.id === id) item.read = true;
-    });
-    saveJSON(KEY.replyNotices, list);
-  }
-
-  let replyBusy = false;
-  let lastFull = 0;
-
-  async function replyWatchTick() {
-    if (replyBusy) return;
-    replyBusy = true;
-
-    try {
-      const auth = await getAuth();
-      if (!auth?.token) return;
-
-      const me = await authJSON('/api/user-profile', auth);
-      const myHandle = validUser(
-        me?.username || me?.handle || me?.user?.username || me?.profile?.username
-      );
-
-      const notificationsJson = await authJSON('/api/notifications?limit=50', auth);
-
-      for (const notification of items(notificationsJson, ['notifications'])) {
-        const type = String(
-          notification?.type ||
-            notification?.eventType ||
-            notification?.kind ||
-            notification?.notificationType ||
-            ''
-        ).toUpperCase();
-
-        const message = String(notification?.message || notification?.text || '');
-        if (!type.includes('REPLY') && !/replied to/i.test(message)) continue;
-
-        const object = notification?.reply || notification?.post || notification?.tweet || notification;
-        const id = postId(object) || String(notification?.postId || notification?.replyPostId || notification?.id || '');
-        const username = validUser(
-          notification?.actorHandle ||
-            notification?.actorUsername ||
-            notification?.actor?.username ||
-            author(object)
-        );
-
-        if (id && username) {
-          saveReplyNotice(
-            {
-              ...object,
-              id,
-              authorUsername: username,
-              authorName:
-                notification?.actorName ||
-                notification?.actorDisplayName ||
-                notification?.actor?.displayName ||
-                postName(object) ||
-                username,
-              authorAvatar:
-                notification?.actorAvatar ||
-                notification?.actor?.avatarUrl ||
-                postAvatar(object),
-              text: notification?.replyText || notification?.postText || postText(object),
-              createdAt:
-                notification?.createdAt || notification?.created_at || postCreated(object)
-            },
-            notification?.parentPostId || notification?.targetPostId || ''
-          );
-        }
-      }
-
-      if (!myHandle) {
-        renderReplyPanel();
-        patchReplyBadge();
-        return;
-      }
-
-      const [postsJson, repliesJson] = await Promise.all([
-        authJSON(`/api/users/${encodeURIComponent(myHandle)}/posts?limit=24`, auth),
-        authJSON(`/api/users/${encodeURIComponent(myHandle)}/replies`, auth)
-      ]);
-
-      const parents = [
-        ...items(postsJson, ['posts']),
-        ...items(repliesJson, ['replies'])
-      ]
-        .filter(post => postId(post) && replyCount(post) > 0)
-        .sort(
-          (a, b) =>
-            new Date(postCreated(b) || 0) - new Date(postCreated(a) || 0)
-        )
-        .slice(0, 24);
-
-      const counts = loadJSON(KEY.replyCounts, {});
-      const seen = new Set(loadJSON(KEY.replySeen, []));
-      const initialized = localStorage.getItem(KEY.replyInit) === '1';
-      const force = Date.now() - lastFull > 10 * 60 * 1000;
-      if (force) lastFull = Date.now();
-
-      for (const parent of parents) {
-        const pid = postId(parent);
-        const count = replyCount(parent);
-        if (!force && initialized && counts[pid] === count) continue;
-
-        const replyJson = await authJSON(`/api/posts/${encodeURIComponent(pid)}/replies?limit=50`, auth);
-
-        for (const reply of items(replyJson, ['replies'])) {
-          const rid = postId(reply);
-          if (!rid || seen.has(rid)) continue;
-
-          const username = author(reply);
-          if (!username || normUser(username) === normUser(myHandle)) {
-            seen.add(rid);
-            continue;
-          }
-
-          if (initialized) saveReplyNotice(reply, pid);
-          seen.add(rid);
-        }
-
-        counts[pid] = count;
-      }
-
-      saveJSON(KEY.replyCounts, counts);
-      saveJSON(KEY.replySeen, [...seen].slice(-3000));
-      localStorage.setItem(KEY.replyInit, '1');
-
-      renderReplyPanel();
-      patchReplyBadge();
-    } catch (error) {
-      console.debug('[Classic Twitter EN reply watcher]', error);
-    } finally {
-      replyBusy = false;
-    }
-  }
-
-  function closeReplyPanel() {
-    document.getElementById('ct-reply-panel')?.remove();
-  }
-
-  function renderReplyPanel() {
-    if (!location.pathname.startsWith('/notifications')) {
-      closeReplyPanel();
-      return;
-    }
-
-    const data = loadReplyNotices().filter(item => !item.read);
-    if (!data.length) {
-      closeReplyPanel();
-      return;
-    }
-
-    const r = centerRect();
-    if (!r) return;
-
-    let panel = document.getElementById('ct-reply-panel');
-    if (!panel) {
-      panel = document.createElement('section');
-      panel.id = 'ct-reply-panel';
-      document.body.appendChild(panel);
-    }
-
-    panel.style.left = `${Math.round(r.left + 12)}px`;
-    panel.style.top = `${Math.max(90, Math.round(r.top + 80))}px`;
-    panel.style.width = `${Math.max(280, Math.round(r.width - 24))}px`;
-    panel.innerHTML = '';
-
-    panel.appendChild(
-      panelHead('↩ New replies', 'Fallback for replies missing from tweet.app notifications', () => {
-        data.forEach(item => markReplyRead(item.id));
-        closeReplyPanel();
-        patchReplyBadge();
-      })
-    );
-
-    for (const item of data) {
-      const row = localCard(item, true);
-      row.onclick = () => {
-        markReplyRead(item.id);
-        if (item.id) location.href = `/post/${encodeURIComponent(item.id)}`;
-        renderReplyPanel();
-        patchReplyBadge();
-      };
-      panel.appendChild(row);
-    }
-  }
-
-  function patchReplyBadge() {
-    const count = loadReplyNotices().filter(item => !item.read).length;
-    let badge = document.getElementById('ct-reply-badge');
-
-    const link = [...document.querySelectorAll('a,button')].find(el =>
-      /^Notifications$/i.test(clean(el.textContent))
-    );
-
-    if (!count || !link) {
-      badge?.remove();
-      return;
-    }
-
-    if (!badge) {
-      badge = document.createElement('div');
-      badge.id = 'ct-reply-badge';
-      document.body.appendChild(badge);
-    }
-
-    const r = link.getBoundingClientRect();
-    badge.textContent = String(count);
-    badge.style.left = `${Math.round(r.right - 8)}px`;
-    badge.style.top = `${Math.round(r.top + 2)}px`;
-  }
-
-
   function ctTranslationButtonText(el) {
     return clean(el?.textContent || el?.getAttribute?.('aria-label') || el?.getAttribute?.('title') || '');
   }
@@ -1251,6 +967,8 @@
       if (favoritesActive) renderFavoritesPanel();
       renderReplyPanel();
       patchReplyBadge();
+    patchNavigation(root);
+    patchOfficialBadges(root);
     } catch (error) {
       console.debug('[Classic Twitter EN]', error);
     }
@@ -1262,5 +980,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.7.1 loaded');
+  console.log('🐦 Classic Twitter EN v6.7.2 loaded');
 })();
