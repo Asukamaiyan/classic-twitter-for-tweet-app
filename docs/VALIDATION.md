@@ -24,7 +24,15 @@
 
 ## 6.8.0 公開先照合
 
-公開作業中。GitHub／Greasy Forkの反映後、通常のインストールURLから取得したコードを3版とも照合して記録します。
+[PR #5](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/5)をmainへマージ済み（`e2ba33e774c95144d16bf1a77cab4464be87818f`）。最終PRコミットとマージ後のGitHub Actionsが成功しました。
+
+Greasy Forkの3版すべてで6.8.0の掲載を確認しました。通常のインストールURLから取得したコードは、Greasy Forkが追加したdownloadURL／updateURLメタデータと改行差を除き、検証済みファイルと一致しました。既存のUnlisted設定を維持しています。
+
+| Greasy Fork ID | 配布内容 SHA-256 |
+|---|---|
+| 594601 | `2238c73fe7ec6f58de3142eb2eb2f00da83b7c724fdd372b9eb6cb2484591f4f` |
+| 594602 | `98c2b88b182e61ec6a5f92dc22513310b1fe031d615e18e83a6643a105d218ed` |
+| 594603 | `7081501219d8b63de4e410ff05e234fb2e55aff331da860273d189c9c65a62d2` |
 
 ---
 
