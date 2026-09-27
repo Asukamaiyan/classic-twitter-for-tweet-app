@@ -1,5 +1,5 @@
 /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTranslate } = {}) {
+function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -19,8 +19,14 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     storageConflict: '別のタブで保存内容が変更されました。上書きを防ぐため保存を中止しました。入力中の内容を控えてから再読み込みしてください。',
     readError: '保存済み設定を読み込めませんでした。初期設定で開始しました。',
     searchError: '自動検索を開始できませんでした。検索画面で次の検索語を入力してください：',
-    automatic: '投稿を自動翻訳する', autoHelp: '有効にすると、サイトの翻訳機能を自動で呼び出します。',
+    automatic: '投稿を自動翻訳する', autoHelp: '選択した方法で投稿を順番に翻訳します。サイトの翻訳でエラーが出た場合は5分間休止します。',
     autoError: '自動翻訳の設定を保存できませんでした。',
+    translationEngine: '翻訳方法', nativeEngine: 'サイトの翻訳', deviceEngine: '端末内の翻訳',
+    deviceHelp: '対応するデスクトップChrome用。翻訳モデルをダウンロードし、投稿本文は端末内で処理します。サイトの翻訳回数を消費しません。モデルは言語ごとに準備してください。',
+    deviceUnsupported: 'このブラウザでは端末内翻訳を利用できません。Safari／Stayとスマートフォンではサイトの翻訳をご利用ください。',
+    sourceLanguage: '翻訳する投稿の言語', prepareModel: 'モデルを準備', preparingModel: '準備中…',
+    translationStatus: '翻訳の状態',
+
     bookmarks: '保存した投稿', bookmarkLabel: '投稿のメモ（任意）', bookmarkSave: 'この投稿を保存',
     bookmarkHelp: '投稿の詳細画面を開くと保存できます。最大 50 件。削除された投稿や非公開の投稿は閲覧できない場合があります。',
     noBookmarks: '保存した投稿はありません。', bookmarkMissing: '先に投稿の詳細画面を開いてください。',
@@ -42,8 +48,14 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     storageConflict: 'Saved data changed in another tab. Nothing was overwritten. Keep a copy of your edits, then reload before saving.',
     readError: 'Could not read saved settings. Started with the defaults.',
     searchError: 'Could not start the search automatically. Enter this query in Explore:',
-    automatic: 'Automatically translate posts', autoHelp: 'Calls the site’s translation feature automatically when enabled.',
+    automatic: 'Automatically translate posts', autoHelp: 'Translates posts one at a time with the selected engine. Site errors pause automatic requests for 5 minutes.',
     autoError: 'Could not save the automatic translation setting.',
+    translationEngine: 'Translation engine', nativeEngine: 'Site translation', deviceEngine: 'On-device translation',
+    deviceHelp: 'For supported desktop Chrome browsers. Downloads models and translates post text on your device without using the site’s translation allowance. Prepare each source language separately.',
+    deviceUnsupported: 'On-device translation is unavailable here. Use site translation in Safari/Stay and on mobile.',
+    sourceLanguage: 'Language of posts to translate', prepareModel: 'Prepare model', preparingModel: 'Preparing…',
+    translationStatus: 'Translation status',
+
     bookmarks: 'Saved posts', bookmarkLabel: 'Note for this post (optional)', bookmarkSave: 'Save this post',
     bookmarkHelp: 'Open a post’s detail page to save it. Up to 50 posts. Deleted or private posts may be unavailable later.',
     noBookmarks: 'No saved posts yet.', bookmarkMissing: 'Open a post’s detail page first.',
@@ -95,7 +107,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     #ct-local-tools * { box-sizing:border-box; }
     #ct-local-tools button, #ct-local-tools a, .ct-keyword-notice button { font:inherit; cursor:pointer; }
     #ct-local-tools button, .ct-keyword-notice button { border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:8px; padding:9px 12px; color:inherit; background:var(--color-tl-app-card, #fff); min-height:44px; }
-    #ct-local-tools button:focus-visible, #ct-local-tools a:focus-visible, #ct-local-tools input:focus-visible, #ct-local-tools textarea:focus-visible, .ct-keyword-notice button:focus-visible { outline:3px solid var(--color-tl-app-primary, #1688d4); outline-offset:2px; }
+    #ct-local-tools button:focus-visible, #ct-local-tools a:focus-visible, #ct-local-tools input:focus-visible, #ct-local-tools select:focus-visible, #ct-local-tools textarea:focus-visible, .ct-keyword-notice button:focus-visible { outline:3px solid var(--color-tl-app-primary, #1688d4); outline-offset:2px; }
     #ct-local-tools button:active:not(:disabled) { transform:translateY(1px); }
     #ct-local-tools button[type=submit] { border-color:var(--color-tl-app-primary, #1688d4); font-weight:650; }
     #ct-local-tools button:disabled { opacity:.55; cursor:default; }
@@ -189,6 +201,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
 
+  let refreshTranslation = () => {};
   if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {
     const automatic = element('section');
     const label = element('label');
@@ -206,6 +219,45 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
         announce(copy.autoError, true);
       }
     });
+    if (typeof getTranslationEngine === 'function' && typeof setTranslationEngine === 'function') {
+      const engine = element('select', undefined, { id: 'ct-local-translation-engine' });
+      engine.style.cssText = 'width:100%;min-height:44px;font:inherit;color:inherit;background:var(--color-tl-app-card,#fff);border:1px solid var(--color-tl-app-border,#b8c5d1);border-radius:8px;padding:6px';
+      engine.append(element('option', copy.nativeEngine, { value: 'native' }), element('option', copy.deviceEngine, { value: 'device' }));
+      engine.options[1].disabled = !deviceTranslationSupported;
+      engine.value = getTranslationEngine();
+      const device = element('div');
+      device.append(element('p', deviceTranslationSupported ? copy.deviceHelp : copy.deviceUnsupported, { class: 'ct-local-note' }));
+      const source = element('select', undefined, { id: 'ct-local-translation-source' });
+      source.style.cssText = engine.style.cssText;
+      const languages = [['en', 'English'], ['ja', '日本語'], ['ko', '한국어'], ['zh', '中文'], ['zh-Hant', '繁體中文'], ['fr', 'Français'], ['es', 'Español'], ['de', 'Deutsch'], ['pt', 'Português'], ['it', 'Italiano'], ['ru', 'Русский'], ['ar', 'العربية'], ['hi', 'हिन्दी'], ['id', 'Bahasa Indonesia'], ['th', 'ไทย'], ['vi', 'Tiếng Việt']];
+      for (const [value, label] of languages) source.append(element('option', label, { value }));
+      source.value = (navigator.language || locale).startsWith('en') ? 'ja' : 'en';
+      const prepare = element('button', copy.prepareModel, { type: 'button', id: 'ct-local-translation-prepare' });
+      source.disabled = prepare.disabled = !deviceTranslationSupported;
+      device.append(element('label', copy.sourceLanguage, { for: source.id }), source, prepare);
+      const translationStatus = element('p', '', { id: 'ct-local-translation-status', role: 'status', 'aria-live': 'polite', 'aria-label': copy.translationStatus, class: 'ct-local-note' });
+      refreshTranslation = () => {
+        const message = getTranslationStatus?.() || '';
+        if (translationStatus.textContent !== message) translationStatus.textContent = message;
+        device.hidden = engine.value !== 'device';
+      };
+      engine.addEventListener('change', () => {
+        try {
+          if (setTranslationEngine(engine.value) === false || getTranslationEngine() !== engine.value) throw new Error('Setting was not saved');
+          announce(copy.saved);
+        } catch { engine.value = getTranslationEngine(); announce(copy.autoError, true); }
+        refreshTranslation();
+      });
+      prepare.addEventListener('click', async () => {
+        prepare.disabled = true; source.disabled = true; prepare.textContent = copy.preparingModel;
+        try { await prepareDeviceTranslation?.(source.value); }
+        catch { announce(copy.autoError, true); }
+        finally { prepare.disabled = source.disabled = !deviceTranslationSupported; prepare.textContent = copy.prepareModel; refreshTranslation(); }
+      });
+      automatic.append(element('label', copy.translationEngine, { for: engine.id }), engine,
+        ...(!deviceTranslationSupported ? [element('p', copy.deviceUnsupported, { class: 'ct-local-note' })] : []), device, translationStatus);
+      refreshTranslation();
+    }
     body.append(automatic);
   }
 
@@ -546,7 +598,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   window.addEventListener('resize', queueViewport);
   updateViewport();
   refresh();
-  const controller = { root, panel, refresh, destroy() {
+  const controller = { root, panel, refresh, refreshTranslation, destroy() {
     destroyed = true;
     observer.disconnect();
     clearTimeout(timer);

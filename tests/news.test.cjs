@@ -1,0 +1,247 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
+const { JSDOM } = require('jsdom');
+const source = readFileSync(join(__dirname, '../src/news.js'), 'utf8');
+const image = 'https://news-pctr.c.yimg.jp/t/news-topics/images/topic/example.jpg';
+const articleURL = 'https://news.yahoo.co.jp/articles/example';
+const feedURL = 'https://news.yahoo.co.jp/rss/categories/domestic.xml';
+const item = (title = '日本のニュース', url = articleURL, img = image) => `<item><title>${title}</title><link>${url}</link><pubDate>Sun, 27 Sep 2026 12:00:00 +0900</pubDate><image>${img}</image></item>`;
+const rss = items => `<?xml version="1.0"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title>Yahoo!ニュース</title>${items}</channel></rss>`;
+function layout(active = 'News', extra = '') {
+  return `<main><div class="w-full min-w-0 flex flex-col"><div class="sticky"><div class="overflow-x-auto">${['For you', 'Following', 'News', 'Sports', 'Entertainment', 'Technology'].map(label => `<button class="rounded-full whitespace-nowrap ${active === label ? 'bg-sky-500 text-white' : ''}">${label}</button>`).join('')}</div></div>${extra}<div id="native-news"><a id="native-story" href="https://example.com">Original world news</a></div></div></main>`;
+}
+function setup(t, options = {}) {
+  const dom = new JSDOM(`<html><head></head><body>${options.html ?? layout()}</body></html>`, {
+    url: options.url || 'https://tweet.app/feed', runScripts: 'outside-only', pretendToBeVisual: true
+  });
+  const window = dom.window;
+  if (options.region) window.localStorage.setItem('ct-news-region-v1', options.region);
+  if (options.cache) window.sessionStorage.setItem('ct-japanese-news-cache-v1', options.cache);
+  if (options.gm) window.GM_xmlhttpRequest = options.gm;
+  if (options.modernGM) window.GM = options.modernGM;
+  if (options.fetch) window.fetch = options.fetch;
+  window.eval(`const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};\n${source}\nwindow.news = { patch: patchJapaneseNews, parse: ctParseJapaneseNews, url: ctNewsURL, load: ctLoadJapaneseNews, request: ctRequestNews, state: ctNewsState, targets: ctNewsTargets };`);
+  const news = window.news;
+  news.state.timeout = 30;
+  t.after(() => window.close());
+  return { window, document: window.document, news };
+}
+const flush = () => new Promise(resolve => setImmediate(resolve));
+const gmSuccess = xml => options => { queueMicrotask(() => options.onload({ status: 200, responseText: xml, finalUrl: options.url })); };
+function select(document, label) {
+  for (const button of document.querySelectorAll('.sticky button')) {
+    button.classList.toggle('bg-sky-500', button.textContent === label);
+    button.classList.toggle('text-white', button.textContent === label);
+  }
+}
+
+test('parses Yahoo RSS image headlines, deduplicates articles, preserves source and publication date', t => {
+  const { news } = setup(t);
+  const articles = news.parse(rss(item() + item() + item('写真なし', articleURL + '2', '')));
+  assert.equal(articles.length, 2);
+  assert.equal(articles[0].image, image);
+  assert.equal(articles[0].title, '日本のニュース');
+  assert.equal(articles[0].source, 'Yahoo!ニュース');
+  assert.equal(articles[0].publishedAt, '2026-09-27T03:00:00.000Z');
+  assert.equal(articles[1].image, '');
+});
+
+test('supports media thumbnail and image enclosure without reading HTML descriptions', t => {
+  const { news } = setup(t);
+  const first = item().replace(`<image>${image}</image>`, `<media:thumbnail url="${image}"/>`);
+  const second = item('Two', articleURL + '2').replace(`<image>${image}</image>`, `<enclosure type="image/jpeg" url="${image}"/><description><![CDATA[<img src="https://evil.test/track">]]></description>`);
+  assert.equal(news.parse(rss(first + second)).length, 2);
+  assert.ok(news.parse(rss(first + second)).every(article => article.image === image));
+});
+
+test('rejects malformed XML, entities, oversized responses and non-RSS documents', t => {
+  const { news } = setup(t);
+  for (const value of [null, '<rss>', '<html><item/></html>', '<!DOCTYPE rss [<!ENTITY x SYSTEM "file:///etc/passwd">]><rss><channel/></rss>', 'a'.repeat(1024 * 1024 + 1)]) {
+    assert.equal(news.parse(value).length, 0);
+  }
+});
+
+test('URL allowlists reject scripts, private hosts, lookalike domains and credentials', t => {
+  const { news } = setup(t);
+  for (const url of ['javascript:alert(1)', 'http://news.yahoo.co.jp/articles/one', 'https://localhost/articles/one', 'https://news.yahoo.co.jp.evil.test/articles/one', 'https://user:pass@news.yahoo.co.jp/articles/one', 'https://news.yahoo.co.jp/articles/one#fragment', 'https://news.yahoo.co.jp:8080/articles/one', 'https://news.yahoo.co.jp/login']) assert.equal(news.url(url), null);
+  for (const url of ['data:image/png,aaa', 'https://127.0.0.1/image.jpg', 'https://yimg.jp.evil.test/image.jpg', 'https://user:pass@x.yimg.jp/a.jpg']) assert.equal(news.url(url, 'image'), null);
+  assert.equal(news.url(image, 'image'), image);
+  assert.equal(news.url(feedURL, 'feed'), feedURL);
+  assert.equal(news.url(feedURL + '?unknown=1', 'feed'), null);
+});
+
+test('RSS cannot inject executable markup or arbitrary image/article URLs', t => {
+  const { news } = setup(t);
+  const malicious = item('&lt;img src=x onerror=alert(1)&gt;', articleURL, 'javascript:alert(1)') + item('evil', 'https://evil.test/a', image);
+  const articles = news.parse(rss(malicious));
+  assert.equal(articles.length, 1);
+  assert.equal(articles[0].title, '<img src=x onerror=alert(1)>');
+  assert.equal(articles[0].image, '');
+});
+
+test('GM transport is anonymous GET with a bounded timeout and no user credentials', async t => {
+  let call;
+  const { news } = setup(t, { gm: options => { call = options; gmSuccess(rss(item()))(options); } });
+  assert.ok(await news.request(feedURL));
+  assert.equal(call.method, 'GET'); assert.equal(call.anonymous, true);
+  assert.equal(call.redirect, 'error'); assert.equal(call.timeout, 30);
+  assert.equal(call.headers.Authorization, undefined); assert.equal(call.headers.Cookie, undefined);
+});
+
+test('supports modern Promise GM transport and rejects redirects/status/errors', async t => {
+  const gm = { marker: true, xmlHttpRequest(options) { assert.equal(this.marker, true); return Promise.resolve({ status: 200, responseText: rss(item()), finalUrl: options.url }); } };
+  const { news } = setup(t, { modernGM: gm });
+  assert.ok(await news.request(feedURL));
+  for (const response of [{ status: 403, responseText: '<rss/>' }, { status: 200, responseText: '<rss/>', finalUrl: 'https://evil.test/rss' }, { status: 200, responseText: 'x'.repeat(1024 * 1024 + 1) }]) {
+    gm.xmlHttpRequest = () => Promise.resolve(response);
+    assert.equal(await news.request(feedURL), null);
+  }
+  gm.xmlHttpRequest = () => Promise.reject(new Error('Network error'));
+  assert.equal(await news.request(feedURL), null);
+});
+
+test('hanging GM request is aborted at the deadline and unknown URLs are never fetched', async t => {
+  let calls = 0;
+  let aborts = 0;
+  const { news } = setup(t, { gm: () => { calls++; return { abort() { aborts++; } }; } });
+  assert.equal(await news.request('https://evil.test/rss'), null);
+  assert.equal(calls, 0);
+  assert.equal(await news.request(feedURL), null);
+  assert.equal(aborts, 1);
+});
+
+test('fetch fallback omits cookies, referrer and redirects and times out on a hanging body', async t => {
+  let call;
+  const { news } = setup(t, { fetch: async (url, options) => { call = options; return { ok: true, url, text: () => new Promise(() => {}) }; } });
+  assert.equal(await news.request(feedURL), null);
+  assert.equal(call.credentials, 'omit'); assert.equal(call.referrerPolicy, 'no-referrer');
+  assert.equal(call.redirect, 'error'); assert.equal(call.signal.aborted, true);
+});
+
+test('concurrent loads deduplicate and successful headlines are cached for 15 minutes', async t => {
+  let calls = 0;
+  const { news, window } = setup(t, { gm: options => { calls++; gmSuccess(rss(item()))(options); } });
+  const [a, b] = await Promise.all([news.load('nation'), news.load('nation')]);
+  assert.equal(calls, 1); assert.equal(a, b);
+  assert.equal(await news.load('nation'), a); assert.equal(calls, 1);
+  assert.ok(window.sessionStorage.getItem('ct-japanese-news-cache-v1'));
+  news.state.cache.get('nation').at = Date.now() - news.state.ttl;
+  await news.load('nation'); assert.equal(calls, 2);
+});
+
+test('failures back off and empty/malformed feeds do not suppress world news', async t => {
+  let calls = 0;
+  const { news, document } = setup(t, { gm: options => { calls++; gmSuccess('<html>blocked</html>')(options); } });
+  news.patch(); await flush();
+  assert.equal(calls, 1);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+  assert.match(document.querySelector('.ct-news-status').textContent, /世界のニュース/);
+  news.patch(); await news.load('nation'); assert.equal(calls, 1);
+});
+
+test('Japanese default renders source photos; World restores the same native DOM and event handlers', async t => {
+  const { news, document, window } = setup(t, { gm: gmSuccess(rss(item())) });
+  const native = document.querySelector('#native-news');
+  let clicked = 0;
+  document.querySelector('#native-story').addEventListener('click', e => { e.preventDefault(); clicked++; });
+  news.patch(); await flush();
+  assert.equal(document.querySelector('.ct-news-article img').src, image);
+  assert.equal(document.querySelector('.ct-news-article').href, articleURL);
+  assert.equal(document.querySelector('.ct-news-article').rel, 'noopener noreferrer');
+  assert.equal(document.querySelector('.ct-news-article img').referrerPolicy, 'no-referrer');
+  assert.equal(native.classList.contains('ct-news-native-hidden'), true);
+  document.querySelector('[data-ct-news-region="world"]').click();
+  assert.equal(native.classList.contains('ct-news-native-hidden'), false);
+  assert.equal(document.querySelector('#native-news'), native);
+  assert.equal(document.querySelector('.ct-news-list').hidden, true);
+  document.querySelector('#native-story').click(); assert.equal(clicked, 1);
+  assert.equal(window.localStorage.getItem('ct-news-region-v1'), 'world');
+});
+
+test('English defaults to world news without contacting an external feed until Japan is chosen', async t => {
+  let calls = 0;
+  const { news, document } = setup(t, { locale: 'en', gm: options => { calls++; gmSuccess(rss(item()))(options); } });
+  news.patch(); await flush(); assert.equal(calls, 0);
+  assert.equal(document.querySelector('[data-ct-news-region="world"]').getAttribute('aria-pressed'), 'true');
+  document.querySelector('[data-ct-news-region="jp"]').click(); await flush();
+  assert.equal(calls, 1); assert.equal(document.querySelector('.ct-news-article h3').textContent, '日本のニュース');
+});
+
+test('switching region or topic during a pending request cannot hide the current world feed', async t => {
+  const callbacks = [];
+  const { news, document } = setup(t, { gm: options => callbacks.push(options) });
+  news.patch();
+  document.querySelector('[data-ct-news-region="world"]').click();
+  callbacks[0].onload({ status: 200, responseText: rss(item()) }); await flush();
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+  assert.equal(document.querySelector('.ct-news-list').hidden, true);
+  select(document, 'Sports');
+  document.querySelector('[data-ct-news-region="jp"]').click();
+  assert.match(callbacks[1].url, /sports\.xml$/);
+  select(document, 'Technology'); news.patch();
+  assert.match(callbacks[2].url, /it\.xml$/);
+  callbacks[1].onload({ status: 200, responseText: rss(item('sports')) }); await flush();
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+  callbacks[2].onload({ status: 200, responseText: rss(item('technology')) }); await flush();
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'technology');
+});
+
+test('switching back to native For you removes the panel and restores native contents', async t => {
+  const { news, document } = setup(t, { gm: gmSuccess(rss(item())) });
+  news.patch(); await flush(); select(document, 'For you'); news.patch();
+  assert.equal(document.querySelector('.ct-japanese-news'), null);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+  assert.equal(news.state.mounts.size, 0);
+});
+
+test('only verified visible home news tabs are eligible; composers and user content are never hidden', t => {
+  for (const options of [
+    { html: layout('For you') },
+    { html: layout().replace('id="native-news"', 'id="native-news"><textarea>Draft</textarea><div').replace('</main>', '</main>') },
+    { html: layout().replace('class="w-full min-w-0 flex flex-col"', 'class="w-full min-w-0 flex flex-col" hidden') },
+    { url: 'https://tweet.app/post/example' }
+  ]) {
+    const { news, document } = setup(t, options);
+    news.patch(); assert.equal(document.querySelector('.ct-japanese-news'), null);
+  }
+});
+
+test('translated native category labels still resolve and do not change titles or article bodies', async t => {
+  const html = layout().replace('>News<', '>ニュース<').replace('>Sports<', '>スポーツ<').replace('>Entertainment<', '>エンターテインメント<').replace('>Technology<', '>テクノロジー<');
+  const { news, document } = setup(t, { html, gm: gmSuccess(rss(item('&lt;img src=x&gt;'))) });
+  news.patch(); await flush();
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, '<img src=x>');
+  assert.equal(document.querySelector('.ct-news-article h3 img'), null);
+  assert.equal(document.querySelector('#native-story').textContent, 'Original world news');
+});
+
+test('cached headlines are validated again and stale or malicious entries are discarded', async t => {
+  const entry = { at: Date.now(), articles: [{ title: 'Cached', url: articleURL, image, publishedAt: '2026-09-27T03:00:00Z' }, { title: 'Evil', url: 'javascript:alert(1)', image }] };
+  const { news, document } = setup(t, { cache: JSON.stringify({ nation: entry }), gm: () => assert.fail('fresh cache should not fetch') });
+  news.patch(); await flush();
+  assert.equal(document.querySelectorAll('.ct-news-article').length, 1);
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'Cached');
+});
+
+test('repeated scans are DOM-idempotent and failed photos hide without a broken-image placeholder', async t => {
+  const { news, document, window } = setup(t, { gm: gmSuccess(rss(item())) });
+  news.patch(); await flush();
+  let count = 0;
+  const observer = new window.MutationObserver(records => { count += records.length; });
+  observer.observe(document.body, { attributes: true, childList: true, subtree: true, characterData: true });
+  news.patch(); news.patch(); await flush(); assert.equal(count, 0);
+  observer.disconnect();
+  const img = document.querySelector('.ct-news-article img');
+  img.dispatchEvent(new window.Event('error')); assert.equal(img.hidden, true);
+});
+
+test('a pending result after route change cannot hide native content or recreate removed panels', async t => {
+  let request;
+  const { news, document, window } = setup(t, { gm: options => { request = options; } });
+  news.patch(); window.history.replaceState({}, '', '/notifications'); news.patch();
+  request.onload({ status: 200, responseText: rss(item()) }); await flush();
+  assert.equal(document.querySelector('.ct-japanese-news'), null);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+});

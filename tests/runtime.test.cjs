@@ -5,6 +5,7 @@ const path = require('node:path');
 const acorn = require('acorn');
 const { JSDOM } = require('jsdom');
 
+const translation = fs.readFileSync(path.join(__dirname, '../src/translation.js'), 'utf8');
 const runtime = fs.readFileSync(path.join(__dirname, '../src/runtime.js'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../classic-twitter-ja.user.js'), 'utf8');
 const helperNames = new Set(['ctTranslationButtonText', 'ctTranslationControls', 'ctDeclaredLanguage', 'ctLikelyLanguage']);
@@ -20,7 +21,7 @@ function visit(node) {
 visit(acorn.parse(script, { ecmaVersion: 'latest' }));
 assert.equal(helpers.length, helperNames.size, 'runtime fixtures use the actual shipped translation helpers');
 
-function post(id, text = 'This is a post in English.', language = 'en', label = 'Show translation') {
+function post(id, text = `This is a post in English. ${id}`,  language = 'en', label = 'Show translation') {
   return `<article id="${id}"><p class="whitespace-pre-wrap" lang="${language}">${text}</p><p aria-live="polite"><button id="${id}-translate">${label}</button></p></article>`;
 }
 
@@ -72,6 +73,7 @@ function harness(t, html = '', options = {}) {
     const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};
     const clean = value => String(value ?? '').replace(/\\s+/g, ' ').trim();
     ${helpers.join('\n')}
+    ${translation}
     ${runtime}
     window.qa = { autoTranslationEnabled, patchAutoTranslation, ctOwnTranslationText,
       ctRememberTranslationChoice, patchFavoriteButtons, articleId, start, ctRunScan, ctScheduleScan,
@@ -103,9 +105,9 @@ function harness(t, html = '', options = {}) {
   };
 }
 
-function countClicks(f, id) {
+function countClicks(f, id, complete = true) {
   let count = 0;
-  f.button(id).addEventListener('click', () => { count += 1; });
+  f.button(id).addEventListener('click', () => { count += 1; if (complete) f.button(id).textContent = 'Show original'; });
   return () => count;
 }
 
@@ -155,7 +157,7 @@ test('opted-in translation is throttled, deduplicated and never hides manual con
   assert.equal(f.qa.pending(), 2);
   await f.advance();
   assert.equal(one(), 1); assert.equal(two(), 0);
-  await f.advance(749); assert.equal(two(), 0);
+  await f.advance(1499); assert.equal(two(), 0);
   await f.advance(1); assert.equal(two(), 1);
   f.qa.patchAutoTranslation(); await f.advance(2000);
   assert.equal(one(), 1); assert.equal(two(), 1);
@@ -229,7 +231,7 @@ test('queued translation rechecks attachment, source text, disabled state and bu
     if (mode === 'disabled') button.setAttribute('aria-disabled', 'true');
     if (mode === 'busy') button.setAttribute('aria-busy', 'true');
     if (mode === 'show-original') button.textContent = 'Show original';
-    await f.advance(1000); assert.equal(count(), 0, mode);
+    await f.advance(2000); assert.equal(count(), 0, mode);
   }
 });
 
@@ -313,4 +315,78 @@ test('pagehide stops observer and interval, and persisted pageshow restores one 
   interval.callback(); assert.equal(f.stats.replyChecks, 3);
   f.hidden(true); interval.callback(); assert.equal(f.stats.replyChecks, 3);
   f.hidden(false); assert.equal(f.stats.replyChecks, 4, 'visible page requests a throttled refresh');
+});
+
+test('native translation waits for completion before sending the next request', async t => {
+  const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
+  const one = countClicks(f, 'one', false), two = countClicks(f, 'two');
+  f.qa.patchAutoTranslation(); await f.advance();
+  f.button('one').setAttribute('aria-busy', 'true');
+  await f.advance(5000);
+  assert.equal(one(), 1); assert.equal(two(), 0);
+  f.button('one').removeAttribute('aria-busy'); f.button('one').textContent = 'Show original';
+  await f.advance(249); assert.equal(two(), 0);
+  await f.advance(1501); assert.equal(two(), 1);
+});
+
+test('native error cancels queued requests, survives backgrounding and permits manual retry', async t => {
+  const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
+  const one = countClicks(f, 'one', false), two = countClicks(f, 'two');
+  f.qa.start(); f.qa.patchAutoTranslation(); await f.advance();
+  f.hidden(true);
+  const alert = f.document.createElement('p'); alert.setAttribute('role', 'alert');
+  alert.textContent = '翻訳できませんでした。もう一度お試しください。';
+  f.button('one').parentElement.parentElement.append(alert);
+  await f.advance(250); f.hidden(false);
+  assert.equal(f.qa.pending(), 0); assert.match(f.settings.getTranslationStatus(), /5分/);
+  f.qa.patchAutoTranslation(); await f.advance(2000); assert.equal(two(), 0);
+  f.button('one').click(); assert.equal(one(), 2, 'manual control was not disabled or hidden');
+  alert.remove();
+  await f.advance(300000); f.qa.patchAutoTranslation(); await f.advance();
+  assert.equal(two(), 1, 'other posts can resume after cooldown');
+});
+
+test('native timeout pauses the queue instead of flooding more requests', async t => {
+  const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
+  const one = countClicks(f, 'one', false), two = countClicks(f, 'two');
+  f.qa.start(); f.qa.patchAutoTranslation(); await f.advance(15000); await f.advance(15000);
+  assert.equal(one(), 1); assert.equal(two(), 0);
+  assert.match(f.settings.getTranslationStatus(), /5分/);
+});
+
+test('native attempts deduplicate React replacement by own permalink and original body', async t => {
+  const html = post('one').replace('<article id="one">', '<article id="one"><a href="/post/real-id"><time>now</time></a>');
+  const f = harness(t, html, { values: { 'autoTranslate.optInV2': true } });
+  const one = countClicks(f, 'one'); f.qa.patchAutoTranslation(); await f.advance(); assert.equal(one(), 1);
+  f.document.querySelector('article').outerHTML = html;
+  const replacement = countClicks(f, 'one'); f.qa.patchAutoTranslation(); await f.advance(2000);
+  assert.equal(replacement(), 0);
+  f.document.querySelector('.whitespace-pre-wrap').textContent = 'This post has been edited.';
+  f.qa.patchAutoTranslation(); await f.advance(); assert.equal(replacement(), 1);
+});
+
+test('feed cards without permalinks deduplicate exact text across remounts', async t => {
+  const f = harness(t, post('one'), { values: { 'autoTranslate.optInV2': true } });
+  const one = countClicks(f, 'one'); f.qa.patchAutoTranslation(); await f.advance(); assert.equal(one(), 1);
+  f.document.querySelector('article').outerHTML = post('one');
+  const replacement = countClicks(f, 'one'); f.qa.patchAutoTranslation(); await f.advance(2000);
+  assert.equal(replacement(), 0);
+  f.button('one').click(); assert.equal(replacement(), 1, 'dedupe does not disable manual translation');
+});
+
+test('native same-language response completes even when a fast busy state was not observed', async t => {
+  const f = harness(t, post('one') + post('two', 'This is another post.'), { values: { 'autoTranslate.optInV2': true } });
+  f.button('one').addEventListener('click', () => f.button('one').setAttribute('aria-disabled', 'true'));
+  const two = countClicks(f, 'two'); f.qa.patchAutoTranslation(); await f.advance(1500);
+  assert.equal(two(), 1);
+});
+
+test('unmounting an in-flight native translation pauses new requests instead of assuming completion', async t => {
+  const f = harness(t, post('one'), { values: { 'autoTranslate.optInV2': true } });
+  f.qa.start(); const one = countClicks(f, 'one', false);
+  f.qa.patchAutoTranslation(); await f.advance(); assert.equal(one(), 1);
+  f.document.querySelector('article').remove();
+  f.document.body.insertAdjacentHTML('beforeend', post('two'));
+  const two = countClicks(f, 'two'); f.qa.patchAutoTranslation(); await f.advance(2000);
+  assert.equal(two(), 0); assert.match(f.settings.getTranslationStatus(), /完了を確認できない/);
 });

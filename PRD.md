@@ -40,3 +40,13 @@ User-requested scope for all three editions:
 - Restore Japanese UI coverage lost by the 6.7.0 broad content exclusions, using verified settings, invitation, composer and navigation contexts. Preserve names, account values, drafts, posts and quotations even when they contain the same words as controls.
 - Verify the exact native avatar structure in every generated distribution, plus dynamic insertion and React updates. Confirm Japanese Chrome/Safari and English output on live pages with UI-only inspection.
 - Publish the corrected self-contained scripts and compare the downloaded Greasy Fork source to the tested files. Keep manual extension-manager and physical-device acceptance separate from Chromium injection.
+
+## 6.8.0 media, translation and Japanese news
+
+- Photo selection accepts several images together, passes the original files to the existing upload flow sequentially, and reports unsuccessful/unsubmitted selections. Preserve native limits, errors, video uploads, and the user's final Post action. Never submit a post automatically.
+- Multi-photo posts support touch scrolling, keyboard navigation and previous/next controls. Their native enlarged viewer can move between the same photos. Keep original image click, post actions, and single-image/video rendering.
+- Japanese new-post placeholders read exactly `いまどうしてる？`, without the account name; input values remain unchanged.
+- Automatic native translation works sequentially, avoids repeated requests for remounted text, and pauses after errors. Optional browser-device translation processes text locally on supported desktop browsers after explicit model preparation. Native manual translation stays available, and local mode does not silently fall back to another server.
+- Server-advertised upload quotas and server image/video processing remain outside userscript control. Do not claim unlimited uploads, unlimited native translation or retained 4K HDR. Document current evidence and unsupported browser/device paths.
+
+- Japanese editions default to Japan-focused news, with an explicit Japan/world selector in all editions. Display publisher-provided article images when present, preserve topic categories, cache public feed reads, and restore native news on failure. Never guess an image or fabricate news.

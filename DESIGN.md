@@ -21,3 +21,10 @@ Official badge PNGs use the verified 96px variant while preserving 18/24px layou
 
 
 Version 6.7.3 repairs two regressions introduced by earlier narrowing: official Uo avatars can be direct images or images inside a direct native profile button, and static settings/help UI can share truncation/paragraph classes with user content. Overlay detection now handles both confirmed avatar forms without accepting arbitrary descendant images. Localization uses contextual exceptions for verified settings rows, invitation help and native composer placeholders; it does not restore unrestricted page-wide dynamic replacement. Distribution startup fixtures include the real nested profile-button structure.
+
+
+Version 6.8.0 adds shared media, translation and Japanese-news modules. Photo batches serialize original File objects through the verified native image input; they wait for successful ready previews, preserve server/native errors, and never submit posts. Gallery enhancement keeps native image elements/click handlers and applies scroll-snap with accessible controls only to the observed multi-image grid. No resolution/HDR or quota spoofing is introduced.
+
+Native automatic translation waits for the previous operation, bounds pending work, deduplicates attempts and backs off on error. Optional on-device translation uses browser capability detection and user-triggered model preparation. Its output is a separate owned region, and unavailable models do not fall back to a remote translator. Translation remains opt-in.
+
+Japan news uses an explicit, reversible region selector. Public RSS requests omit authentication; bounded caches and error backoff avoid repeated fetching during DOM scans. Only valid HTTPS article/image URLs are rendered through DOM APIs. Native news nodes remain owned by React and are hidden only after a successful Japanese-feed response, then restored on failure or world selection. Generated editions declare the same narrowly scoped public-feed connection permission.

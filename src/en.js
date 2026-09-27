@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.7.3
-// @description  Classic interface for tweet.app, preserving posts and names. Reply inbox, individual notification-avatar links, high-resolution badges, star Favorites, saved searches, local saved posts and optional keyword filters.
+// @version      6.8.0
+// @description  Classic interface for tweet.app. Multiple-photo selection, photo slides, Japan/world news and safer automatic translation with optional on-device translation. Preserves posts, reply inbox, badges and local tools.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      api.tweet.app
+// @connect      news.yahoo.co.jp
 /* @safari-grants */
 // @noframes
 // @run-at       document-start
@@ -21,11 +22,14 @@
   const CT_LOCALE = 'en';
   /* @include network */
   /* @include enhancements */
+  /* @include translation */
   /* @include runtime */
   /* @include presentation */
   /* @include replies */
   /* @include navigation */
   /* @include badges */
+  /* @include media */
+  /* @include news */
   /* @include safari */
 
   const API_ORIGIN = 'https://api.tweet.app';
@@ -969,6 +973,8 @@
       patchReplyBadge();
     patchNavigation(root);
     patchOfficialBadges(root);
+    ctMediaEnhance(root);
+    patchJapaneseNews(root);
     } catch (error) {
       console.debug('[Classic Twitter EN]', error);
     }
@@ -980,5 +986,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.7.3 loaded');
+  console.log('🐦 Classic Twitter EN v6.8.0 loaded');
 })();
