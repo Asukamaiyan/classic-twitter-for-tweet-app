@@ -4,7 +4,7 @@
 
 ## インストール・更新
 
-ローカル修正版は **6.8.0** です。Greasy Forkで最後に公開確認した版は **6.7.3** です。使う環境に合った **1本だけ** を有効にしてください。
+バージョン **6.8.0** です。使う環境に合った **1本だけ** を有効にしてください。
 
 | 環境 | Greasy Fork | ファイル |
 |---|---|---|
@@ -14,7 +14,7 @@
 
 Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込みしてください。既存のスクリプト名とnamespaceを維持しています。重複する旧版やテスト版は無効にしてください。日本ニュース機能は本体へ統合しました。旧ニュース試験版は無効にしてください。
 
-## 6.8.0 の改善（公開前）
+## 6.8.0 の改善
 
 - **写真をまとめて選択**：複数ファイルを1枚ずつ既存の添付処理へ渡し、完了を待って次へ進みます。失敗や上限で止まった残りの枚数を表示し、最終的な投稿は利用者が行います。
 - **写真を横にスライド**：投稿に表示されている複数写真をスワイプ、矢印、キーボードで切り替えます。元の画像を開く操作は維持します。
@@ -25,7 +25,7 @@ Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込み
 
 画像枚数・ファイルサイズ・長さ・1日あたりの投稿枠やサーバーでの再圧縮は、tweet.appが決める条件です。**無制限の投稿、無制限のサイト翻訳、4K HDRの保持は実装・保証していません。** 4Kの元ファイルでも、サーバー出力で解像度やHDRが維持されるとは限りません。端末内翻訳にもモデル・対応言語・端末資源の条件があります。
 
-6.8.0の検証範囲と未確認事項は[検証記録](docs/VALIDATION.md)に記載します。Greasy Forkへの公開前は、上表のローカルファイルから更新してください。
+6.8.0の検証範囲と公開先の照合結果は[検証記録](docs/VALIDATION.md)を参照してください。
 
 ## 6.7.3 の修正
 
@@ -93,7 +93,7 @@ npm run check
 
 ## English
 
-Local version 6.8.0 adds multiple-photo selection, a swipeable photo gallery, safer sequential automatic translation, optional desktop Chrome on-device translation, and Japan/world news with feed-provided images. Publishing and live service acceptance are pending. Server upload quotas, native translation quotas and preservation of 4K HDR cannot be removed or guaranteed by this userscript. Safari/mobile do not gain Chrome built-in AI support.
+Version 6.8.0 adds multiple-photo selection, a swipeable photo gallery, safer sequential automatic translation, optional desktop Chrome on-device translation, and Japan/world news with feed-provided images. The three distributions share the same modules. Actual Tampermonkey installation and physical Safari/Stay acceptance remain unverified. Server upload quotas, native translation quotas and preservation of 4K HDR cannot be removed or guaranteed by this userscript. Safari/mobile do not gain Chrome built-in AI support.
 
 Version 6.7.3 fixes avatar-follow overlays that remained on feeds, post details, replies and user suggestions because the avatar was nested inside a profile button. Regular Follow buttons and profile navigation remain available. Japanese UI coverage in settings and invitations is restored while preserving user content.
 

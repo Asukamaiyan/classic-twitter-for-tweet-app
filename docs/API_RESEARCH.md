@@ -75,7 +75,7 @@ These endpoints remain an observed first-party contract rather than a documented
 
 ## 6.8.0 media and translation evidence (2026-09-27)
 
-The locally saved first-party client bundle `index-DCFw2ga2.js` was rechecked. The preceding investigation recorded the following unauthenticated first-party [media configuration](https://api.tweet.app/api/media/config). Network restrictions prevented re-fetching that endpoint during final implementation, so daily/server limits are not newly verified:
+The public first-party client bundle `index-DCFw2ga2.js` was fetched again on 2026-09-27 before publication. Its SHA-256 remained `8ec6038a2a88b5255e1bb8ad8df425c38cad8063bffe8aa7cc7f80bbdfdc500f`, matching the inspected bundle. The unauthenticated first-party [media configuration](https://api.tweet.app/api/media/config) was also re-fetched on that date and advertised the following bounds. These are current configuration values, not upload acceptance tests:
 
 | Media | Server-advertised bounds |
 |---|---|
@@ -96,4 +96,10 @@ The optional device engine uses the [Chrome Translator API](https://developer.ch
 
 The official client uses `/api/news/headlines?topic=nation|sports|entertainment|technology&limit=10`; no verified Japan country selector was found. The enhancement uses [Yahoo!ニュースの公式RSS案内](https://support.yahoo-net.jp/PccNews/s/article/H000011243) and the public category feeds at `https://news.yahoo.co.jp/rss/categories/{domestic,sports,entertainment,it}.xml`. Native requests are not intercepted. Feed-supplied `image`, Media RSS thumbnail/content or image-enclosure URLs are accepted only on the public Yahoo image domains. Missing or failed images remain absent rather than being replaced with unrelated pictures.
 
-The preserved live DOM matches the expected feed-header location and six-button topic toolbar. The current environment could not navigate to the RSS/media-configuration endpoints (`ERR_BLOCKED_BY_CLIENT`); shell external requests could not resolve the hosts. Therefore current RSS content, current image delivery, live upload completion, current server quotas and model download/translation quality were not verified in this final run. Tests use controlled native-DOM, RSS and browser-AI fixtures. Local HTTP server creation was also denied by the sandbox.
+Pre-publication read-only checks on 2026-09-27 fetched all four current Yahoo category RSS feeds. Each feed contained 50 items; the shipped parser selected ten valid articles and recognized ten image URLs per category, for 40 articles and 40 image URLs in total. All selected article links used Yahoo HTTPS URLs and all publication dates parsed successfully. A representative feed image returned HTTP 200 with `image/jpeg` content (19,353 bytes). This confirms one image response, rather than claiming that all 40 images were downloaded.
+
+A temporary injection into the actual Chromium page confirmed that the live feed-header location and six-button toolbar match the implementation. Supplying the fetched current RSS through a GM transport shim displayed ten Japanese-news articles, with five visible source images loaded at 450px width. Selecting World restored the native news contents. This verifies the rendering and fallback interaction with current feed data; the shim does not establish that cross-origin RSS requests work through an installed userscript manager.
+
+Earlier in implementation, browser requests were blocked with `ERR_BLOCKED_BY_CLIENT`, shell requests could not resolve external hosts, and the sandbox denied a local HTTP server. Those restrictions describe the earlier test stage; subsequent pre-publication reads and the Chromium checks above supersede the earlier RSS, image-delivery and media-configuration gaps. Automated tests additionally use controlled native-DOM, RSS and browser-AI fixtures.
+
+No real post or media upload was submitted. Server-side upload acceptance, preservation of 4K/HDR after processing, installed Tampermonkey behavior, physical Safari/Stay behavior, and actual browser-model download and translation quality remain unverified.
