@@ -13,6 +13,19 @@
 
 設計参照: [W3C Disclosure Pattern](https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/)の展開状態と操作、[MDN Reduced Motion](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-reduced-motion)の利用者設定を参照。サイトの配色は公式クライアントの`index-eD6wHGfB.css`で確認した`--color-tl-app-*`を使用しています。
 
+## 6.7.1 公開先照合
+
+[PR #2](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/2)をmainへマージ済み（`e921493b204b63f3b8651dae366a9b08edff3082`）。マージ後のGitHub Actionsも成功しました。
+
+Greasy Forkの3版は6.7.1の掲載表示を確認。通常のインストールURLから取得したコードは、Greasy Fork追加の更新URLメタデータと改行の差を除き、検証済み配布ファイルとすべて一致しました。英語版の配布キャッシュは初回に旧版を返し、その後同じURLで6.7.1への反映を確認しています。既存のUnlisted設定を維持しました。
+
+| Greasy Fork ID | ダウンロード内容 SHA-256 |
+|---|---|
+| 594601 | `4c2cbfb374059fae22e91ba2038736e0f9715ce776c2a1838d48deebd275ad72` |
+| 594602 | `caa4469698e3b534c6c77cac03e0526de4039b676ddb9c4a743f47e5d8b9183e` |
+| 594603 | `63aa51ae9dc87871b5b92423174aa1bd0add2e3ab798dd0f6f0b806277b95ba3` |
+
+
 ---
 
 # 6.7.0 検証記録
