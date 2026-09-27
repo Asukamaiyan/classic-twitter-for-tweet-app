@@ -71,3 +71,29 @@ The same official client asset and live authenticated UI confirmed:
 - Native reply author headers and the mobile Account menu omit the badge renderer. Existing profile data supplies `badges` and `foundingMemberNumber`; the supplement follows the official cumulative tier and team-role precedence.
 
 These endpoints remain an observed first-party contract rather than a documented external API. Reply polling pauses when the tab is hidden and does not deliver OS push notifications. Live verification used the signed-in user's existing session without logging or exporting credentials.
+
+
+## 6.8.0 media and translation evidence (2026-09-27)
+
+The locally saved first-party client bundle `index-DCFw2ga2.js` was rechecked. The preceding investigation recorded the following unauthenticated first-party [media configuration](https://api.tweet.app/api/media/config). Network restrictions prevented re-fetching that endpoint during final implementation, so daily/server limits are not newly verified:
+
+| Media | Server-advertised bounds |
+|---|---|
+| Images | JPEG/PNG/WebP; 10 MiB per file; four per post; 20 per user/day |
+| Video | MP4/MOV; 50 MiB; 30 seconds; five per user/day |
+
+The native client submits original image File objects to `/api/media/upload` and chunks videos through `/api/media/upload/init`, `/append`, `/finalize`, then reads `/status`. No client resolution/HDR rejection was found. No option to retain originals, select codec, preserve HDR metadata, or select 4K output was found. The production UI says videos are transcoded to H.264. Demo labels mention WebP image optimization and 720p video, but these are not a measurement of current production output. No experimental live upload or published media was created during this investigation. A file passing local size/duration checks does not prove retained 4K HDR after server processing.
+
+The photo input lacks `multiple`; its onChange handler also reads only `files[0]`. Merely adding the HTML attribute loses subsequent files. The enhancement serializes selected photos through the established native handler and waits for its completed preview before advancing. It does not alter authentication, quota checks, accepted formats, or server requests.
+
+Main-post photo grids render all `media_assets`; native image clicks open a single-image Media viewer with no next/previous controls. These observed grids can support a local carousel. Reply and quote renderers currently expose only `media_assets[0]`; their missing images cannot be inferred from DOM and are not advertised as complete galleries.
+
+Native translation posts `{targetLang}` to `/api/posts/{id}/translate`. Its component replaces every exception with the same “Couldn’t translate” alert. This message alone cannot establish a quota: network, authentication, unsupported language and server failures are also possible. The previous userscript scheduled up to 40 requests 750ms apart and did not stop after an error. No documented native unlimited mode was found.
+
+The optional device engine uses the [Chrome Translator API](https://developer.chrome.com/docs/ai/translator-api) and [Language Detector API](https://developer.chrome.com/docs/ai/language-detection). Availability is checked at runtime; model preparation requires a user action. Supported desktop browsers process translated text on device, without consuming Tweet's translation allowance. Safari/Stay and mobile do not gain this API merely by installing the script. Browser models can still be unavailable or impose input/resource limits. This is not a promise of universally unlimited translation.
+
+### Japanese news and current validation boundary
+
+The official client uses `/api/news/headlines?topic=nation|sports|entertainment|technology&limit=10`; no verified Japan country selector was found. The enhancement uses [Yahoo!ニュースの公式RSS案内](https://support.yahoo-net.jp/PccNews/s/article/H000011243) and the public category feeds at `https://news.yahoo.co.jp/rss/categories/{domestic,sports,entertainment,it}.xml`. Native requests are not intercepted. Feed-supplied `image`, Media RSS thumbnail/content or image-enclosure URLs are accepted only on the public Yahoo image domains. Missing or failed images remain absent rather than being replaced with unrelated pictures.
+
+The preserved live DOM matches the expected feed-header location and six-button topic toolbar. The current environment could not navigate to the RSS/media-configuration endpoints (`ERR_BLOCKED_BY_CLIENT`); shell external requests could not resolve the hosts. Therefore current RSS content, current image delivery, live upload completion, current server quotas and model download/translation quality were not verified in this final run. Tests use controlled native-DOM, RSS and browser-AI fixtures. Local HTTP server creation was also denied by the sandbox.

@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.7.3
-// @description  tweet.appのUIを日本語化。投稿本文・名前を保持。リプライ通知、通知アイコンの個別リンク、高画質バッジ、星のお気に入り、保存検索・投稿保存・キーワード折りたたみ。
+// @version      6.8.0
+// @description  tweet.appのUIを日本語化。複数写真選択とスライド表示、日本のニュース、翻訳エラー時の待機、対応PCの端末内翻訳。投稿本文・名前と既存の返信通知・バッジ・保存機能を保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      api.tweet.app
+// @connect      news.yahoo.co.jp
 /* @safari-grants */
 // @noframes
 // @run-at       document-start
@@ -21,11 +22,14 @@
   const CT_LOCALE = 'ja';
   /* @include network */
   /* @include enhancements */
+  /* @include translation */
   /* @include runtime */
   /* @include presentation */
   /* @include replies */
   /* @include navigation */
   /* @include badges */
+  /* @include media */
+  /* @include news */
   /* @include safari */
 
   const API_ORIGIN = 'https://api.tweet.app';
@@ -1258,9 +1262,10 @@ if (/^just\s+now$/i.test(t)) {
       if (isOwnedLocalizationElement(el) ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
       const value = el.getAttribute('placeholder');
-      const personalized = el.matches('textarea#public-tweet-input') &&
-        value?.match(/^What['’]s happening, ([\s\S]+)\?$/);
-      const out = personalized ? `${personalized[1]}、いまどうしてる？` : placeholders.get(value) || JP.get(value);
+      const composerPrompt = el.matches('textarea#public-tweet-input,textarea#public-modal-tweet-input') &&
+        (/^What['’]s happening(?:, [\s\S]+)?[?!]+$/.test(value || '') ||
+          /^(?:[\s\S]+、)?いまどうしてる？$/.test(value || ''));
+      const out = composerPrompt ? 'いまどうしてる？' : placeholders.get(value) || JP.get(value);
       if (out && out !== value) el.setAttribute('placeholder', out);
     }
   }
@@ -2395,6 +2400,8 @@ if (/^just\s+now$/i.test(t)) {
       patchReplyBadge();
     patchNavigation(root);
     patchOfficialBadges(root);
+    ctMediaEnhance(root);
+    patchJapaneseNews(root);
 
     } catch(error) {
       console.debug(
@@ -2421,6 +2428,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.7.3 loaded'
+    '🐦 Classic Twitter JP v6.8.0 loaded'
   );
 })();

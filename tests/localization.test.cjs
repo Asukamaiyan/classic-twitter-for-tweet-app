@@ -394,12 +394,15 @@ test('ja: native invite help preserves React counters and never translates user 
   f.dom.window.close();
 });
 
-test('ja: personalized native composer prompt preserves the name and draft', () => {
+test('ja: native composer prompt omits the name while preserving the draft', () => {
   const f = fixture('ja', `<textarea id="public-tweet-input" placeholder="What's happening, Home 🫍?">Keep my draft</textarea>
+    <textarea id="public-modal-tweet-input" placeholder="Home 🫍、いまどうしてる？">Modal draft</textarea>
     <textarea id="other" placeholder="What's happening, Home 🫍?">Another draft</textarea>`);
   f.run();
-  assert.equal(f.document.getElementById('public-tweet-input').placeholder, 'Home 🫍、いまどうしてる？');
+  assert.equal(f.document.getElementById('public-tweet-input').placeholder, 'いまどうしてる？');
   assert.equal(f.document.getElementById('public-tweet-input').value, 'Keep my draft');
+  assert.equal(f.document.getElementById('public-modal-tweet-input').placeholder, 'いまどうしてる？');
+  assert.equal(f.document.getElementById('public-modal-tweet-input').value, 'Modal draft');
   assert.equal(f.document.getElementById('other').placeholder, "What's happening, Home 🫍?");
   assert.equal(f.document.getElementById('other').value, 'Another draft');
   f.dom.window.close();

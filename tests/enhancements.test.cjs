@@ -551,3 +551,35 @@ test('invalid form values identify and focus the field, then clear invalid state
     assert.notEqual(input.getAttribute('aria-invalid'), 'true', id);
   }
 });
+
+test('device models are prepared only by an explicit button click and failure preserves controls', async t => {
+  let engine = 'native', preparations = 0, status = '';
+  const { document, window, controller } = setup(t, { options: {
+    getAutoTranslate: () => false, setAutoTranslate: () => {},
+    getTranslationEngine: () => engine, setTranslationEngine: value => { engine = value; },
+    deviceTranslationSupported: true,
+    prepareDeviceTranslation: async language => { preparations++; assert.equal(language, 'ja'); status = 'Model unavailable'; return false; },
+    getTranslationStatus: () => status,
+  } });
+  const select = document.getElementById('ct-local-translation-engine');
+  select.value = 'device'; select.dispatchEvent(new window.Event('change'));
+  assert.equal(engine, 'device'); assert.equal(preparations, 0);
+  const button = document.getElementById('ct-local-translation-prepare');
+  button.click(); assert.equal(preparations, 1); assert.equal(button.disabled, true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(button.disabled, false); assert.equal(button.textContent, 'Prepare model');
+  controller.refreshTranslation();
+  assert.equal(document.getElementById('ct-local-translation-status').textContent, 'Model unavailable');
+});
+
+test('unsupported device translation is explained and disabled without changing saved engine', t => {
+  let engine = 'native';
+  const { document } = setup(t, { options: {
+    getAutoTranslate: () => false, setAutoTranslate: () => {},
+    getTranslationEngine: () => engine, setTranslationEngine: value => { engine = value; },
+    deviceTranslationSupported: false,
+  } });
+  assert.equal(document.querySelector('#ct-local-translation-engine option[value="device"]').disabled, true);
+  assert.equal(document.getElementById('ct-local-translation-prepare').disabled, true);
+  assert.equal(engine, 'native'); assert.match(document.getElementById('ct-local-tools').textContent, /Safari\/Stay/);
+});

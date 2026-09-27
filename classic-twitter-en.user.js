@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.7.3
-// @description  Classic interface for tweet.app, preserving posts and names. Reply inbox, individual notification-avatar links, high-resolution badges, star Favorites, saved searches, local saved posts and optional keyword filters.
+// @version      6.8.0
+// @description  Classic interface for tweet.app. Multiple-photo selection, photo slides, Japan/world news and safer automatic translation with optional on-device translation. Preserves posts, reply inbox, badges and local tools.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      api.tweet.app
+// @connect      news.yahoo.co.jp
 
 // @noframes
 // @run-at       document-start
@@ -300,7 +301,7 @@
   }
 
   /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTranslate } = {}) {
+function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -320,8 +321,14 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     storageConflict: '別のタブで保存内容が変更されました。上書きを防ぐため保存を中止しました。入力中の内容を控えてから再読み込みしてください。',
     readError: '保存済み設定を読み込めませんでした。初期設定で開始しました。',
     searchError: '自動検索を開始できませんでした。検索画面で次の検索語を入力してください：',
-    automatic: '投稿を自動翻訳する', autoHelp: '有効にすると、サイトの翻訳機能を自動で呼び出します。',
+    automatic: '投稿を自動翻訳する', autoHelp: '選択した方法で投稿を順番に翻訳します。サイトの翻訳でエラーが出た場合は5分間休止します。',
     autoError: '自動翻訳の設定を保存できませんでした。',
+    translationEngine: '翻訳方法', nativeEngine: 'サイトの翻訳', deviceEngine: '端末内の翻訳',
+    deviceHelp: '対応するデスクトップChrome用。翻訳モデルをダウンロードし、投稿本文は端末内で処理します。サイトの翻訳回数を消費しません。モデルは言語ごとに準備してください。',
+    deviceUnsupported: 'このブラウザでは端末内翻訳を利用できません。Safari／Stayとスマートフォンではサイトの翻訳をご利用ください。',
+    sourceLanguage: '翻訳する投稿の言語', prepareModel: 'モデルを準備', preparingModel: '準備中…',
+    translationStatus: '翻訳の状態',
+
     bookmarks: '保存した投稿', bookmarkLabel: '投稿のメモ（任意）', bookmarkSave: 'この投稿を保存',
     bookmarkHelp: '投稿の詳細画面を開くと保存できます。最大 50 件。削除された投稿や非公開の投稿は閲覧できない場合があります。',
     noBookmarks: '保存した投稿はありません。', bookmarkMissing: '先に投稿の詳細画面を開いてください。',
@@ -343,8 +350,14 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     storageConflict: 'Saved data changed in another tab. Nothing was overwritten. Keep a copy of your edits, then reload before saving.',
     readError: 'Could not read saved settings. Started with the defaults.',
     searchError: 'Could not start the search automatically. Enter this query in Explore:',
-    automatic: 'Automatically translate posts', autoHelp: 'Calls the site’s translation feature automatically when enabled.',
+    automatic: 'Automatically translate posts', autoHelp: 'Translates posts one at a time with the selected engine. Site errors pause automatic requests for 5 minutes.',
     autoError: 'Could not save the automatic translation setting.',
+    translationEngine: 'Translation engine', nativeEngine: 'Site translation', deviceEngine: 'On-device translation',
+    deviceHelp: 'For supported desktop Chrome browsers. Downloads models and translates post text on your device without using the site’s translation allowance. Prepare each source language separately.',
+    deviceUnsupported: 'On-device translation is unavailable here. Use site translation in Safari/Stay and on mobile.',
+    sourceLanguage: 'Language of posts to translate', prepareModel: 'Prepare model', preparingModel: 'Preparing…',
+    translationStatus: 'Translation status',
+
     bookmarks: 'Saved posts', bookmarkLabel: 'Note for this post (optional)', bookmarkSave: 'Save this post',
     bookmarkHelp: 'Open a post’s detail page to save it. Up to 50 posts. Deleted or private posts may be unavailable later.',
     noBookmarks: 'No saved posts yet.', bookmarkMissing: 'Open a post’s detail page first.',
@@ -396,7 +409,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     #ct-local-tools * { box-sizing:border-box; }
     #ct-local-tools button, #ct-local-tools a, .ct-keyword-notice button { font:inherit; cursor:pointer; }
     #ct-local-tools button, .ct-keyword-notice button { border:1px solid var(--color-tl-app-border, #b8c5d1); border-radius:8px; padding:9px 12px; color:inherit; background:var(--color-tl-app-card, #fff); min-height:44px; }
-    #ct-local-tools button:focus-visible, #ct-local-tools a:focus-visible, #ct-local-tools input:focus-visible, #ct-local-tools textarea:focus-visible, .ct-keyword-notice button:focus-visible { outline:3px solid var(--color-tl-app-primary, #1688d4); outline-offset:2px; }
+    #ct-local-tools button:focus-visible, #ct-local-tools a:focus-visible, #ct-local-tools input:focus-visible, #ct-local-tools select:focus-visible, #ct-local-tools textarea:focus-visible, .ct-keyword-notice button:focus-visible { outline:3px solid var(--color-tl-app-primary, #1688d4); outline-offset:2px; }
     #ct-local-tools button:active:not(:disabled) { transform:translateY(1px); }
     #ct-local-tools button[type=submit] { border-color:var(--color-tl-app-primary, #1688d4); font-weight:650; }
     #ct-local-tools button:disabled { opacity:.55; cursor:default; }
@@ -490,6 +503,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
 
+  let refreshTranslation = () => {};
   if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {
     const automatic = element('section');
     const label = element('label');
@@ -507,6 +521,45 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
         announce(copy.autoError, true);
       }
     });
+    if (typeof getTranslationEngine === 'function' && typeof setTranslationEngine === 'function') {
+      const engine = element('select', undefined, { id: 'ct-local-translation-engine' });
+      engine.style.cssText = 'width:100%;min-height:44px;font:inherit;color:inherit;background:var(--color-tl-app-card,#fff);border:1px solid var(--color-tl-app-border,#b8c5d1);border-radius:8px;padding:6px';
+      engine.append(element('option', copy.nativeEngine, { value: 'native' }), element('option', copy.deviceEngine, { value: 'device' }));
+      engine.options[1].disabled = !deviceTranslationSupported;
+      engine.value = getTranslationEngine();
+      const device = element('div');
+      device.append(element('p', deviceTranslationSupported ? copy.deviceHelp : copy.deviceUnsupported, { class: 'ct-local-note' }));
+      const source = element('select', undefined, { id: 'ct-local-translation-source' });
+      source.style.cssText = engine.style.cssText;
+      const languages = [['en', 'English'], ['ja', '日本語'], ['ko', '한국어'], ['zh', '中文'], ['zh-Hant', '繁體中文'], ['fr', 'Français'], ['es', 'Español'], ['de', 'Deutsch'], ['pt', 'Português'], ['it', 'Italiano'], ['ru', 'Русский'], ['ar', 'العربية'], ['hi', 'हिन्दी'], ['id', 'Bahasa Indonesia'], ['th', 'ไทย'], ['vi', 'Tiếng Việt']];
+      for (const [value, label] of languages) source.append(element('option', label, { value }));
+      source.value = (navigator.language || locale).startsWith('en') ? 'ja' : 'en';
+      const prepare = element('button', copy.prepareModel, { type: 'button', id: 'ct-local-translation-prepare' });
+      source.disabled = prepare.disabled = !deviceTranslationSupported;
+      device.append(element('label', copy.sourceLanguage, { for: source.id }), source, prepare);
+      const translationStatus = element('p', '', { id: 'ct-local-translation-status', role: 'status', 'aria-live': 'polite', 'aria-label': copy.translationStatus, class: 'ct-local-note' });
+      refreshTranslation = () => {
+        const message = getTranslationStatus?.() || '';
+        if (translationStatus.textContent !== message) translationStatus.textContent = message;
+        device.hidden = engine.value !== 'device';
+      };
+      engine.addEventListener('change', () => {
+        try {
+          if (setTranslationEngine(engine.value) === false || getTranslationEngine() !== engine.value) throw new Error('Setting was not saved');
+          announce(copy.saved);
+        } catch { engine.value = getTranslationEngine(); announce(copy.autoError, true); }
+        refreshTranslation();
+      });
+      prepare.addEventListener('click', async () => {
+        prepare.disabled = true; source.disabled = true; prepare.textContent = copy.preparingModel;
+        try { await prepareDeviceTranslation?.(source.value); }
+        catch { announce(copy.autoError, true); }
+        finally { prepare.disabled = source.disabled = !deviceTranslationSupported; prepare.textContent = copy.prepareModel; refreshTranslation(); }
+      });
+      automatic.append(element('label', copy.translationEngine, { for: engine.id }), engine,
+        ...(!deviceTranslationSupported ? [element('p', copy.deviceUnsupported, { class: 'ct-local-note' })] : []), device, translationStatus);
+      refreshTranslation();
+    }
     body.append(automatic);
   }
 
@@ -847,7 +900,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   window.addEventListener('resize', queueViewport);
   updateViewport();
   refresh();
-  const controller = { root, panel, refresh, destroy() {
+  const controller = { root, panel, refresh, refreshTranslation, destroy() {
     destroyed = true;
     observer.disconnect();
     clearTimeout(timer);
@@ -868,33 +921,246 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   return controller;
 }
 
+  /* Optional on-device translation. No post text is sent to another service. */
+function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual = () => false, onStatus, onComplete } = {}) {
+  const ja = locale === 'ja';
+  const copy = ja ? {
+    unsupported: 'このブラウザは端末内翻訳に対応していません。サイトの翻訳をご利用ください。',
+    activation: 'モデルの準備ボタンをもう一度押してください。', preparing: '翻訳モデルを準備しています…',
+    ready: '端末内翻訳の準備ができました。', unavailable: 'この言語の翻訳モデルを利用できません。',
+    failed: '端末内翻訳に失敗しました。原文とサイトの翻訳はそのまま使えます。',
+    needModel: 'この言語のモデルを便利ツールで準備してください。', unknown: '言語を確実に判定できませんでした。サイトの翻訳をご利用ください。',
+    translate: '端末内で翻訳', hide: '訳文を閉じる', working: '端末内で翻訳中…', label: '端末内の翻訳',
+    same: 'ブラウザの表示言語と同じです。', length: 'この投稿は端末内翻訳で扱える長さを超えています。',
+  } : {
+    unsupported: 'On-device translation is unavailable in this browser. Use site translation.',
+    activation: 'Press Prepare model again.', preparing: 'Preparing translation models…',
+    ready: 'On-device translation is ready.', unavailable: 'This translation model is unavailable.',
+    failed: 'On-device translation failed. The original and site translation remain available.',
+    needModel: 'Prepare a model for this language in Tools.', unknown: 'The language could not be identified reliably. Use site translation.',
+    translate: 'Translate on device', hide: 'Hide translation', working: 'Translating on device…', label: 'On-device translation',
+    same: 'This post already uses the browser’s language.', length: 'This post exceeds the on-device translation input limit.',
+  };
+  const supported = typeof globalThis.Translator?.availability === 'function' &&
+    typeof globalThis.Translator?.create === 'function' &&
+    typeof globalThis.LanguageDetector?.availability === 'function' &&
+    typeof globalThis.LanguageDetector?.create === 'function';
+  // Chrome uses zh-Hant for Traditional Chinese, not the site's zh-TW code.
+  const browserLanguage = (navigator.language || locale).toLowerCase();
+  const target = /^zh-(?:hant|tw|hk|mo)/.test(browserLanguage) ? 'zh-Hant' : browserLanguage.split(/[-_]/)[0];
+  const translators = new Map();
+  const cache = new Map();
+  const records = new Map();
+  const queue = new Map();
+  let detector = null;
+  let busy = false;
+  let preparing = false;
+  let generation = 0;
+  let style = null;
+  const say = message => onStatus?.(message);
+
+  async function prepare(source) {
+    if (!supported) { say(copy.unsupported); return false; }
+    if (preparing) return false;
+    if (!/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(source) || source.toLowerCase() === target.toLowerCase()) {
+      say(copy.same); return false;
+    }
+    if (navigator.userActivation && !navigator.userActivation.isActive) { say(copy.activation); return false; }
+    preparing = true;
+    say(copy.preparing);
+    try {
+      const [pair, detection] = await Promise.all([
+        Translator.availability({ sourceLanguage: source, targetLanguage: target }),
+        LanguageDetector.availability()
+      ]);
+      if (pair === 'unavailable' || detection === 'unavailable') { say(copy.unavailable); return false; }
+      if (navigator.userActivation && !navigator.userActivation.isActive) { say(copy.activation); return false; }
+      const monitor = m => m.addEventListener('downloadprogress', event => {
+        if (Number.isFinite(event.loaded)) say(`${copy.preparing} ${Math.round(event.loaded * 100)}%`);
+      });
+      // Start both creations during the same explicit user activation. Do not
+      // start the translator after waiting for the detector's model download.
+      const results = await Promise.allSettled([
+        detector || LanguageDetector.create({ monitor }),
+        translators.get(source) || Translator.create({ sourceLanguage: source, targetLanguage: target, monitor })
+      ]);
+      if (results[0].status === 'fulfilled') detector = results[0].value;
+      if (results[1].status === 'fulfilled') translators.set(source, results[1].value);
+      if (results.some(result => result.status === 'rejected')) { say(copy.failed); return false; }
+      for (const record of records.values()) record.attempted = false;
+      say(`${copy.ready} (${source} → ${target})`);
+      onComplete?.();
+      return true;
+    } catch { say(copy.failed); return false; }
+    finally { preparing = false; }
+  }
+
+  function ensureStyle() {
+    if (style?.isConnected) return;
+    style = document.createElement('style');
+    style.dataset.ctOwned = 'true';
+    style.textContent = `.ct-device-translation{margin:8px 0;color:inherit;font:inherit}.ct-device-translation button{color:var(--color-tl-app-primary,#1688d4);background:none;border:0;padding:6px 0;cursor:pointer;font:inherit;font-size:.8125rem}.ct-device-translation button:focus-visible{outline:2px solid currentColor;outline-offset:2px}.ct-device-translation p{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}.ct-device-translation[hidden],.ct-device-translation [hidden]{display:none!important}`;
+    document.head.append(style);
+  }
+
+  function stillValid(record, token) {
+    return generation === token && isActive() && record.section.isConnected &&
+      getContext(record.native)?.text === record.text && !record.dismissed && !isManual(record.article);
+  }
+
+  async function process() {
+    if (busy) return;
+    busy = true;
+    let processed = false;
+    while (queue.size) {
+      const [record, automatic] = queue.entries().next().value;
+      queue.delete(record);
+      if (!record.section.isConnected || !isActive() || record.dismissed ||
+          getContext(record.native)?.text !== record.text) continue;
+      if (automatic && record.attempted) continue;
+      processed = true;
+      record.attempted = true;
+      const token = generation;
+      record.button.disabled = true;
+      record.button.textContent = copy.working;
+      try {
+        if (!detector) throw new Error(copy.needModel);
+        if (record.text.length > 12000) throw new Error(copy.length);
+        const key = `${target}:${record.text}`;
+        let translated = cache.get(key);
+        if (!translated) {
+          const [result] = await detector.detect(record.text);
+          if (!stillValid(record, token)) continue;
+          if (!result || !Number.isFinite(result.confidence) || result.confidence < 0.75 || !result.detectedLanguage || result.detectedLanguage === 'und') throw new Error(copy.unknown);
+          const source = result.detectedLanguage;
+          if (source.toLowerCase() === target.toLowerCase()) throw new Error(copy.same);
+          const translator = translators.get(source);
+          if (!translator) throw new Error(`${copy.needModel} (${source} → ${target})`);
+          translated = await translator.translate(record.text);
+          if (typeof translated !== 'string' || !translated.trim()) throw new Error(copy.failed);
+          cache.set(key, translated);
+          if (cache.size > 200) cache.delete(cache.keys().next().value);
+        }
+        if (!stillValid(record, token)) continue;
+        record.output.textContent = translated;
+        record.output.lang = target;
+        record.output.hidden = false;
+        record.shown = true;
+      } catch (error) {
+        if (stillValid(record, token)) {
+          const known = Object.values(copy).some(message => error.message?.startsWith(message));
+          record.output.textContent = known ? error.message : copy.failed;
+          record.output.hidden = false;
+        }
+      } finally {
+        record.button.disabled = false;
+        record.button.textContent = record.shown ? copy.hide : copy.translate;
+      }
+    }
+    busy = false;
+    if (processed) onComplete?.();
+  }
+
+  function patch(root = document, automatic = false) {
+    if (!supported || !isActive()) return;
+    ensureStyle();
+    for (const [article, record] of records) {
+      if (!article.isConnected || !record.section.isConnected || getContext(record.native)?.text !== record.text) {
+        record.section.remove(); queue.delete(record); records.delete(article);
+      }
+    }
+    for (const native of ctTranslationControls(root)) {
+      const context = getContext(native);
+      if (!context || isManual(context.article) || !native.closest('[aria-live="polite"]') || ctTranslationDisabled(native)) continue;
+      let record = records.get(context.article);
+      if (!record) {
+        const section = document.createElement('div');
+        section.className = 'ct-device-translation';
+        section.dataset.ctOwned = 'true';
+        section.setAttribute('aria-label', copy.label);
+        const button = document.createElement('button');
+        button.type = 'button'; button.textContent = copy.translate;
+        const output = document.createElement('p'); output.hidden = true;
+        output.setAttribute('aria-live', 'polite');
+        section.append(button, output);
+        section.addEventListener('click', event => event.stopPropagation());
+        context.body.insertAdjacentElement('afterend', section);
+        record = { ...context, native, section, button, output, attempted: false, dismissed: false, shown: false };
+        records.set(context.article, record);
+        button.addEventListener('click', () => {
+          if (record.shown) {
+            record.output.hidden = true; record.shown = false; record.dismissed = true;
+            record.button.textContent = copy.translate;
+          } else {
+            record.dismissed = false; queue.set(record, false); void process();
+          }
+        });
+      }
+      if (automatic && detector && !record.attempted && !record.dismissed && queue.size < 40) queue.set(record, true);
+    }
+    void process();
+  }
+
+  function cancel() { generation++; queue.clear(); }
+  function hide(article) {
+    const record = records.get(article);
+    if (!record) return;
+    record.dismissed = true; record.output.hidden = true; record.shown = false;
+    record.button.textContent = copy.translate; queue.delete(record);
+  }
+  function clear() {
+    if (!records.size) return;
+    cancel();
+    for (const record of records.values()) record.section.remove();
+    records.clear();
+  }
+  return { supported, prepare, patch, cancel, clear, hide };
+}
+
     // Shared runtime; embedded at build time, never fetched remotely.
   const ctAutoSeen = new WeakMap();
   const ctAutoPending = new Map();
+  const ctAutoAttempted = new Set();
   const ctManualTranslation = new WeakSet();
   const ctNativeLikeButtons = new WeakSet();
   const ctLikeLabels = new WeakMap();
   let ctAutoClick = false;
-  let ctNextTranslationAt = 0;
+  let ctAutoTimer = null;
+  let ctAutoCurrent = null;
+  let ctAutoCooldownUntil = 0;
+  let ctTranslationMessage = '';
+  let ctDeviceTranslation = null;
 
   function autoTranslationEnabled() {
     // A separate opt-in key does not inherit the old enabled-by-default setting.
     return loadJSON(KEY.autoTranslate + '.optInV2', false) === true;
   }
 
+  function ctTranslationEngine() {
+    return loadJSON(KEY.autoTranslate + '.engine', 'native') === 'device' ? 'device' : 'native';
+  }
+
+  function ctTranslationStatus(message) {
+    ctTranslationMessage = message;
+    ctTools?.refreshTranslation?.();
+  }
+
   function ctCancelTranslations() {
-    for (const timer of ctAutoPending.values()) clearTimeout(timer);
+    clearTimeout(ctAutoTimer);
+    ctAutoTimer = null;
     ctAutoPending.clear();
-    ctNextTranslationAt = 0;
+    // The request is already owned by the site and cannot be canceled here.
+    // Keep its result monitor so a hidden-tab error still starts the cooldown.
+    ctDeviceTranslation?.cancel();
   }
 
   function ctOwnTranslationText(control) {
-    if (control.closest('blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"]')) return null;
+    if (control.closest('blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"],[data-ct-owned]')) return null;
     const article = control.closest('article');
     if (!article) return null;
     const body = [...article.querySelectorAll('p.whitespace-pre-wrap,[data-testid="tweet-text"],[data-testid="post-text"]')]
       .find(el => el.closest('article') === article &&
-        !el.closest('[aria-live],button,[role="button"],blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"]'));
+        !el.closest('[aria-live],button,[role="button"],blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"],[data-ct-owned]'));
     const text = body?.textContent?.trim();
     return text ? { article, body, text } : null;
   }
@@ -904,11 +1170,92 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
       control.getAttribute('aria-busy') === 'true';
   }
 
-  function patchAutoTranslation(root = document, nativeLanguage = CT_LOCALE) {
-    if (!autoTranslationEnabled() || document.hidden || !ctPageActive) {
-      ctCancelTranslations();
+  function ctNativeTranslationError(control) {
+    const region = control.closest('[aria-live="polite"]')?.parentElement;
+    return [...region?.querySelectorAll('[role="alert"]') || []]
+      .some(node => /Couldn.t translate|翻訳できませんでした/i.test(node.textContent));
+  }
+
+  function ctTranslationAttemptKey(context, target) {
+    const id = articleId(context.article);
+    // Feed cards often have no permalink. Repeated identical text can reuse
+    // the session's attempted state; manual translation is always available.
+    return `${target}:${id || 'text'}:${context.text}`;
+  }
+
+  function ctFinishNativeTranslation(failed, uncertain = false) {
+    clearTimeout(ctAutoCurrent?.timer);
+    ctAutoCurrent = null;
+    if (failed) {
+      ctAutoCooldownUntil = Date.now() + 5 * 60 * 1000;
+      ctAutoPending.clear();
+      ctTranslationStatus(CT_LOCALE === 'ja'
+        ? `${uncertain ? '翻訳の完了を確認できないため' : 'サイトの翻訳でエラーが発生したため'}、自動翻訳を5分間休止しています。手動翻訳は引き続き使えます。`
+        : `Automatic site translation is paused for 5 minutes ${uncertain ? 'because completion could not be confirmed' : 'after an error'}. Manual translation is still available.`);
+    } else {
+      ctAutoTimer = setTimeout(ctRunNativeTranslation, 1500);
+    }
+  }
+
+  function ctMonitorNativeTranslation() {
+    const job = ctAutoCurrent;
+    if (!job) return;
+    if (!job.article.isConnected) { ctFinishNativeTranslation(true, true); return; }
+    const control = [...job.article.querySelectorAll('[aria-live="polite"] button')]
+      .find(button => button.closest('article') === job.article && !button.closest('blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"]'));
+    if (control && ctNativeTranslationError(control)) { ctFinishNativeTranslation(true); return; }
+    const action = ctTranslationButtonText(control);
+    if (/^(?:Show original|原文を表示)$/i.test(action) ||
+        (control && /^(?:Show translation|翻訳を表示)$/i.test(action) &&
+          control.getAttribute('aria-busy') !== 'true' && ctTranslationDisabled(control))) {
+      ctFinishNativeTranslation(false); return;
+    }
+    if (Date.now() - job.started >= 30000) { ctFinishNativeTranslation(true, true); return; }
+    job.timer = setTimeout(ctMonitorNativeTranslation, 250);
+  }
+
+  function ctRunNativeTranslation() {
+    ctAutoTimer = null;
+    if (ctAutoCurrent || ctAutoCooldownUntil > Date.now()) return;
+    if (!autoTranslationEnabled() || ctTranslationEngine() !== 'native' || document.hidden || !ctPageActive) {
+      ctAutoPending.clear(); return;
+    }
+    while (ctAutoPending.size) {
+      const [control, context] = ctAutoPending.entries().next().value;
+      ctAutoPending.delete(control);
+      const { article, text, key } = context;
+      if (key && ctAutoAttempted.has(key)) continue;
+      if (!control.isConnected || ctTranslationDisabled(control) || ctManualTranslation.has(article) ||
+          ctOwnTranslationText(control)?.text !== text ||
+          !/^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(control))) continue;
+      if (ctNativeTranslationError(control)) { ctFinishNativeTranslation(true); return; }
+      ctAutoSeen.set(article, text);
+      if (key) {
+        ctAutoAttempted.add(key);
+        if (ctAutoAttempted.size > 1000) ctAutoAttempted.delete(ctAutoAttempted.values().next().value);
+      }
+      ctAutoCurrent = { article, started: Date.now(), timer: null };
+      ctAutoClick = true;
+      try { control.click(); }
+      catch { ctFinishNativeTranslation(true); }
+      finally { ctAutoClick = false; }
+      if (ctAutoCurrent) ctMonitorNativeTranslation();
       return;
     }
+  }
+
+  function patchAutoTranslation(root = document, nativeLanguage = CT_LOCALE) {
+    const active = !document.hidden && ctPageActive;
+    if (ctTranslationEngine() === 'device') {
+      ctAutoPending.clear();
+      clearTimeout(ctAutoTimer); ctAutoTimer = null;
+      ctDeviceTranslation?.patch(root, active && autoTranslationEnabled());
+      return;
+    }
+    ctDeviceTranslation?.clear();
+    if (!autoTranslationEnabled() || !active) { ctCancelTranslations(); return; }
+    if (ctAutoCooldownUntil > Date.now()) return;
+    if (ctAutoCooldownUntil) { ctAutoCooldownUntil = 0; ctTranslationStatus(''); }
     // Tweet's native translator chooses navigator.language, not the userscript UI locale.
     const targetLanguage = (navigator.language || nativeLanguage).toLowerCase().split(/[-_]/)[0];
     for (const control of ctTranslationControls(root)) {
@@ -918,23 +1265,12 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
       const { article, body, text } = context;
       const lang = ctLikelyLanguage(text, body);
       if (lang === 'unknown' || lang === targetLanguage || ctManualTranslation.has(article)) continue;
-      if (ctAutoSeen.get(article) === text || ctAutoPending.has(control)) continue;
-      if (!/^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(control))) continue;
+      const key = ctTranslationAttemptKey(context, targetLanguage);
+      if (ctAutoSeen.get(article) === text || (key && ctAutoAttempted.has(key)) || ctAutoPending.has(control)) continue;
       if (ctAutoPending.size >= 40) break;
-      const delay = Math.max(0, ctNextTranslationAt - Date.now());
-      ctNextTranslationAt = Date.now() + delay + 750;
-      const timer = setTimeout(() => {
-        ctAutoPending.delete(control);
-        if (!autoTranslationEnabled() || document.hidden || !ctPageActive ||
-            !control.isConnected || ctTranslationDisabled(control) || ctManualTranslation.has(article)) return;
-        if (ctOwnTranslationText(control)?.text !== text) return;
-        if (!/^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(control))) return;
-        ctAutoSeen.set(article, text);
-        ctAutoClick = true;
-        try { control.click(); } finally { ctAutoClick = false; }
-      }, delay);
-      ctAutoPending.set(control, timer);
+      ctAutoPending.set(control, { ...context, key });
     }
+    if (!ctAutoCurrent && ctAutoTimer === null && ctAutoPending.size) ctAutoTimer = setTimeout(ctRunNativeTranslation, 0);
   }
 
   function ctRememberTranslationChoice(event) {
@@ -944,9 +1280,8 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     const article = control.closest('article');
     if (!article) return;
     ctManualTranslation.add(article);
-    const timer = ctAutoPending.get(control);
-    if (timer !== undefined) clearTimeout(timer);
-    ctAutoPending.delete(control);
+    ctDeviceTranslation?.hide(article);
+    for (const [queued, context] of ctAutoPending) if (context.article === article) ctAutoPending.delete(queued);
   }
 
   function ctIsLiked(button) {
@@ -999,7 +1334,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   let ctScanning = false;
   let ctPageActive = true;
   let ctStarted = false;
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'class'];
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'class', 'src'];
   const observer = new MutationObserver(mutations => {
     if (ctScanning || !ctPageActive) return;
     if (!mutations.some(m => {
@@ -1049,11 +1384,25 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.7.3';
+    document.documentElement.dataset.ctActiveVersion = '6.8.0';
     ctStarted = true;
+    ctDeviceTranslation = createDeviceTranslation({
+      locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
+      isActive: () => ctPageActive && !document.hidden && ctTranslationEngine() === 'device',
+      onStatus: ctTranslationStatus, onComplete: ctScheduleScan
+    });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
       getAutoTranslate: autoTranslationEnabled,
+      getTranslationEngine: ctTranslationEngine,
+      setTranslationEngine: engine => {
+        if (!['native', 'device'].includes(engine) ||
+            !saveJSON(KEY.autoTranslate + '.engine', engine)) throw new Error('Storage unavailable');
+        ctCancelTranslations(); ctScheduleScan();
+      },
+      deviceTranslationSupported: ctDeviceTranslation.supported,
+      prepareDeviceTranslation: source => ctDeviceTranslation.prepare(source),
+      getTranslationStatus: () => ctTranslationMessage,
       setAutoTranslate: enabled => {
         if (!saveJSON(KEY.autoTranslate + '.optInV2', enabled === true)) throw new Error('Storage unavailable');
         ctCancelTranslations();
@@ -2019,6 +2368,743 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     return Promise.all(requests);
   }
 
+    // Reuse the native upload UI: it validates and uploads one File at a time.
+  // No media quotas, server formats, transcoding settings or post submissions
+  // are changed here. In particular, accepting a file does not promise 4K HDR.
+  const ctMediaUploads = new WeakMap();
+  const ctMediaUploadEvents = new WeakSet();
+  const ctMediaCarousels = new Map();
+  let ctMediaTransferSupported;
+  let ctMediaPendingViewer = null;
+  let ctMediaViewer = null;
+  const ctMediaPhotoAccept = 'image/jpeg,image/png,image/webp';
+
+  function ctMediaJapanese() { return CT_LOCALE === 'ja'; }
+  function ctMediaCanTransfer() {
+    if (ctMediaTransferSupported !== undefined) return ctMediaTransferSupported;
+    try {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([], 'ct-capability-check.jpg', { type: 'image/jpeg' }));
+      const probe = document.createElement('input');
+      probe.type = 'file';
+      probe.files = transfer.files;
+      ctMediaTransferSupported = probe.files.length === 1;
+    } catch { ctMediaTransferSupported = false; }
+    return ctMediaTransferSupported;
+  }
+  function ctMediaUploadRoot(input) {
+    if (!input.matches(`input[type="file"][accept="${ctMediaPhotoAccept}"]`) ||
+        input.closest('[data-ct-local-ui]')) return null;
+    const toolbar = input.parentElement;
+    const root = toolbar?.parentElement;
+    if (!toolbar?.matches('div.flex.items-center') || !root?.matches('div.w-full.mt-3.space-y-3') ||
+        ![...toolbar.children].some(el => el.matches('input[type="file"][accept="video/mp4,video/quicktime"]'))) return null;
+    const actions = [...toolbar.children].find(el => el.matches('div.flex.items-center'));
+    const buttons = actions ? [...actions.children].filter(el => el.tagName === 'BUTTON') : [];
+    return buttons.length === 2 ? { root, toolbar, photoButton: buttons[0] } : null;
+  }
+  function ctMediaPreviews(root) { return [...root.querySelectorAll('img[alt="Upload preview"]')]; }
+  function ctMediaPreviewReady(image) {
+    return [...(image.parentElement?.children || [])].some(el => el.matches('div.absolute.bottom-2.left-2') &&
+      el.classList.contains('bg-emerald-500/90'));
+  }
+  function ctMediaUploadError(root) {
+    const error = [...root.children].find(el => el.matches('div.text-red-500'));
+    return error?.textContent?.trim() || '';
+  }
+  function ctMediaUploadStatus(state, text, busy = false) {
+    if (!state.status?.isConnected) {
+      const status = document.createElement('div');
+      status.className = 'ct-media-upload-status';
+      status.dataset.ctLocalUi = 'media-upload';
+      const label = document.createElement('span');
+      label.setAttribute('role', 'status');
+      label.setAttribute('aria-live', 'polite');
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.textContent = ctMediaJapanese() ? '残りを中止' : 'Stop remaining';
+      cancel.addEventListener('click', event => {
+        event.stopPropagation();
+        state.cancelled = true;
+        state.wake?.();
+      });
+      status.append(label, cancel);
+      state.root.append(status);
+      state.status = status;
+      state.label = label;
+      state.cancel = cancel;
+    }
+    if (state.label.textContent !== text) state.label.textContent = text;
+    state.cancel.hidden = !busy;
+  }
+  function ctMediaWaitForPhoto(state, previousSources) {
+    return new Promise(resolve => {
+      let complete = false;
+      const finish = result => {
+        if (complete) return;
+        complete = true;
+        observer.disconnect();
+        clearInterval(poll);
+        clearTimeout(timeout);
+        clearTimeout(initial);
+        state.wake = null;
+        resolve(result);
+      };
+      const check = () => {
+        if (state.cancelled || !state.input.isConnected || !state.root.isConnected ||
+            location.pathname !== state.path) { finish('cancelled'); return; }
+        if (ctMediaUploadError(state.root)) { finish('error'); return; }
+        const photos = ctMediaPreviews(state.root);
+        if (photos.length < previousSources.length) { finish('cancelled'); return; }
+        const remaining = previousSources.slice();
+        const added = photos.filter(photo => {
+          const index = remaining.indexOf(photo.getAttribute('src'));
+          if (index < 0) return true;
+          remaining.splice(index, 1);
+          return false;
+        });
+        if (remaining.length) { finish('cancelled'); return; }
+        if (added.length === 1 && ctMediaPreviewReady(added[0])) finish('ready');
+      };
+      // Start after the native change handler and React's state update. A stale
+      // validation error may still be in the DOM during dispatchEvent itself.
+      const observer = new MutationObserver(check);
+      observer.observe(state.root, { childList: true, subtree: true, attributes: true, characterData: true });
+      const poll = setInterval(check, 100);
+      const timeout = setTimeout(() => finish('timeout'), 120000);
+      const initial = setTimeout(check, 0);
+      state.wake = check;
+    });
+  }
+  async function ctMediaQueuePhotos(input, media, files) {
+    const state = ctMediaUploads.get(input);
+    if (state.busy) return;
+    const existing = ctMediaPreviews(media.root).length;
+    const available = Math.max(0, 4 - existing); // The observed native toolbar also caps at four.
+    const selected = files.slice(0, available);
+    const skipped = files.length - selected.length;
+    const ja = ctMediaJapanese();
+    if (media.photoButton.disabled || media.root.querySelector('video') || !selected.length) {
+      ctMediaUploadStatus(state, ja ? '現在は写真を追加できません。既存の添付とアップロード状態を確認してください。' :
+        'Photos cannot be added now. Check existing attachments and upload status.');
+      input.value = '';
+      return;
+    }
+    state.busy = true;
+    state.cancelled = false;
+    state.path = location.pathname;
+    let completed = 0;
+    let result = 'ready';
+    try {
+      for (const file of selected) {
+        if (state.cancelled || !input.isConnected || location.pathname !== state.path) { result = 'cancelled'; break; }
+        const before = ctMediaPreviews(media.root).map(photo => photo.getAttribute('src'));
+        ctMediaUploadStatus(state, ja ? `写真を追加中 ${completed + 1} / ${selected.length}` :
+          `Adding photos ${completed + 1} / ${selected.length}`, true);
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        input.files = transfer.files;
+        const event = new Event('change', { bubbles: true });
+        ctMediaUploadEvents.add(event);
+        input.dispatchEvent(event);
+        result = await ctMediaWaitForPhoto(state, before);
+        if (result !== 'ready') break;
+        completed++;
+      }
+    } catch { result = 'error'; }
+    finally {
+      state.busy = false;
+      input.value = '';
+      const count = ja ? `${completed}枚を追加しました。` : `${completed} photo(s) added. `;
+      const reason = result === 'ready' ? (skipped ? (ja ? `1投稿4枚までのため、残り${skipped}枚は追加していません。` :
+        `${skipped} remaining photo(s) were not added because a post accepts four.`) : '') :
+        result === 'cancelled' ? (ja ? '残りの追加を中止しました。処理中の1枚は完了する場合があります。' :
+          'Remaining photos stopped. The photo already uploading may still finish.') :
+        result === 'timeout' ? (ja ? '完了を確認できないため、残りは停止しました。添付の状態を確認してください。' :
+          'Completion could not be confirmed. Remaining photos stopped; check the attachments.') :
+          (ja ? 'エラーのため残りは停止しました。標準のエラー表示を確認してください。' :
+            'Remaining photos stopped after an error. Check the native error message.');
+      if (state.root.isConnected) ctMediaUploadStatus(state, count + reason);
+    }
+  }
+  function ctMediaEnhanceInput(input) {
+    if (ctMediaUploads.has(input) || !ctMediaCanTransfer()) return;
+    const media = ctMediaUploadRoot(input);
+    if (!media || input.multiple) return; // A future native multi-file handler owns its own input.
+    const state = { input, root: media.root, busy: false, cancelled: false };
+    ctMediaUploads.set(input, state);
+    input.multiple = true;
+    input.addEventListener('change', event => {
+      if (ctMediaUploadEvents.has(event)) return;
+      const files = [...(input.files || [])];
+      if (!state.busy && files.length <= 1) return;
+      event.stopImmediatePropagation();
+      if (!state.busy) void ctMediaQueuePhotos(input, media, files);
+    }, true);
+    // Home's submit is in oS.actionRight; modal submit is its sibling and
+    // reply composers use a role=form ancestor with a Ctrl/Cmd+Enter handler.
+    const replyForm = media.root.closest('[role="form"]');
+    const parent = media.root.parentElement;
+    const scope = replyForm || (parent?.querySelector('textarea#public-tweet-input,textarea#public-modal-tweet-input') ? parent : media.root);
+    scope.addEventListener('click', event => {
+      if (!state.busy || event.target.closest('[data-ct-local-ui="media-upload"]')) return;
+      const button = event.target.closest('button,input');
+      if (button && (media.root.contains(button) || replyForm?.contains(button) ||
+          button.matches('#public-tweet-submit-btn,#public-modal-tweet-submit-btn'))) {
+        event.preventDefault(); event.stopImmediatePropagation();
+      }
+    }, true);
+    scope.addEventListener('keydown', event => {
+      if (state.busy && (event.ctrlKey || event.metaKey) && event.key === 'Enter' && event.target.matches('textarea')) {
+        event.preventDefault(); event.stopImmediatePropagation();
+      }
+    }, true);
+    scope.addEventListener('submit', event => {
+      if (state.busy) { event.preventDefault(); event.stopImmediatePropagation(); }
+    }, true);
+  }
+
+  function ctMediaSlides(grid) {
+    if (!grid.matches('div.grid.gap-0\\.5.rounded-2xl.overflow-hidden.border') ||
+        !grid.closest('main,article') || grid.closest('[data-ct-local-ui],blockquote,[aria-label^="Quoted post"]')) return [];
+    const slides = [...grid.children];
+    if (slides.length < 2 || slides.some(slide => !slide.matches('div.relative.overflow-hidden') ||
+        slide.children.length !== 1 || !slide.firstElementChild.matches('img[alt="Attached media"].cursor-pointer'))) return [];
+    return slides;
+  }
+  function ctMediaCarouselIndex(state) {
+    const width = state.grid.clientWidth;
+    return width ? Math.max(0, Math.min(state.slides.length - 1, Math.round(state.grid.scrollLeft / width))) : state.index;
+  }
+  function ctMediaUpdateCarousel(state) {
+    state.index = ctMediaCarouselIndex(state);
+    const count = `${state.index + 1} / ${state.slides.length}`;
+    if (state.count.textContent !== count) state.count.textContent = count;
+    state.prev.disabled = state.index === 0;
+    state.next.disabled = state.index === state.slides.length - 1;
+  }
+  function ctMediaMoveCarousel(state, index) {
+    state.index = Math.max(0, Math.min(state.slides.length - 1, index));
+    const left = state.index * state.grid.clientWidth;
+    const behavior = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    if (typeof state.grid.scrollTo === 'function') state.grid.scrollTo({ left, behavior });
+    else state.grid.scrollLeft = left;
+    // Native scrolling emits scroll events while moving; keep an immediate
+    // update as well for keyboard access and browsers without smooth scrolling.
+    const count = `${state.index + 1} / ${state.slides.length}`;
+    if (state.count.textContent !== count) state.count.textContent = count;
+    state.prev.disabled = state.index === 0;
+    state.next.disabled = state.index === state.slides.length - 1;
+  }
+  function ctMediaRemoveCarousel(state) {
+    state.grid.classList.remove('ct-media-carousel');
+    for (const [name, value] of state.attributes) {
+      if (value === null) state.grid.removeAttribute(name);
+      else state.grid.setAttribute(name, value);
+    }
+    state.grid.removeEventListener('scroll', state.onScroll);
+    state.grid.removeEventListener('keydown', state.onKey);
+    state.grid.removeEventListener('click', state.onClick, true);
+    state.resize?.disconnect();
+    state.controls.remove();
+    ctMediaCarousels.delete(state.grid);
+  }
+  function ctMediaApplyCarousel(state) {
+    const grid = state.grid;
+    if (!grid.classList.contains('ct-media-carousel')) grid.classList.add('ct-media-carousel');
+    const attributes = {
+      tabindex: '0', role: 'region',
+      'aria-label': ctMediaJapanese() ? '投稿の写真' : 'Post photos',
+      'aria-roledescription': ctMediaJapanese() ? 'カルーセル' : 'carousel'
+    };
+    for (const [name, value] of Object.entries(attributes)) {
+      if (grid.getAttribute(name) !== value) grid.setAttribute(name, value);
+    }
+  }
+  function ctMediaEnhanceCarousel(grid) {
+    const slides = ctMediaSlides(grid);
+    if (!slides.length) return;
+    const existing = ctMediaCarousels.get(grid);
+    if (existing) {
+      existing.slides = slides;
+      ctMediaApplyCarousel(existing);
+      if (!existing.controls.isConnected) grid.after(existing.controls);
+      ctMediaUpdateCarousel(existing);
+      return;
+    }
+    const controls = document.createElement('div');
+    controls.className = 'ct-media-carousel-controls';
+    controls.dataset.ctLocalUi = 'media-carousel';
+    const prev = document.createElement('button');
+    const next = document.createElement('button');
+    const count = document.createElement('span');
+    prev.type = next.type = 'button';
+    prev.textContent = '‹'; next.textContent = '›';
+    prev.setAttribute('aria-label', ctMediaJapanese() ? '前の写真' : 'Previous photo');
+    next.setAttribute('aria-label', ctMediaJapanese() ? '次の写真' : 'Next photo');
+    count.setAttribute('role', 'status');
+    count.setAttribute('aria-live', 'polite');
+    controls.append(prev, count, next);
+    controls.addEventListener('click', event => event.stopPropagation());
+    const state = { grid, slides, controls, prev, next, count, index: 0,
+      attributes: ['tabindex', 'role', 'aria-label', 'aria-roledescription'].map(name => [name, grid.getAttribute(name)]) };
+    prev.addEventListener('click', () => ctMediaMoveCarousel(state, state.index - 1));
+    next.addEventListener('click', () => ctMediaMoveCarousel(state, state.index + 1));
+    state.onScroll = () => ctMediaUpdateCarousel(state);
+    state.onKey = event => {
+      if (event.target !== grid || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault(); event.stopPropagation();
+      const index = event.key === 'Home' ? 0 : event.key === 'End' ? state.slides.length - 1 :
+        state.index + (event.key === 'ArrowRight' ? 1 : -1);
+      ctMediaMoveCarousel(state, index);
+    };
+    grid.addEventListener('scroll', state.onScroll, { passive: true });
+    grid.addEventListener('keydown', state.onKey);
+    state.onClick = event => {
+      const index = state.slides.findIndex(slide => slide.firstElementChild === event.target);
+      if (index >= 0) ctMediaPendingViewer = { state, index, at: Date.now() };
+    };
+    grid.addEventListener('click', state.onClick, true);
+    ctMediaApplyCarousel(state);
+    grid.after(controls);
+    if (typeof ResizeObserver === 'function') {
+      state.resize = new ResizeObserver(() => ctMediaMoveCarousel(state, state.index));
+      state.resize.observe(grid);
+    }
+    ctMediaCarousels.set(grid, state);
+    ctMediaUpdateCarousel(state);
+  }
+  function ctMediaClearViewer() {
+    if (!ctMediaViewer) return;
+    const viewer = ctMediaViewer;
+    viewer.observer?.disconnect();
+    viewer.controls.remove();
+    document.removeEventListener('keydown', viewer.onKey, true);
+    viewer.dialog.removeEventListener('touchstart', viewer.onTouchStart);
+    viewer.dialog.removeEventListener('touchend', viewer.onTouchEnd);
+    ctMediaViewer = null;
+  }
+  function ctMediaEnhanceViewer() {
+    const active = ctMediaViewer;
+    if (active && (!active.dialog.isConnected || !active.state.grid.isConnected || !ctMediaSlides(active.state.grid).length)) ctMediaClearViewer();
+    const pending = ctMediaPendingViewer;
+    if (!pending || !pending.state.grid.isConnected || Date.now() - pending.at > 5000) return;
+    const source = pending.state.slides[pending.index]?.firstElementChild?.src;
+    if (!source) return;
+    const dialog = [...document.querySelectorAll('div[role="dialog"][aria-modal="true"][aria-label="Media viewer"]')]
+      .find(el => el.querySelector('img[alt="Media preview"]')?.src === source);
+    if (!dialog) return;
+    if (ctMediaViewer?.dialog !== dialog || ctMediaViewer?.state !== pending.state) {
+      ctMediaClearViewer();
+      const controls = document.createElement('div');
+      controls.className = 'ct-media-carousel-controls ct-media-viewer-controls';
+      controls.dataset.ctLocalUi = 'media-viewer';
+      const prev = document.createElement('button');
+      const next = document.createElement('button');
+      const count = document.createElement('span');
+      prev.type = next.type = 'button';
+      prev.textContent = '‹'; next.textContent = '›';
+      prev.setAttribute('aria-label', ctMediaJapanese() ? '前の写真' : 'Previous photo');
+      next.setAttribute('aria-label', ctMediaJapanese() ? '次の写真' : 'Next photo');
+      count.setAttribute('role', 'status');
+      count.setAttribute('aria-live', 'polite');
+      controls.append(prev, count, next);
+      controls.addEventListener('click', event => event.stopPropagation());
+      const viewer = { dialog, state: pending.state, controls, prev, next, count, index: pending.index };
+      const move = index => {
+        const slides = ctMediaSlides(viewer.state.grid);
+        if (!dialog.isConnected || !slides.length || !viewer.state.grid.isConnected) return;
+        index = Math.max(0, Math.min(slides.length - 1, index));
+        if (index === viewer.index) return;
+        // Call the existing image handler so React owns the enlarged image too.
+        // Neither the image URL nor the native close/backdrop behavior is replaced.
+        slides[index].firstElementChild.click();
+        ctMediaEnhanceViewer();
+      };
+      prev.addEventListener('click', () => move(viewer.index - 1));
+      next.addEventListener('click', () => move(viewer.index + 1));
+      viewer.onKey = event => {
+        if (!dialog.isConnected || event.altKey || event.ctrlKey || event.metaKey ||
+            event.target.closest?.('input,textarea,[contenteditable="true"]') ||
+            !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault(); event.stopPropagation();
+        move(event.key === 'Home' ? 0 : event.key === 'End' ? viewer.state.slides.length - 1 :
+          viewer.index + (event.key === 'ArrowRight' ? 1 : -1));
+      };
+      viewer.onTouchStart = event => {
+        viewer.touch = event.touches.length === 1 && event.target.matches?.('img[alt="Media preview"]') ?
+          { x: event.touches[0].clientX, y: event.touches[0].clientY } : null;
+      };
+      viewer.onTouchEnd = event => {
+        const start = viewer.touch;
+        viewer.touch = null;
+        if (!start || event.changedTouches.length !== 1) return;
+        const dx = event.changedTouches[0].clientX - start.x;
+        const dy = event.changedTouches[0].clientY - start.y;
+        if (Math.abs(dx) >= 45 && Math.abs(dx) > Math.abs(dy) * 1.5) move(viewer.index + (dx < 0 ? 1 : -1));
+      };
+      dialog.addEventListener('touchstart', viewer.onTouchStart, { passive: true });
+      dialog.addEventListener('touchend', viewer.onTouchEnd, { passive: true });
+      document.addEventListener('keydown', viewer.onKey, true);
+      dialog.append(controls);
+      ctMediaViewer = viewer;
+      // rE reuses its image and React can commit src after click() returns. The
+      // shared UI observer intentionally does not watch src, so watch this one
+      // verified dialog until it closes, instead of polling or rewriting src.
+      viewer.observer = new MutationObserver(() => ctMediaEnhanceViewer());
+      viewer.observer.observe(dialog, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    }
+    ctMediaViewer.index = pending.index;
+    const count = `${pending.index + 1} / ${pending.state.slides.length}`;
+    if (ctMediaViewer.count.textContent !== count) ctMediaViewer.count.textContent = count;
+    ctMediaViewer.prev.disabled = pending.index === 0;
+    ctMediaViewer.next.disabled = pending.index === pending.state.slides.length - 1;
+  }
+  function ctMediaStyles() {
+    if (document.getElementById('ct-media-style')) return;
+    const style = document.createElement('style');
+    style.id = 'ct-media-style';
+    style.textContent = `
+      .ct-media-carousel { display:flex!important; gap:0!important; width:100%; min-width:0; overflow-x:auto!important; overflow-y:hidden!important; scroll-snap-type:x mandatory; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; }
+      .ct-media-carousel > div { flex:0 0 100%; min-width:0; aspect-ratio:auto!important; scroll-snap-align:start; scroll-snap-stop:always; display:flex; align-items:center; justify-content:center; }
+      .ct-media-carousel > div > img { width:100%; height:auto!important; max-height:min(70vh, 510px); object-fit:contain!important; }
+      .ct-media-carousel:focus-visible { outline:3px solid var(--color-tl-app-primary,#1688d4); outline-offset:2px; }
+      .ct-media-carousel-controls { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:4px; font:13px/1.4 system-ui,sans-serif; color:var(--color-tl-app-text-muted,#657786); }
+      .ct-media-carousel-controls button { min-width:44px; min-height:44px; border:0; border-radius:50%; color:inherit; background:transparent; font:26px/1 system-ui,sans-serif; cursor:pointer; }
+      .ct-media-carousel-controls button:hover:not(:disabled) { background:var(--color-tl-app-bg,#edf3f8); }
+      .ct-media-carousel-controls button:disabled { opacity:.3; cursor:default; }
+      .ct-media-carousel-controls button:focus-visible,.ct-media-upload-status button:focus-visible { outline:3px solid var(--color-tl-app-primary,#1688d4); }
+      .ct-media-viewer-controls { flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
+      .ct-media-viewer-controls button:hover:not(:disabled) { background:#ffffff26; }
+      .ct-media-upload-status { display:flex; align-items:center; gap:10px; font:13px/1.5 system-ui,sans-serif; color:var(--color-tl-app-text-muted,#657786); }
+      .ct-media-upload-status button { flex-shrink:0; min-height:44px; padding:5px 10px; border:1px solid var(--color-tl-app-border,#b8c5d1); border-radius:8px; color:inherit; background:transparent; cursor:pointer; }
+      .ct-media-upload-status [hidden] { display:none!important; }
+      @media(prefers-reduced-motion:reduce) { .ct-media-carousel { scroll-behavior:auto!important; } }
+    `;
+    document.head.append(style);
+  }
+  function ctMediaEnhance(root = document) {
+    ctMediaStyles();
+    for (const state of ctMediaCarousels.values()) {
+      if (!state.grid.isConnected || !ctMediaSlides(state.grid).length) ctMediaRemoveCarousel(state);
+    }
+    const inputs = [...root.querySelectorAll?.(`input[type="file"][accept="${ctMediaPhotoAccept}"]`) || []];
+    if (root.matches?.(`input[type="file"][accept="${ctMediaPhotoAccept}"]`)) inputs.push(root);
+    inputs.forEach(ctMediaEnhanceInput);
+    const grids = [...root.querySelectorAll?.('div.grid.rounded-2xl.overflow-hidden.border') || []];
+    if (root.matches?.('div.grid.rounded-2xl.overflow-hidden.border')) grids.push(root);
+    grids.forEach(ctMediaEnhanceCarousel);
+    ctMediaEnhanceViewer();
+  }
+
+    // Public Japanese RSS headlines. Native tweet.app requests are not intercepted.
+  // The original news container remains intact and is restored on every failure.
+  const ctNewsFeeds = Object.freeze({
+    nation: 'https://news.yahoo.co.jp/rss/categories/domestic.xml',
+    sports: 'https://news.yahoo.co.jp/rss/categories/sports.xml',
+    entertainment: 'https://news.yahoo.co.jp/rss/categories/entertainment.xml',
+    technology: 'https://news.yahoo.co.jp/rss/categories/it.xml'
+  });
+  const ctNewsLabels = new Map([
+    ['News', 'nation'], ['ニュース', 'nation'], ['Sports', 'sports'], ['スポーツ', 'sports'],
+    ['Entertainment', 'entertainment'], ['エンタメ', 'entertainment'], ['エンターテインメント', 'entertainment'],
+    ['Technology', 'technology'], ['テクノロジー', 'technology']
+  ]);
+  const ctNewsState = {
+    region: null, mounts: new Map(), cache: new Map(), pending: new Map(), retryAt: new Map(),
+    ttl: 15 * 60 * 1000, retryDelay: 60 * 1000, timeout: 10000
+  };
+  const ctNewsPreferenceKey = 'ct-news-region-v1';
+  const ctNewsCacheKey = 'ct-japanese-news-cache-v1';
+
+  function ctNewsText(value, max = 512) {
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
+  }
+  function ctNewsURL(value, kind = 'article') {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash) return null;
+      if (kind === 'feed') return Object.values(ctNewsFeeds).includes(url.href) ? url.href : null;
+      if (kind === 'image') {
+        // Yahoo's feed images are served by its public image CDN. Never accept
+        // arbitrary feed-supplied URLs (localhost, data URLs, credentials, etc.).
+        return /^(?:[a-z0-9-]+\.)*yimg\.(?:jp|com)$/.test(url.hostname) ? url.href : null;
+      }
+      return url.hostname === 'news.yahoo.co.jp' && /^\/(?:articles|pickup|expert\/articles)\//.test(url.pathname) ? url.href : null;
+    } catch { return null; }
+  }
+  function ctNewsArticle(value) {
+    if (!value || typeof value !== 'object') return null;
+    const title = ctNewsText(value.title);
+    const url = ctNewsURL(value.url);
+    if (!title || !url) return null;
+    const date = Date.parse(value.publishedAt);
+    return {
+      title, url, image: ctNewsURL(value.image, 'image') || '',
+      source: 'Yahoo!ニュース', publishedAt: Number.isFinite(date) ? new Date(date).toISOString() : ''
+    };
+  }
+  function ctParseJapaneseNews(xml) {
+    if (typeof xml !== 'string' || !xml || xml.length > 1024 * 1024 || /<!DOCTYPE|<!ENTITY/i.test(xml)) return [];
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    if (doc.querySelector('parsererror') || !doc.querySelector('rss > channel')) return [];
+    const seen = new Set();
+    const articles = [];
+    for (const item of [...doc.querySelectorAll('channel > item')].slice(0, 50)) {
+      const childText = name => [...item.children].find(el => el.localName === name)?.textContent || '';
+      const imageElement = [...item.children].find(el => el.localName === 'image');
+      const mediaElement = [...item.children].find(el =>
+        (el.localName === 'thumbnail' || el.localName === 'content') &&
+        el.namespaceURI === 'http://search.yahoo.com/mrss/');
+      const enclosure = [...item.children].find(el => el.localName === 'enclosure' && /^image\//.test(el.getAttribute('type') || ''));
+      const imageValue = imageElement?.querySelector('url')?.textContent || imageElement?.textContent ||
+        mediaElement?.getAttribute('url') || enclosure?.getAttribute('url') || '';
+      const article = ctNewsArticle({ title: childText('title'), url: childText('link').trim(),
+        image: imageValue.trim(), publishedAt: childText('pubDate') });
+      if (!article || seen.has(article.url)) continue;
+      seen.add(article.url);
+      articles.push(article);
+      if (articles.length >= 10) break;
+    }
+    return articles;
+  }
+  function ctRequestNews(url) {
+    const target = ctNewsURL(url, 'feed');
+    if (!target) return Promise.resolve(null);
+    return new Promise(resolve => {
+      let done = false;
+      let handle;
+      const aborter = typeof AbortController === 'function' ? new AbortController() : null;
+      const finish = value => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = setTimeout(() => {
+        finish(null);
+        try { handle?.abort?.(); } catch {}
+        try { aborter?.abort(); } catch {}
+      }, ctNewsState.timeout);
+      const parse = response => response?.status >= 200 && response.status < 300 &&
+        (!response.finalUrl || response.finalUrl === target) &&
+        typeof response.responseText === 'string' && response.responseText.length <= 1024 * 1024
+        ? response.responseText : null;
+      let request = null;
+      if (typeof GM_xmlhttpRequest === 'function') request = GM_xmlhttpRequest;
+      else if (typeof globalThis.GM?.xmlHttpRequest === 'function') request = globalThis.GM.xmlHttpRequest.bind(globalThis.GM);
+      if (request) {
+        try {
+          handle = request({ method: 'GET', url: target, anonymous: true, redirect: 'error',
+            timeout: ctNewsState.timeout, headers: { Accept: 'application/rss+xml, application/xml, text/xml' },
+            onload: response => finish(parse(response)), onerror: () => finish(null),
+            ontimeout: () => finish(null), onabort: () => finish(null) });
+          if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => finish(parse(response)), () => finish(null));
+        } catch { finish(null); }
+        return;
+      }
+      if (typeof fetch !== 'function') return finish(null);
+      Promise.resolve().then(() => fetch(target, { method: 'GET', credentials: 'omit', redirect: 'error',
+        referrerPolicy: 'no-referrer', ...(aborter ? { signal: aborter.signal } : {}) }))
+        .then(async response => {
+          if (!response?.ok || (response.url && response.url !== target)) return null;
+          const value = await response.text();
+          return value.length <= 1024 * 1024 ? value : null;
+        }).then(finish, () => finish(null));
+    });
+  }
+  function ctNewsReadCache() {
+    try {
+      const stored = sessionStorage.getItem(ctNewsCacheKey);
+      if (!stored || stored.length > 128 * 1024) return;
+      const cache = JSON.parse(stored);
+      for (const topic of Object.keys(ctNewsFeeds)) {
+        const entry = cache?.[topic];
+        if (!entry || !Number.isFinite(entry.at) || entry.at > Date.now() || Date.now() - entry.at >= ctNewsState.ttl || !Array.isArray(entry.articles)) continue;
+        const articles = entry.articles.slice(0, 10).map(ctNewsArticle).filter(Boolean);
+        if (articles.length) ctNewsState.cache.set(topic, { at: entry.at, articles });
+      }
+    } catch {}
+  }
+  async function ctLoadJapaneseNews(topic) {
+    if (!Object.hasOwn(ctNewsFeeds, topic)) return null;
+    const cached = ctNewsState.cache.get(topic);
+    if (cached && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) return cached.articles;
+    if (ctNewsState.pending.has(topic)) return ctNewsState.pending.get(topic);
+    if ((ctNewsState.retryAt.get(topic) || 0) > Date.now()) return null;
+    const pending = (async () => {
+      const xml = await ctRequestNews(ctNewsFeeds[topic]);
+      const articles = ctParseJapaneseNews(xml);
+      if (!articles.length) {
+        ctNewsState.retryAt.set(topic, Date.now() + ctNewsState.retryDelay);
+        return null;
+      }
+      ctNewsState.retryAt.delete(topic);
+      ctNewsState.cache.set(topic, { at: Date.now(), articles });
+      try { sessionStorage.setItem(ctNewsCacheKey, JSON.stringify(Object.fromEntries(ctNewsState.cache))); } catch {}
+      return articles;
+    })().finally(() => ctNewsState.pending.delete(topic));
+    ctNewsState.pending.set(topic, pending);
+    return pending;
+  }
+  function ctNewsVisible(element) {
+    return element?.isConnected && !element.closest('[hidden],[aria-hidden="true"]');
+  }
+  function ctNewsTargets() {
+    if (!/^\/feed\/?$/.test(location.pathname)) return [];
+    const targets = [];
+    for (const header of document.querySelectorAll('main > div.w-full.min-w-0.flex.flex-col > div.sticky')) {
+      if (!ctNewsVisible(header)) continue;
+      const tabs = header.querySelector('div.overflow-x-auto');
+      if (!tabs) continue;
+      const buttons = [...tabs.children].filter(el => el.matches('button.rounded-full.whitespace-nowrap'));
+      const topics = new Set(buttons.map(el => ctNewsLabels.get(ctNewsText(el.textContent))).filter(Boolean));
+      if (topics.size !== 4) continue;
+      const active = buttons.find(el => el.classList.contains('bg-sky-500') && el.classList.contains('text-white'));
+      const topic = ctNewsLabels.get(ctNewsText(active?.textContent));
+      if (!topic) continue;
+      const container = header.parentElement.lastElementChild;
+      // Verified native Whe layout: the final direct div is the news/feed body.
+      // Never hide a composer, header, or a subtree containing another control.
+      if (!container || container === header || container.tagName !== 'DIV' || container.hasAttribute('data-ct-local-ui') ||
+          container.querySelector('textarea,input,article,[contenteditable="true"]')) continue;
+      targets.push({ header, container, topic });
+    }
+    return targets;
+  }
+  function ctNewsSetText(node, text) { if (node.textContent !== text) node.textContent = text; }
+  function ctNewsUnhide(mount) {
+    if (mount.container.classList.contains('ct-news-native-hidden')) mount.container.classList.remove('ct-news-native-hidden');
+  }
+  function ctNewsMakeMount(target) {
+    const ja = CT_LOCALE === 'ja';
+    const panel = document.createElement('section');
+    panel.className = 'ct-japanese-news';
+    panel.dataset.ctLocalUi = 'japanese-news';
+    panel.setAttribute('aria-label', ja ? 'ニュースの地域' : 'News region');
+    const controls = document.createElement('div');
+    controls.className = 'ct-news-controls';
+    const japan = document.createElement('button');
+    japan.type = 'button'; japan.textContent = ja ? '日本' : 'Japan';
+    japan.dataset.ctNewsRegion = 'jp';
+    const world = document.createElement('button');
+    world.type = 'button'; world.textContent = ja ? '世界' : 'World';
+    world.dataset.ctNewsRegion = 'world';
+    controls.append(japan, world);
+    const status = document.createElement('p');
+    status.className = 'ct-news-status';
+    status.setAttribute('role', 'status');
+    const list = document.createElement('div');
+    list.className = 'ct-news-list';
+    panel.append(controls, status, list);
+    target.container.before(panel);
+    const mount = { ...target, panel, status, list, japan, world, rendered: null, loading: null };
+    for (const button of [japan, world]) button.addEventListener('click', () => {
+      ctNewsState.region = button.dataset.ctNewsRegion;
+      try { localStorage.setItem(ctNewsPreferenceKey, ctNewsState.region); } catch {}
+      patchJapaneseNews();
+    });
+    return mount;
+  }
+  function ctNewsRenderArticles(mount, articles) {
+    if (mount.rendered === articles) return;
+    mount.rendered = articles;
+    const fragment = document.createDocumentFragment();
+    for (const article of articles) {
+      const link = document.createElement('a');
+      link.className = 'ct-news-article'; link.href = article.url;
+      link.target = '_blank'; link.rel = 'noopener noreferrer';
+      if (article.image) {
+        const img = document.createElement('img');
+        img.src = article.image; img.alt = ''; img.loading = 'lazy';
+        img.referrerPolicy = 'no-referrer';
+        // No made-up picture when a source thumbnail disappears.
+        img.addEventListener('error', () => { img.hidden = true; });
+        link.append(img);
+      }
+      const title = document.createElement('h3'); title.textContent = article.title;
+      const source = document.createElement('p');
+      source.className = 'ct-news-source'; source.textContent = article.source;
+      if (article.publishedAt) {
+        const time = document.createElement('time');
+        time.dateTime = article.publishedAt;
+        time.textContent = new Date(article.publishedAt).toLocaleString(CT_LOCALE === 'ja' ? 'ja-JP' : 'en-US', {
+          month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
+        source.append(document.createTextNode(' · '), time);
+      }
+      link.append(title, source); fragment.append(link);
+    }
+    mount.list.replaceChildren(fragment);
+  }
+  function ctNewsRefreshMount(mount) {
+    const ja = CT_LOCALE === 'ja';
+    const japan = ctNewsState.region === 'jp';
+    for (const button of [mount.japan, mount.world]) {
+      const selected = button.dataset.ctNewsRegion === ctNewsState.region;
+      const value = String(selected);
+      if (button.getAttribute('aria-pressed') !== value) button.setAttribute('aria-pressed', value);
+    }
+    if (!japan) {
+      ctNewsUnhide(mount);
+      if (!mount.list.hidden) mount.list.hidden = true;
+      ctNewsSetText(mount.status, '');
+      return;
+    }
+    const cached = ctNewsState.cache.get(mount.topic);
+    if (cached && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) {
+      ctNewsRenderArticles(mount, cached.articles);
+      if (mount.list.hidden) mount.list.hidden = false;
+      if (!mount.container.classList.contains('ct-news-native-hidden')) mount.container.classList.add('ct-news-native-hidden');
+      ctNewsSetText(mount.status, ja ? 'Yahoo!ニュース · 見出しを押すと記事が開きます' : 'Yahoo! News Japan · Open a headline to read the article');
+      return;
+    }
+    ctNewsUnhide(mount);
+    if (!mount.list.hidden) mount.list.hidden = true;
+    if ((ctNewsState.retryAt.get(mount.topic) || 0) > Date.now()) {
+      ctNewsSetText(mount.status, ja ? '日本のニュースを取得できなかったため、世界のニュースを表示しています。' : 'Japanese news is unavailable. Showing world news.');
+      return;
+    }
+    ctNewsSetText(mount.status, ja ? '日本のニュースを読み込み中…' : 'Loading Japanese news…');
+    if (mount.loading === mount.topic) return;
+    const topic = mount.topic;
+    mount.loading = topic;
+    ctLoadJapaneseNews(topic).finally(() => {
+      if (mount.loading === topic) mount.loading = null;
+      if (mount.panel.isConnected && ctNewsState.mounts.get(mount.container) === mount) ctNewsRefreshMount(mount);
+    });
+  }
+  function patchJapaneseNews() {
+    if (ctNewsState.region === null) {
+      let value;
+      try { value = localStorage.getItem(ctNewsPreferenceKey); } catch {}
+      ctNewsState.region = value === 'jp' || value === 'world' ? value : CT_LOCALE === 'ja' ? 'jp' : 'world';
+      ctNewsReadCache();
+    }
+    const targets = ctNewsTargets();
+    const containers = new Set(targets.map(target => target.container));
+    for (const [container, mount] of ctNewsState.mounts) {
+      if (!containers.has(container) || !mount.panel.isConnected) {
+        ctNewsUnhide(mount); mount.panel.remove(); ctNewsState.mounts.delete(container);
+      }
+    }
+    if (!targets.length) return;
+    if (!document.getElementById('ct-japanese-news-style')) {
+      const style = document.createElement('style'); style.id = 'ct-japanese-news-style';
+      style.textContent = `.ct-news-native-hidden{display:none!important}.ct-news-controls{display:flex;gap:8px;padding:12px 16px 4px}.ct-news-controls button{min-height:44px;border:1px solid var(--color-tl-app-border,#ccd6dd);border-radius:999px;background:transparent;color:inherit;font:inherit;font-size:13px;font-weight:700;padding:5px 14px;cursor:pointer}.ct-news-controls button[aria-pressed="true"]{background:#1d9bf0;border-color:#1d9bf0;color:#fff}.ct-news-controls button:focus-visible{outline:2px solid #1d9bf0;outline-offset:3px}.ct-news-status{margin:0;padding:4px 16px 10px;font-size:12px;line-height:1.5;color:inherit;opacity:.72}.ct-news-status:empty{display:none}.ct-news-article{display:block;padding:12px 16px;border-bottom:1px solid var(--color-tl-app-border,#ccd6dd);color:inherit;text-decoration:none}.ct-news-article:hover{background:rgba(127,127,127,.06)}.ct-news-article img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:16px;border:1px solid var(--color-tl-app-border,#ccd6dd)}.ct-news-article img[hidden]{display:none}.ct-news-article h3{font-size:17px;line-height:1.4;font-weight:700;margin:12px 0 6px}.ct-news-source{margin:0;font-size:13px;line-height:1.5;opacity:.7}.ct-news-list[hidden]{display:none}`;
+      (document.head || document.documentElement).append(style);
+    }
+    for (const target of targets) {
+      let mount = ctNewsState.mounts.get(target.container);
+      if (!mount) {
+        mount = ctNewsMakeMount(target);
+        ctNewsState.mounts.set(target.container, mount);
+      }
+      mount.topic = target.topic;
+      ctNewsRefreshMount(mount);
+    }
+  }
+
 
 
   const API_ORIGIN = 'https://api.tweet.app';
@@ -2962,6 +4048,8 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
       patchReplyBadge();
     patchNavigation(root);
     patchOfficialBadges(root);
+    ctMediaEnhance(root);
+    patchJapaneseNews(root);
     } catch (error) {
       console.debug('[Classic Twitter EN]', error);
     }
@@ -2973,5 +4061,5 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.7.3 loaded');
+  console.log('🐦 Classic Twitter EN v6.8.0 loaded');
 })();
