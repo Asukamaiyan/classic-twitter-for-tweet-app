@@ -228,6 +228,9 @@
         profileCache.clear();
         ctNetworkState.profileTimes.clear();
         ctNetworkState.profileFailures.clear();
+        // Identity can finish loading after the current DOM scan. Revisit
+        // account-scoped panels even when no native node changes afterward.
+        if (typeof ctScheduleScan === 'function') ctScheduleScan();
       }
       return auth;
     }).catch(() => null).finally(() => {

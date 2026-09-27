@@ -162,13 +162,17 @@ test('auth reads only the Firebase default-user key, never a general auth/token 
 
 test('auth deduplicates concurrent lookups but refreshes immediately after token change or logout', async () => {
   const local = storage({ [firebaseKey]: JSON.stringify(authValue()) });
-  const c = harness({ localStorage: local });
+  let refreshes = 0;
+  const c = harness({ localStorage: local, ctScheduleScan() { refreshes++; } });
   const first = c.network.getAuth(); assert.equal(c.network.getAuth(), first);
   assert.equal((await first).token, tokenA);
+  assert.equal(refreshes, 1, 'an asynchronously discovered identity refreshes account-scoped UI');
   local.map.set(firebaseKey, JSON.stringify(authValue(tokenB)));
   assert.equal((await c.network.getCachedAuth()).token, tokenB);
+  assert.equal(refreshes, 1, 'token refresh for the same account does not trigger repeated scans');
   local.map.delete(firebaseKey);
   assert.equal(await c.network.getAuth(), null);
+  assert.equal(refreshes, 2, 'sign-out clears account-scoped UI even without another native mutation');
   assert.equal(c.network.state.authPending, null);
 });
 
