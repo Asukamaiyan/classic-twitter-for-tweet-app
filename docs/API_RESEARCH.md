@@ -57,3 +57,17 @@ Stable-looking explicit identifiers worth testing against live UI:
 Not every post is an `article`, and many post/profile routes use React onClick handlers rather than anchor hrefs. Do not derive post URLs from an unrelated last link, text timestamp, or a quoted post. Disable a per-post save button when the permalink cannot be reliably identified; a current-detail-page save control is a safe fallback.
 
 Use narrowly scoped exact UI phrases, original-value bookkeeping, and reversible changes. A word such as `Home`, `Reply`, `Following`, `Top`, `Latest`, `Show original` or `Post` can also occur in user content. Regex replacement through all text nodes cannot disambiguate it. Keep editable fields and user-generated content protected even when nested inside a button/link. Preserve English mode without running Japanese replacements. Test navigation, menu labels, ARIA/title/placeholder values, node reuse, reset, and repeated MutationObserver passes in Chrome and Safari/WebKit independently.
+
+
+## 6.7.2 verified reply, avatar and badge corrections (2026-09-27)
+
+The same official client asset and live authenticated UI confirmed:
+
+- Current-account lookup is `GET /api/user-profile/{uid}` returning `profile.username`; the bare `/api/user-profile` route is used for writes and must not be guessed as a read route.
+- `GET /api/users/{username}/posts` returns `posts`; `/replies` returns wrappers with `post` and `parentPost`. A reply notification watches the user's own `post`, not an unrelated wrapper ID or notification ID.
+- `GET /api/posts/{id}/replies?limit=50&cursor=…` supplies replies with author identity, text, timestamps and `nextCursor`. The additional inbox reads these routes only. No native reply notification type was identified in the inspected notification renderer.
+- Native grouped notification rows render up to eight Uo avatars but do not assign their individual profile handlers. The row's representative click therefore wins. `/api/notifications` supplies verified `actorHandle`, `actorDisplayName`, `actorAvatarUrl` and `nextCursor` for identity matching.
+- Official `founder`, `fighter`, `centurion`, `team-member`, `ambassador`, `wing`, and `press` badge PNGs are published at 96×96 under `/assets/{kind}-badge-96.png`. All seven returned PNG content with real 96×96 dimensions. Native low-density selection can choose the 18px source; the patch requests 96px without enlarging layout.
+- Native reply author headers and the mobile Account menu omit the badge renderer. Existing profile data supplies `badges` and `foundingMemberNumber`; the supplement follows the official cumulative tier and team-role precedence.
+
+These endpoints remain an observed first-party contract rather than a documented external API. Reply polling pauses when the tab is hidden and does not deliver OS push notifications. Live verification used the signed-in user's existing session without logging or exporting credentials.

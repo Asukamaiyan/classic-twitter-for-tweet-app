@@ -301,6 +301,7 @@ test('busy translation controls are reconsidered when native loading finishes', 
 test('pagehide stops observer and interval, and persisted pageshow restores one of each', async t => {
   const f = harness(t, '<button>Home</button>');
   f.qa.start();
+  assert.equal(f.stats.replyChecks, 1, 'reply history starts immediately');
   f.window.dispatchEvent(new f.window.Event('pagehide'));
   assert.equal(f.intervals.size, 0);
   f.document.querySelector('button').textContent = 'Notifications';
@@ -309,6 +310,7 @@ test('pagehide stops observer and interval, and persisted pageshow restores one 
   f.window.dispatchEvent(new f.window.PageTransitionEvent('pageshow', { persisted: true }));
   await f.advance(100); assert.equal(f.stats.scans, 2); assert.equal(f.intervals.size, 1);
   const interval = [...f.intervals.values()][0];
-  interval.callback(); assert.equal(f.stats.replyChecks, 1);
-  f.hidden(true); interval.callback(); assert.equal(f.stats.replyChecks, 1);
+  interval.callback(); assert.equal(f.stats.replyChecks, 3);
+  f.hidden(true); interval.callback(); assert.equal(f.stats.replyChecks, 3);
+  f.hidden(false); assert.equal(f.stats.replyChecks, 4, 'visible page requests a throttled refresh');
 });

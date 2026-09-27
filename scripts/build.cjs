@@ -10,7 +10,7 @@ const variants = [
 for (const [locale, file, safari] of variants) {
   let source = read(`src/${locale}.js`);
   source = source.replace('/* @safari-grants */', safari ? '// @connect      firebasestorage.googleapis.com\n// @connect      storage.googleapis.com' : '');
-  for (const part of ['network', 'enhancements', 'runtime', 'presentation']) {
+  for (const part of ['network', 'enhancements', 'runtime', 'presentation', 'replies', 'navigation', 'badges']) {
     source = source.replace(`/* @include ${part} */`, read(`src/${part}.js`));
   }
   source = source.replace('/* @include safari */', safari ? read('src/safari-extras.js') : '');

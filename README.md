@@ -4,7 +4,7 @@
 
 ## インストール・更新
 
-現在の版は **6.7.1** です。使う環境に合った **1本だけ** を有効にしてください。
+現在の版は **6.7.2** です。使う環境に合った **1本だけ** を有効にしてください。
 
 | 環境 | Greasy Fork | ファイル |
 |---|---|---|
@@ -13,6 +13,15 @@
 | English | [English version](https://greasyfork.org/en/scripts/594603) | `classic-twitter-en.user.js` |
 
 Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込みしてください。既存のスクリプト名とnamespaceを維持しています。重複する旧版やテスト版は無効にしてください。ニュース試験版はこのリリースの対象外です。
+
+## 6.7.2 の改善
+
+- アイコンに重なる小さなフォローボタンを非表示。プロフィールなどの通常のフォローボタンは利用できます。
+- 通知欄の各アイコンから、それぞれの本人のプロフィールへ移動。名前だけで移動先を推測しません。
+- 通知欄に「リプライ通知」を追加。過去の返信も履歴として表示し、新着だけを未読にします。再確認・すべて既読の操作に対応。
+- 公式バッジ画像を96×96pxに変更し、表示サイズを維持。スマホのプロフィールメニューと返信の作者名にも表示します。
+
+リプライ通知は、**このタブを表示している間**、最新24件の自分の投稿・返信を対象に90秒ごとに順番に確認します。1回最大6スレッドを確認するため、表示に数分かかる場合があります。履歴・既読状態はこのブラウザ内でアカウント別に保存します。サイトを閉じている間のプッシュ通知や全期間の通知を提供するものではありません。
 
 ## 6.7.1 の改善
 
@@ -48,7 +57,7 @@ Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込み
 
 [API調査](docs/API_RESEARCH.md) に、実際の公式クライアントで確認できた機能と補完機能の境界を記載しています。外部開発者向けの公開API仕様は確認できていません。翻訳、アカウントミュート、検索、Following、テーマなどは既にサイト本体の機能です。
 
-追加の便利ツールはAPIを呼ばず、現在表示されている画面とブラウザ保存領域だけを使います。従来の表示名・返信通知補完はtweet.appの既存APIへの読み取り通信を使います。ログイン用トークンを作者や第三者のサーバーへ送りません。サーバー側DM、予約投稿、端末間同期を追加するものではありません。
+追加の便利ツールはAPIを呼ばず、現在表示されている画面とブラウザ保存領域だけを使います。表示名・バッジ・通知アイコン・返信通知の補完はtweet.appの既存APIへの読み取り通信を使います。ログイン用トークンを作者や第三者のサーバーへ送りません。サーバー側DM、予約投稿、端末間同期を追加するものではありません。
 
 ## 開発・検証
 
@@ -65,7 +74,9 @@ npm run check
 
 ## English
 
-Version 6.7.1 limits terminology changes to interface controls. Post bodies, quotes, names, bios, drafts and native manual translation controls are preserved. Automatic translation is off until explicitly enabled in **Tools**; the native translator follows the browser language.
+Version 6.7.2 adds individual notification-avatar profile links, a browser-local reply inbox, and official high-resolution badges beside reply authors and mobile account names. Tiny avatar follow overlays are hidden; regular Follow buttons remain. Reply checks run in batches every 90 seconds while this tab is visible, covering the latest 24 own posts/replies. This is not background push notification delivery. Reply history is stored separately per account.
+
+The script limits terminology changes to interface controls. Post bodies, quotes, names, bios, drafts and native manual translation controls are preserved. Automatic translation is off until explicitly enabled in **Tools**; the native translator follows the browser language.
 
 Tools provides browser-local saved searches, optional reversible keyword filters, and saved post links from a post detail page. Saved data is shared by accounts in this browser and is not synced across devices. See the validation record for tested environments and the remaining physical Safari/Stay checks.
 

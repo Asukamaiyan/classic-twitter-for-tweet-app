@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.7.1
-// @description  tweet.appのUIを安全に日本語化。投稿本文・名前を保持し、表示名・Founder Number・星のお気に入り、保存検索・投稿保存・任意のキーワード折りたたみに対応。
+// @version      6.7.2
+// @description  tweet.appのUIを日本語化。投稿本文・名前を保持。リプライ通知、通知アイコンの個別リンク、高画質バッジ、星のお気に入り、保存検索・投稿保存・キーワード折りたたみ。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -1046,7 +1046,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.7.1';
+    document.documentElement.dataset.ctActiveVersion = '6.7.2';
     ctStarted = true;
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
@@ -1060,6 +1060,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     document.addEventListener('click', ctRememberTranslationChoice, true);
     ctRunScan();
     ctStartReplyInterval();
+    replyWatchTick();
     window.addEventListener('popstate', ctScheduleScan);
     for (const name of ['pushState', 'replaceState']) {
       const original = history[name];
@@ -1071,7 +1072,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     }
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) ctCancelTranslations();
-      else ctScheduleScan();
+      else { ctScheduleScan(); replyWatchTick(); }
     });
     window.addEventListener('pagehide', () => {
       ctPageActive = false;
@@ -1088,6 +1089,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
         ctObserve();
         ctScheduleScan();
         ctStartReplyInterval();
+        replyWatchTick();
       }
     });
   }
@@ -1174,6 +1176,832 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[aria-live]'));
     return { id, username, name, text: body?.textContent || '', avatar: articleAvatar(article),
       href: `${location.origin}/post/${encodeURIComponent(id)}`, savedAt: Date.now() };
+  }
+
+    // Browser-local reply inbox. All routes and response shapes come from Tweet's own client.
+  // No native notification is marked read and no posting/following API is called here.
+  const ctReplyState = {
+    uid: null, data: null, busy: false, lastAttempt: -Infinity, error: '', storageError: false,
+    rendered: '', storageBound: false
+  };
+  const CT_REPLY_PREFIX = 'ct-replies-v2:';
+  const CT_REPLY_INTERVAL = 90000;
+  const CT_REPLY_THREADS = 24;
+  const CT_REPLY_BATCH = 6;
+  const CT_REPLY_PAGES = 3;
+
+  function ctReplyText(ja, en) { return CT_LOCALE === 'ja' ? ja : en; }
+  function ctReplyId(value) {
+    return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : null;
+  }
+  function ctReplyHandle(value) {
+    return typeof value === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(value) ? value : null;
+  }
+  function ctReplyAvatar(value) {
+    if (typeof value !== 'string' || value.length > 4000) return '';
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+    } catch { return ''; }
+  }
+  function ctReplyEmpty() {
+    return { startedAt: Date.now(), checkedAt: 0, notices: [], seen: [], threads: {} };
+  }
+  function ctReplyRead(uid) {
+    try {
+      const raw = JSON.parse(localStorage.getItem(CT_REPLY_PREFIX + encodeURIComponent(uid)) || 'null');
+      if (!raw || !Array.isArray(raw.notices)) return ctReplyEmpty();
+      return {
+        startedAt: Number(raw.startedAt) || Date.now(), checkedAt: Number(raw.checkedAt) || 0,
+        notices: raw.notices.filter(item => ctReplyId(item?.id) && ctReplyHandle(item?.authorUsername))
+          .slice(0, 100).map(item => ({ ...item, read: item.read === true })),
+        seen: Array.isArray(raw.seen) ? raw.seen.filter(ctReplyId).slice(-4000) : [],
+        threads: raw.threads && typeof raw.threads === 'object' && !Array.isArray(raw.threads) ? raw.threads : {}
+      };
+    } catch { return ctReplyEmpty(); }
+  }
+  function ctReplyWrite(uid, data) {
+    // Preserve acknowledgements made by another tab while network requests were running.
+    const latest = ctReplyRead(uid);
+    const read = new Set(latest.notices.filter(item => item.read).map(item => item.id));
+    const notices = new Map(latest.notices.map(item => [item.id, item]));
+    for (const item of data.notices) notices.set(item.id, { ...item, read: item.read || read.has(item.id) });
+    const merged = {
+      ...data, notices: [...notices.values()].sort((a, b) =>
+        (Date.parse(b.createdAt) || b.detectedAt || 0) - (Date.parse(a.createdAt) || a.detectedAt || 0)
+      ).slice(0, 100), seen: [...new Set([...latest.seen, ...data.seen])].slice(-4000)
+    };
+    try {
+      localStorage.setItem(CT_REPLY_PREFIX + encodeURIComponent(uid), JSON.stringify(merged));
+      ctReplyState.storageError = false;
+      return merged;
+    } catch {
+      ctReplyState.storageError = true;
+      return merged;
+    }
+  }
+  function ctReplyCheckKnownIdentity() {
+    if (ctReplyState.uid && typeof ctNetworkState !== 'undefined' && ctNetworkState.authUID !== ctReplyState.uid) {
+      ctReplyState.uid = null;
+      ctReplyState.data = null;
+      ctReplyState.error = '';
+      ctReplyState.storageError = false;
+    }
+  }
+  function loadReplyNotices() {
+    ctReplyCheckKnownIdentity();
+    return ctReplyState.uid ? (ctReplyState.data?.notices || []) : [];
+  }
+  function markReplyRead(id, deferRender = false) {
+    ctReplyCheckKnownIdentity();
+    if (!ctReplyState.uid || !ctReplyState.data) return;
+    const data = ctReplyRead(ctReplyState.uid);
+    // Retain this tab's in-memory replies if browser storage is unavailable.
+    data.notices = [...new Map([...data.notices, ...loadReplyNotices()].map(item => [item.id, item])).values()]
+      .map(item => !id || item.id === id ? { ...item, read: true } : item);
+    ctReplyState.data = ctReplyWrite(ctReplyState.uid, { ...ctReplyState.data, notices: data.notices });
+    const updateUI = () => { renderReplyPanel(); patchReplyBadge(); };
+    // Keep the activated anchor connected until its native click action has run.
+    // This also preserves normal browser modifier-key/new-tab navigation.
+    if (deferRender) setTimeout(updateUI, 0);
+    else updateUI();
+  }
+  async function ctReplyJSON(path, auth) {
+    const json = await requestJSON(API_ORIGIN + path, { Authorization: `Bearer ${auth.token}` });
+    if (!json || typeof json !== 'object' || json.success === false || json.error) return null;
+    return json;
+  }
+  function ctReplySelectParents(posts, replies, username) {
+    const candidates = [...posts, ...replies.map(item => item?.post)];
+    return [...new Map(candidates.filter(post => ctReplyId(post?.id) &&
+      ctReplyHandle(post?.authorUsername)?.toLowerCase() === username.toLowerCase() &&
+      !post.originalPostId && !post.isRepost && !post.repostedBy).map(post => [post.id, post])).values()]
+      .sort((a, b) => (Date.parse(b.createdAt ?? b.created_at) || 0) - (Date.parse(a.createdAt ?? a.created_at) || 0))
+      .slice(0, CT_REPLY_THREADS)
+      .filter(post => Number(post.replyCount ?? post.comments ?? 0) > 0);
+  }
+  function ctReplyRecord(reply, parentId, username, data) {
+    const id = ctReplyId(reply?.id);
+    const handle = ctReplyHandle(reply?.authorUsername);
+    if (!id || !handle || handle.toLowerCase() === username.toLowerCase() || reply.isDeleted ||
+        reply.originalPostId || (reply.parentId && reply.parentId !== parentId)) return;
+    const existing = data.notices.find(item => item.id === id);
+    const wasSeen = data.seen.includes(id);
+    if (!wasSeen) data.seen.push(id);
+    if (wasSeen && !existing) return;
+    const createdAt = typeof (reply.createdAt ?? reply.created_at) === 'string' ? (reply.createdAt ?? reply.created_at) : '';
+    const created = Date.parse(createdAt);
+    const record = {
+      id, parentId, authorUsername: handle,
+      authorName: typeof reply.authorName === 'string' ? reply.authorName.slice(0, 200) : handle,
+      authorAvatar: ctReplyAvatar(reply.authorAvatar),
+      text: typeof reply.text === 'string' ? reply.text.slice(0, 4000) : '',
+      createdAt, detectedAt: existing?.detectedAt || Date.now(),
+      // Historical replies are useful history, but never an initial unread flood.
+      read: existing ? existing.read : (!Number.isFinite(created) || created <= data.startedAt)
+    };
+    // Trim by creation date only when committing, not by API/parent traversal order.
+    data.notices = [record, ...data.notices.filter(item => item.id !== id)];
+  }
+  async function replyWatchTick(force = false) {
+    if (ctReplyState.busy || document.hidden || (typeof ctPageActive !== 'undefined' && !ctPageActive)) return;
+    const now = Date.now();
+    ctReplyState.busy = true;
+    try {
+      const auth = await getAuth();
+      if (!auth?.token || !ctReplyId(auth.uid)) {
+        ctReplyState.uid = null;
+        ctReplyState.data = null;
+        ctReplyState.error = '';
+        ctReplyState.storageError = false;
+        return;
+      }
+      const accountChanged = ctReplyState.uid !== auth.uid;
+      // Identity checks are never throttled; a newly selected account does not
+      // inherit the previous account's polling deadline or visible inbox.
+      if (!accountChanged && now - ctReplyState.lastAttempt < (force ? 10000 : CT_REPLY_INTERVAL)) return;
+      ctReplyState.lastAttempt = now;
+      ctReplyState.error = '';
+      if (accountChanged) {
+        ctReplyState.uid = auth.uid;
+        ctReplyState.data = ctReplyRead(auth.uid);
+        ctReplyState.storageError = false;
+      }
+      renderReplyPanel();
+      patchReplyBadge();
+      // GET /api/user-profile requires the Firebase uid; the bare route is PUT-only.
+      const profileJSON = await ctReplyJSON('/api/user-profile/' + encodeURIComponent(auth.uid), auth);
+      const username = ctReplyHandle(profileJSON?.profile?.username);
+      if (!username) throw new Error('profile');
+      const [postsJSON, repliesJSON] = await Promise.all([
+        ctReplyJSON('/api/users/' + encodeURIComponent(username) + '/posts?limit=24', auth),
+        ctReplyJSON('/api/users/' + encodeURIComponent(username) + '/replies', auth)
+      ]);
+      if (!Array.isArray(postsJSON?.posts) || !Array.isArray(repliesJSON?.replies)) throw new Error('threads');
+      const data = JSON.parse(JSON.stringify(ctReplyState.data || ctReplyRead(auth.uid)));
+      const parents = ctReplySelectParents(postsJSON.posts, repliesJSON.replies, username);
+      const parentIds = new Set(parents.map(post => post.id));
+      data.threads = Object.fromEntries(Object.entries(data.threads).filter(([id]) => parentIds.has(id)));
+      const pending = parents.filter(post => {
+        const previous = data.threads[post.id];
+        return force || !previous || previous.cursor || previous.count !== Number(post.replyCount ?? post.comments) ||
+          now - previous.checkedAt >= 600000;
+      }).sort((a, b) => (data.threads[a.id]?.checkedAt || 0) - (data.threads[b.id]?.checkedAt || 0))
+        .slice(0, CT_REPLY_BATCH);
+      let failures = 0;
+      for (const parent of pending) {
+        if (document.hidden || (typeof ctPageActive !== 'undefined' && !ctPageActive)) break;
+        let cursor = data.threads[parent.id]?.cursor || null;
+        let successful = true;
+        for (let page = 0; page < CT_REPLY_PAGES; page++) {
+          const query = new URLSearchParams({ limit: '50' });
+          if (cursor) query.set('cursor', cursor);
+          const json = await ctReplyJSON('/api/posts/' + encodeURIComponent(parent.id) + '/replies?' + query, auth);
+          if (!Array.isArray(json?.replies)) { successful = false; failures++; break; }
+          for (const reply of json.replies) ctReplyRecord(reply, parent.id, username, data);
+          const next = typeof json.nextCursor === 'string' && json.nextCursor.length <= 2000 ? json.nextCursor : null;
+          if (!next || next === cursor) { cursor = null; break; }
+          cursor = next;
+        }
+        if (successful) data.threads[parent.id] = {
+          count: Number(parent.replyCount ?? parent.comments), checkedAt: now, cursor
+        };
+        // A failed page must not be remembered as a successful count baseline.
+      }
+      const current = await getAuth();
+      if (current?.uid !== auth.uid) {
+        ctReplyState.uid = null;
+        ctReplyState.data = null;
+        return;
+      }
+      data.checkedAt = now;
+      ctReplyState.data = ctReplyWrite(auth.uid, data);
+      if (failures) ctReplyState.error = ctReplyText('一部の返信を取得できませんでした。次回に再確認します。', 'Some replies could not be checked. They will be retried.');
+    } catch {
+      ctReplyState.error = ctReplyText('返信を取得できませんでした。ログイン状態を確認して、再確認してください。', 'Replies could not be checked. Check your sign-in and try again.');
+    } finally {
+      const current = await getAuth();
+      if (current?.uid !== ctReplyState.uid) {
+        ctReplyState.uid = null;
+        ctReplyState.data = null;
+      }
+      ctReplyState.busy = false;
+      renderReplyPanel();
+      patchReplyBadge();
+    }
+  }
+  function closeReplyPanel() { document.getElementById('ct-reply-panel')?.remove(); ctReplyState.rendered = ''; }
+  function ctReplyBindStorage() {
+    if (ctReplyState.storageBound) return;
+    ctReplyState.storageBound = true;
+    window.addEventListener('storage', event => {
+      if (ctReplyState.uid && event.key === CT_REPLY_PREFIX + encodeURIComponent(ctReplyState.uid)) {
+        ctReplyState.data = ctReplyRead(ctReplyState.uid);
+        renderReplyPanel();
+        patchReplyBadge();
+      }
+    });
+  }
+  function renderReplyPanel() {
+    ctReplyCheckKnownIdentity();
+    ctReplyBindStorage();
+    if (!/^\/notifications\/?$/.test(location.pathname)) { closeReplyPanel(); return; }
+    const main = document.querySelector('main');
+    if (!main) return;
+    let panel = document.getElementById('ct-reply-panel');
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'ct-reply-panel';
+      panel.dataset.ctLocalUi = 'replies';
+      panel.setAttribute('aria-label', ctReplyText('リプライ通知', 'Reply notifications'));
+      // Override legacy panel styling: stay in normal document flow at every screen width.
+      panel.style.cssText = 'position:relative!important;inset:auto!important;width:auto!important;max-width:100%!important;max-height:none!important;margin:12px!important;padding:0!important;z-index:auto!important;box-shadow:none!important;border:1px solid var(--color-tl-app-border,#8b98a544)!important;border-radius:12px!important;color:inherit!important;background:inherit!important;overflow:hidden!important';
+      const heading = [...main.querySelectorAll('h1,h2')].find(el =>
+        !el.closest('[data-ct-local-ui],[hidden],[aria-hidden="true"]') && /^(Notifications|通知)$/.test(el.textContent.trim()));
+      const header = heading?.closest('.sticky') || heading?.parentElement;
+      if (header && header !== main) header.after(panel);
+      else main.prepend(panel);
+      ctReplyState.rendered = '';
+    }
+    const notices = loadReplyNotices();
+    const unread = notices.filter(item => !item.read).length;
+    const signature = JSON.stringify([ctReplyState.uid, notices, ctReplyState.busy, ctReplyState.error, ctReplyState.storageError, ctReplyState.data?.checkedAt]);
+    if (signature === ctReplyState.rendered) return;
+    ctReplyState.rendered = signature;
+    const open = panel.querySelector('details')?.open ?? false;
+    const focused = panel.contains(document.activeElement) ? document.activeElement?.dataset?.replyAction : null;
+    panel.replaceChildren();
+    const details = document.createElement('details');
+    details.open = open;
+    const summary = document.createElement('summary');
+    summary.style.cssText = 'padding:12px 14px;cursor:pointer;font-weight:700;line-height:1.4';
+    summary.textContent = ctReplyText('↩ リプライ通知', '↩ Reply notifications') + (unread ? ` (${unread})` : '');
+    summary.dataset.replyAction = 'summary';
+    details.append(summary);
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:0 14px 14px;overflow-wrap:anywhere';
+    const help = document.createElement('p');
+    help.style.cssText = 'font-size:12px;line-height:1.5;opacity:.75;margin:0 0 10px';
+    help.textContent = ctReplyText(
+      'このアカウントの最新24件の投稿・返信を、このタブを表示している間90秒ごとに順番に確認します。履歴と既読はこのブラウザ内のみ。過去の返信は既読で追加します。',
+      'Checks replies to your latest 24 posts and replies in batches every 90 seconds while this tab is visible. History and read status stay in this browser. Older replies are added as read.');
+    body.append(help);
+    const status = document.createElement('p');
+    status.setAttribute('role', 'status');
+    status.style.cssText = 'font-size:13px;line-height:1.5;margin:0 0 10px';
+    status.textContent = ctReplyState.storageError
+      ? ctReplyText('保存できません。通知はこのページを閉じるまで表示します。', 'Storage is unavailable. Replies will remain only until this page closes.')
+      : ctReplyState.busy ? ctReplyText('返信を確認中…', 'Checking replies…')
+      : ctReplyState.error || (!ctReplyState.uid ? ctReplyText('ログイン後に返信を確認します。', 'Sign in to check replies.')
+        : ctReplyState.data?.checkedAt ? ctReplyText('最終確認 ', 'Last checked ') + new Date(ctReplyState.data.checkedAt).toLocaleTimeString(CT_LOCALE, { hour: '2-digit', minute: '2-digit' })
+          : ctReplyText('返信の確認を待っています。', 'Waiting to check replies.'));
+    body.append(status);
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px';
+    function control(label, action, callback) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.dataset.replyAction = action;
+      button.style.cssText = 'font:inherit;font-size:13px;color:inherit;border:1px solid var(--color-tl-app-border,#8b98a566);background:transparent;border-radius:999px;padding:7px 12px;min-height:36px;cursor:pointer';
+      button.addEventListener('click', callback);
+      controls.append(button);
+      return button;
+    }
+    const refresh = control(ctReplyText('再確認', 'Check now'), 'refresh', () => replyWatchTick(true));
+    refresh.disabled = ctReplyState.busy;
+    const read = control(ctReplyText('すべて既読にする', 'Mark all read'), 'read', () => markReplyRead());
+    read.disabled = !unread;
+    body.append(controls);
+    if (!notices.length) {
+      const empty = document.createElement('p');
+      empty.style.cssText = 'font-size:14px;margin:8px 0';
+      empty.textContent = ctReplyText('確認した返信はまだありません。', 'No replies have been found yet.');
+      body.append(empty);
+    }
+    const list = document.createElement('div');
+    list.style.cssText = 'max-height:420px;overflow:auto;overscroll-behavior:contain';
+    for (const item of notices) {
+      const row = document.createElement('article');
+      row.dataset.ctReplyId = item.id;
+      row.style.cssText = 'padding:12px 0;border-top:1px solid var(--color-tl-app-border,#8b98a544)';
+      const actor = document.createElement('a');
+      actor.href = '/user/' + encodeURIComponent(item.authorUsername);
+      actor.textContent = `${item.authorName || item.authorUsername} @${item.authorUsername}`;
+      actor.style.cssText = 'display:inline-flex;align-items:center;gap:8px;max-width:100%;font-size:14px;font-weight:700;color:inherit;text-decoration:none';
+      const avatarURL = ctReplyAvatar(item.authorAvatar);
+      if (avatarURL) {
+        const avatar = document.createElement('img');
+        avatar.src = avatarURL;
+        avatar.alt = '';
+        avatar.width = 28;
+        avatar.height = 28;
+        avatar.loading = 'lazy';
+        avatar.referrerPolicy = 'no-referrer';
+        avatar.style.cssText = 'width:28px;height:28px;object-fit:cover;border-radius:50%;flex-shrink:0';
+        avatar.addEventListener('error', () => avatar.remove(), { once: true });
+        // The avatar and author name share one verified profile destination.
+        actor.prepend(avatar);
+      }
+      row.append(actor);
+      if (!item.read) {
+        const marker = document.createElement('span');
+        marker.style.cssText = 'font-size:11px;margin-left:8px;color:#1d9bf0';
+        marker.textContent = ctReplyText('未読', 'Unread');
+        row.append(marker);
+      }
+      const link = document.createElement('a');
+      link.href = '/post/' + encodeURIComponent(item.id);
+      link.style.cssText = 'display:block;color:inherit;text-decoration:none;font-size:14px;white-space:pre-wrap;line-height:1.5;margin:5px 0';
+      link.textContent = item.text || ctReplyText('返信を開く', 'Open reply');
+      link.addEventListener('click', () => markReplyRead(item.id, true));
+      row.append(link);
+      const date = new Date(item.createdAt);
+      if (Number.isFinite(date.getTime())) {
+        const time = document.createElement('time');
+        time.dateTime = date.toISOString();
+        time.textContent = date.toLocaleString(CT_LOCALE);
+        time.style.cssText = 'font-size:12px;opacity:.7';
+        row.append(time);
+      }
+      list.append(row);
+    }
+    body.append(list);
+    details.append(body);
+    panel.append(details);
+    if (focused) panel.querySelector(`[data-reply-action="${focused}"]`)?.focus();
+  }
+  function patchReplyBadge() {
+    document.getElementById('ct-reply-badge')?.remove(); // Retire the old detached overlay badge.
+    const count = loadReplyNotices().filter(item => !item.read).length;
+    for (const control of document.querySelectorAll('nav a,nav button,aside a,aside button')) {
+      const label = (control.getAttribute('aria-label') || '').trim();
+      const text = [...control.childNodes].filter(node => node.nodeType === Node.TEXT_NODE)
+        .map(node => node.textContent).join('').trim();
+      const nativeText = [...control.querySelectorAll('span')].filter(el => !el.closest('[data-ct-local-ui]'))
+        .map(el => el.textContent.trim());
+      const target = control.getAttribute('href') === '/notifications' ||
+        /^(Notifications|通知)$/.test(label) || /^(Notifications|通知)$/.test(text) || nativeText.some(value => /^(Notifications|通知)$/.test(value));
+      let badge = control.querySelector('[data-ct-reply-count]');
+      if (!target || !count) { badge?.remove(); continue; }
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.dataset.ctReplyCount = '1';
+        badge.dataset.ctLocalUi = 'reply-count';
+        badge.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-inline-start:4px;padding:0 4px;border-radius:999px;background:#1d9bf0;color:white;font-size:11px;font-weight:700;vertical-align:middle;pointer-events:none';
+        control.append(badge);
+      }
+      const display = `↩${count}`;
+      if (badge.textContent !== display) badge.textContent = display;
+      badge.setAttribute('aria-label', ctReplyText(`未読の返信 ${count} 件`, `${count} unread replies`));
+    }
+  }
+
+    // The native notification row opens its representative event. Its avatars do
+  // not have individual profile handlers, and their alt text is a display name,
+  // never a username. Resolve identities only from native handles or API actors.
+  const ctNavigationState = {
+    installed: false, pending: null, uid: null, fetchedAt: 0, retryAt: 0,
+    actors: new Map(), overlays: new Map(), generation: 0, loading: false,
+    nextCursor: null, initialized: false, pagesFetched: 0, lastAttempt: '', cursorSeen: new Set()
+  };
+  const ctAvatarWrapperSelector = 'div.relative.inline-flex.shrink-0.isolate';
+  const ctNativeFollowSelector = 'span[role="button"][aria-label]';
+
+  function ctNavigationJapanese() { return CT_LOCALE === 'ja'; }
+  function ctNavigationHandle(value) {
+    return typeof value === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(value.trim()) ? value.trim().toLowerCase() : null;
+  }
+  function ctNativeAvatar(wrapper) {
+    return [...wrapper.children].find(el => el.matches('img.rounded-full.object-cover,div[role="img"].rounded-full')) || null;
+  }
+  function ctNativeAvatarFollow(wrapper) {
+    return [...wrapper.children].find(el => el.matches(ctNativeFollowSelector) &&
+      el.classList.contains('absolute') && el.classList.contains('-bottom-0.5') &&
+      el.classList.contains('-right-0.5') && /^(?:Follow|Following) @[a-zA-Z0-9_.-]{1,80}$/.test(el.getAttribute('aria-label') || '')) || null;
+  }
+  function ctAvatarURL(value) {
+    if (!value || value === 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150') return '';
+    try {
+      // Public avatars returned by tweet.app use absolute URLs. A relative URL
+      // may refer to a different media origin, so do not infer that origin here.
+      const url = new URL(value);
+      return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.href : null;
+    } catch { return null; }
+  }
+  function ctAvatarIdentity(wrapper) {
+    const avatar = ctNativeAvatar(wrapper);
+    if (!avatar) return null;
+    const label = avatar.getAttribute(avatar.tagName === 'IMG' ? 'alt' : 'aria-label') || '';
+    const suffix = avatar.tagName === 'IMG' ? ' avatar' : ' avatar placeholder';
+    if (!label.endsWith(suffix)) return null;
+    const name = label.slice(0, -suffix.length);
+    const url = avatar.tagName === 'IMG' ? ctAvatarURL(avatar.getAttribute('src')) : '';
+    return name && name.length <= 512 && url !== null ? `${name}\n${url}` : null;
+  }
+  function ctNotificationAvatarWrappers() {
+    if (!/^\/notifications\/?$/.test(location.pathname)) return [];
+    return [...document.querySelectorAll(`main button.items-start.border-b ${ctAvatarWrapperSelector}`)]
+      .filter(el => ctNativeAvatar(el) && !el.closest('article,[data-ct-local-ui]'));
+  }
+  function ctNotificationAvatarHandle(wrapper) {
+    const native = ctNativeAvatarFollow(wrapper)?.getAttribute('aria-label')?.match(/ @([a-zA-Z0-9_.-]+)$/)?.[1];
+    if (native) return ctNavigationHandle(native);
+    if (ctNavigationState.uid !== ctNetworkState.authUID) return null;
+    const identity = ctAvatarIdentity(wrapper);
+    return identity ? ctNavigationState.actors.get(identity) || null : null;
+  }
+  function ctAddNotificationActors(json, actors) {
+    if (!json || json.success !== true || !Array.isArray(json.notifications)) return false;
+    for (const item of json.notifications.slice(0, 100)) {
+      const handle = ctNavigationHandle(item?.actorHandle);
+      const name = item?.actorDisplayName;
+      const url = ctAvatarURL(item?.actorAvatarUrl);
+      if (!handle || typeof name !== 'string' || !name || name.length > 512 || url === null) continue;
+      const identity = `${name}\n${url}`;
+      if (actors.has(identity) && actors.get(identity) !== handle) actors.set(identity, null);
+      else if (!actors.has(identity)) actors.set(identity, handle);
+    }
+    return true;
+  }
+  function ctRenderNotificationAvatars() {
+    const japanese = ctNavigationJapanese();
+    for (const wrapper of ctNotificationAvatarWrappers()) {
+      let link = wrapper.querySelector(':scope > a.ct-notification-profile-link');
+      if (!link) {
+        link = document.createElement('a');
+        link.className = 'ct-notification-profile-link';
+        link.dataset.ctLocalUi = 'notification-profile';
+        link.setAttribute('role', 'link');
+        link.tabIndex = 0;
+        wrapper.append(link);
+      }
+      const handle = ctNotificationAvatarHandle(wrapper);
+      const label = handle ? (japanese ? `@${handle}のプロフィールを開く` : `Open @${handle}'s profile`) :
+        ctNavigationState.loading ? (japanese ? 'プロフィールを確認中…' : 'Looking up profile…') :
+          (japanese ? 'プロフィールを特定できません。押すと再確認します' : 'Profile unavailable. Activate to retry');
+      const href = handle ? `/user/${encodeURIComponent(handle)}` : null;
+      if (href && link.getAttribute('href') !== href) link.setAttribute('href', href);
+      else if (!href) link.removeAttribute('href');
+      if (handle) link.removeAttribute('aria-disabled');
+      else if (link.getAttribute('aria-disabled') !== 'true') link.setAttribute('aria-disabled', 'true');
+      if (link.getAttribute('aria-label') !== label) link.setAttribute('aria-label', label);
+      if (link.title !== label) link.title = label;
+    }
+  }
+  function ctUnresolvedNotificationActors() {
+    return [...new Set(ctNotificationAvatarWrappers().filter(wrapper => !ctNotificationAvatarHandle(wrapper))
+      .map(wrapper => ctAvatarIdentity(wrapper) || 'unknown-avatar'))].sort().join('\n\n');
+  }
+  function ctResetNotificationActorCache() {
+    ctNavigationState.actors.clear();
+    ctNavigationState.fetchedAt = 0;
+    ctNavigationState.nextCursor = null;
+    ctNavigationState.initialized = false;
+    ctNavigationState.pagesFetched = 0;
+    ctNavigationState.lastAttempt = '';
+    ctNavigationState.cursorSeen.clear();
+  }
+  function ctLoadNotificationActors({ retry = false } = {}) {
+    if (ctNavigationState.pending) return ctNavigationState.pending;
+    if (!/^\/notifications\/?$/.test(location.pathname) || Date.now() < ctNavigationState.retryAt) return Promise.resolve();
+    const generation = ctNavigationState.generation;
+    const pending = Promise.resolve().then(async () => {
+      const auth = await getAuth();
+      if (generation !== ctNavigationState.generation || !/^\/notifications\/?$/.test(location.pathname)) return;
+      if (ctNavigationState.uid !== (auth?.uid || null)) {
+        ctNavigationState.uid = auth?.uid || null;
+        ctResetNotificationActorCache();
+      }
+      if (!auth?.token || !auth.uid) { ctNavigationState.retryAt = Date.now() + 10000; return; }
+      const unresolved = ctUnresolvedNotificationActors();
+      if (!unresolved) return;
+      const fresh = Date.now() - ctNavigationState.fetchedAt < 60000;
+      const changed = unresolved !== ctNavigationState.lastAttempt;
+      if (fresh && !changed && !retry) return;
+      ctNavigationState.loading = true;
+      ctRenderNotificationAvatars();
+      // Keep older pages when a grouped row has more than eight actors. Starting
+      // again from the newest page could otherwise never reach an older avatar.
+      const actors = new Map(ctNavigationState.actors);
+      const headOnly = ctNavigationState.initialized && !fresh && !changed && !retry;
+      const continuing = ctNavigationState.initialized && !!ctNavigationState.nextCursor && (fresh || retry);
+      let cursor = continuing ? ctNavigationState.nextCursor : null;
+      const budget = headOnly ? 1 : retry || !continuing ? 20 : Math.max(0, 20 - ctNavigationState.pagesFetched);
+      if (!headOnly && !continuing) {
+        ctNavigationState.pagesFetched = 0;
+        ctNavigationState.cursorSeen.clear();
+      }
+      for (let page = 0; page < budget; page++) {
+        if (cursor && ctNavigationState.cursorSeen.has(cursor)) break;
+        const query = new URLSearchParams({ limit: '20' });
+        if (cursor) query.set('cursor', cursor);
+        const json = await requestJSON(`https://api.tweet.app/api/notifications?${query}`, { Authorization: `Bearer ${auth.token}` });
+        if (generation !== ctNavigationState.generation || ctNetworkState.authUID !== auth.uid ||
+            !/^\/notifications\/?$/.test(location.pathname)) return;
+        if (!ctAddNotificationActors(json, actors)) { ctNavigationState.retryAt = Date.now() + 10000; return; }
+        if (cursor) ctNavigationState.cursorSeen.add(cursor);
+        while (actors.size > 1000) actors.delete(actors.keys().next().value);
+        ctNavigationState.actors = actors;
+        ctNavigationState.initialized = true;
+        if (!cursor) ctNavigationState.fetchedAt = Date.now();
+        const next = typeof json.nextCursor === 'string' && json.nextCursor.length <= 2048 ? json.nextCursor : null;
+        if (!headOnly) {
+          ctNavigationState.pagesFetched++;
+          ctNavigationState.nextCursor = next;
+        }
+        ctRenderNotificationAvatars();
+        if (ctNotificationAvatarWrappers().every(wrapper => ctNotificationAvatarHandle(wrapper))) break;
+        if (!next || ctNavigationState.cursorSeen.has(next)) break;
+        cursor = next;
+      }
+      ctNavigationState.lastAttempt = ctUnresolvedNotificationActors();
+    }).catch(() => { ctNavigationState.retryAt = Date.now() + 10000; }).finally(() => {
+      if (ctNavigationState.pending === pending) {
+        ctNavigationState.pending = null;
+        ctNavigationState.loading = false;
+        ctRenderNotificationAvatars();
+      }
+    });
+    ctNavigationState.pending = pending;
+    return pending;
+  }
+  function ctNotificationLinkEvent(event) {
+    const link = event.target?.closest?.('a.ct-notification-profile-link');
+    if (!link || !/^\/notifications\/?$/.test(location.pathname)) return;
+    const wrapper = link.parentElement;
+    if (!wrapper?.matches(ctAvatarWrapperSelector) || !wrapper.closest('main button.items-start.border-b')) return;
+    // A React update may arrive between the last scan and this click. Never
+    // navigate using the previous avatar's URL while the next scan is queued.
+    const handle = ctNotificationAvatarHandle(wrapper);
+    const href = handle ? `/user/${encodeURIComponent(handle)}` : null;
+    if (href && link.getAttribute('href') !== href) link.setAttribute('href', href);
+    else if (!href) link.removeAttribute('href');
+    // Stop the outer React row handler, but keep real-anchor defaults: normal,
+    // modified, middle-button and context-menu navigation all retain their URLs.
+    event.stopPropagation();
+    if (event.type === 'keydown') {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      if (event.key === ' ' || !link.hasAttribute('href')) event.preventDefault();
+      if (link.hasAttribute('href') || event.key !== 'Enter') return;
+    } else if (link.hasAttribute('href')) return;
+    event.preventDefault();
+    if (event.type === 'click' || event.type === 'keydown') {
+      void ctLoadNotificationActors({ retry: true });
+    }
+  }
+  function installNativeNavigation() {
+    if (ctNavigationState.installed) return;
+    ctNavigationState.installed = true;
+    const style = document.createElement('style');
+    style.id = 'ct-native-navigation-style';
+    style.textContent = '.ct-avatar-follow-hidden{display:none!important;pointer-events:none!important}' +
+      '.ct-notification-profile-link{position:absolute;inset:0;z-index:2;display:block;border-radius:9999px;background:transparent;cursor:pointer}' +
+      '.ct-notification-profile-link:focus-visible{outline:2px solid #0ea5e9;outline-offset:3px}' +
+      '.ct-notification-profile-link[aria-disabled="true"]{cursor:help}';
+    (document.head || document.documentElement).append(style);
+    for (const type of ['click', 'auxclick', 'keydown', 'contextmenu']) document.addEventListener(type, ctNotificationLinkEvent, true);
+  }
+  function patchNavigation(root = document) {
+    installNativeNavigation();
+    if (ctNavigationState.uid && ctNetworkState.authUID !== ctNavigationState.uid) {
+      ctNavigationState.uid = null;
+      ctResetNotificationActorCache();
+    }
+    const wrappers = [...root.querySelectorAll(ctAvatarWrapperSelector)];
+    if (root.matches?.(ctAvatarWrapperSelector)) wrappers.unshift(root);
+    for (const wrapper of wrappers) {
+      if (!ctNativeAvatar(wrapper) || wrapper.closest('[data-ct-local-ui]')) continue;
+      const overlay = ctNativeAvatarFollow(wrapper);
+      if (!overlay) continue;
+      if (!ctNavigationState.overlays.has(overlay)) ctNavigationState.overlays.set(overlay, {
+        tabIndex: overlay.getAttribute('tabindex'), hidden: overlay.getAttribute('aria-hidden')
+      });
+      overlay.classList.add('ct-avatar-follow-hidden');
+      if (overlay.getAttribute('tabindex') !== '-1') overlay.setAttribute('tabindex', '-1');
+      if (overlay.getAttribute('aria-hidden') !== 'true') overlay.setAttribute('aria-hidden', 'true');
+    }
+    for (const overlay of ctNavigationState.overlays.keys()) if (!overlay.isConnected) ctNavigationState.overlays.delete(overlay);
+    ctRenderNotificationAvatars();
+    const unresolved = ctUnresolvedNotificationActors();
+    if (unresolved && (Date.now() - ctNavigationState.fetchedAt >= 60000 || unresolved !== ctNavigationState.lastAttempt)) {
+      void ctLoadNotificationActors();
+    }
+  }
+  function destroyNativeNavigation() {
+    ctNavigationState.generation++;
+    ctNavigationState.installed = false;
+    for (const type of ['click', 'auxclick', 'keydown', 'contextmenu']) document.removeEventListener(type, ctNotificationLinkEvent, true);
+    document.getElementById('ct-native-navigation-style')?.remove();
+    document.querySelectorAll('a.ct-notification-profile-link').forEach(link => link.remove());
+    for (const [overlay, original] of ctNavigationState.overlays) {
+      overlay.classList.remove('ct-avatar-follow-hidden');
+      for (const [attribute, value] of [['tabindex', original.tabIndex], ['aria-hidden', original.hidden]]) {
+        if (value === null) overlay.removeAttribute(attribute); else overlay.setAttribute(attribute, value);
+      }
+    }
+    ctNavigationState.overlays.clear();
+    ctResetNotificationActorCache();
+    ctNavigationState.pending = null;
+    ctNavigationState.uid = null;
+    ctNavigationState.fetchedAt = ctNavigationState.retryAt = 0;
+    ctNavigationState.loading = false;
+  }
+
+    // Official badge artwork and membership precedence from Tweet's web client.
+  // The largest published variant is 96 px; displayed dimensions remain native.
+  const ctOfficialBadgeKinds = {
+    founder: 'Founder', fighter: 'Fighter', centurion: 'Centurion',
+    'team-member': 'Team Member', ambassador: 'Tweet Ambassador', wing: 'Wing', press: 'Press'
+  };
+  const ctBadgeImageStates = new WeakMap();
+  const ctBadgeRequests = new WeakMap();
+
+  function ctBadgeAsset(value) {
+    try {
+      const url = new URL(value, location.origin);
+      if (!['https://app.tweet.app', 'https://tweet.app'].includes(url.origin) || url.search || url.hash) return null;
+      const match = url.pathname.match(/^\/assets\/(founder|fighter|centurion|team-member|ambassador|wing|press)-badge-(18|36|48|96)\.png$/);
+      return match ? { kind: match[1], size: Number(match[2]), url: url.href } : null;
+    } catch { return null; }
+  }
+
+  function ctBadgeSource(kind) {
+    return `https://app.tweet.app/assets/${kind}-badge-96.png`;
+  }
+
+  function ctUpgradeBadgeImage(img) {
+    if (!img.matches('img.shrink-0.select-none') || img.closest('.ct-official-badges')) return;
+    const original = ctBadgeAsset(img.getAttribute('src'));
+    if (!original) return;
+    let state = ctBadgeImageStates.get(img);
+    const firstUse = !state;
+    if (state?.kind !== original.kind) {
+      state = { kind: original.kind, src: img.getAttribute('src'), srcset: img.getAttribute('srcset'), failed: false };
+      ctBadgeImageStates.set(img, state);
+    }
+    if (firstUse) {
+      img.addEventListener('error', () => {
+        const current = ctBadgeImageStates.get(img);
+        if (!current || img.src !== ctBadgeSource(current.kind) || current.failed) return;
+        current.failed = true;
+        // A failed enhancement must not remove the site's original artwork.
+        img.setAttribute('src', current.src);
+        if (current.srcset === null) img.removeAttribute('srcset');
+        else img.setAttribute('srcset', current.srcset);
+      });
+    }
+    if (state.failed) return;
+    const source = ctBadgeSource(original.kind);
+    if (img.src !== source) img.src = source;
+    // A width-based srcset lets DPR=1 choose the low-resolution 18 px file.
+    // Keep layout dimensions, but select the largest artwork explicitly.
+    if (img.hasAttribute('srcset')) img.removeAttribute('srcset');
+  }
+
+  function ctProfileBadgeKinds(user) {
+    const badges = Array.isArray(user?.badges) ? user.badges : [];
+    if (badges.includes('team_member')) return ['team-member'];
+    const hasCenturion = badges.includes('centurion');
+    const hasFighter = hasCenturion || badges.includes('founding_special');
+    const hasFounder = hasFighter || badges.includes('founding') ||
+      (user?.foundingMemberNumber != null && /^\d+$/.test(String(user.foundingMemberNumber)));
+    const result = [];
+    if (hasFounder) result.push('founder');
+    if (hasFighter) result.push('fighter');
+    if (hasCenturion) result.push('centurion');
+    if (badges.includes('wing')) result.push('wing');
+    if (badges.includes('ambassador')) result.push('ambassador');
+    if (badges.includes('press')) result.push('press');
+    return result;
+  }
+
+  function ctBadgeUsername(value) {
+    const username = String(value || '').trim().replace(/^@/, '').toLowerCase();
+    return /^[a-z0-9_.-]{1,80}$/.test(username) ? username : null;
+  }
+
+  function ctBadgeArticleTarget(article) {
+    if (!article?.isConnected || article.closest('[data-ct-owned],[data-ct-local-ui],blockquote,[aria-label^="Quoted post"]')) return null;
+    const avatar = [...article.querySelectorAll('button[aria-label]')].find(button =>
+      button.closest('article') === article && !button.closest('blockquote,[aria-label^="Quoted post"]') &&
+      /^View @[^\s]+'s profile$/i.test(button.getAttribute('aria-label') || ''));
+    const username = ctBadgeUsername(avatar?.getAttribute('aria-label')?.match(/^View @(.+)'s profile$/i)?.[1]);
+    if (!username) return null;
+    const name = [...article.querySelectorAll('button.font-bold.truncate')].find(button =>
+      button.closest('article') === article && !button.closest('blockquote,[aria-label^="Quoted post"],p') &&
+      (ctBadgeUsername(button.dataset.ctAuthorUser) === username || ctBadgeUsername(button.textContent) === username));
+    if (!name) return null;
+    return { name, username, host: name.parentElement, kind: 'article', scope: article };
+  }
+
+  function ctBadgeAccountTarget(dialog) {
+    if (!dialog?.isConnected || !dialog.matches('[role="dialog"][aria-label="Account menu"]')) return null;
+    const name = dialog.querySelector('button.block.text-left > p.font-extrabold.truncate');
+    const handle = name?.nextElementSibling;
+    if (!handle?.matches('p.truncate') || !/^@/.test(handle.textContent.trim())) return null;
+    const username = ctBadgeUsername(handle.textContent);
+    return username ? { name, username, host: name, kind: 'account', scope: dialog } : null;
+  }
+
+  function ctBadgeNativeImages(target) {
+    return [...target.host.querySelectorAll('img')].filter(img => !img.closest('.ct-official-badges') && ctBadgeAsset(img.getAttribute('src')));
+  }
+
+  function ctBadgeCurrentTarget(target) {
+    return target.kind === 'account' ? ctBadgeAccountTarget(target.scope) : ctBadgeArticleTarget(target.scope);
+  }
+
+  function ctBadgeGroup(target) {
+    return [...target.host.children].find(child => child.classList.contains('ct-official-badges')) || null;
+  }
+
+  function ctInstallBadgeStyle() {
+    if (document.getElementById('ct-official-badge-style')) return;
+    const style = document.createElement('style');
+    style.id = 'ct-official-badge-style';
+    style.textContent = `
+      .ct-official-badges { display:inline-flex; flex-shrink:0; align-items:center; gap:2px; vertical-align:middle; }
+      .ct-official-badges img { display:block; width:18px; height:18px; max-width:none; aspect-ratio:1; object-fit:contain; image-rendering:auto; }
+      .ct-account-badge-name { white-space:normal !important; overflow:visible !important; overflow-wrap:anywhere; }
+      .ct-account-badge-name > .ct-official-badges { margin-inline-start:4px; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function ctRenderProfileBadges(target, user) {
+    const kinds = ctProfileBadgeKinds(user);
+    let group = ctBadgeGroup(target);
+    if (!kinds.length || ctBadgeNativeImages(target).length) { group?.remove(); return; }
+    const signature = `${target.username}:${kinds.join(',')}`;
+    if (group?.dataset.ctBadgeSignature === signature) return;
+    if (!group) {
+      group = document.createElement('span');
+      group.className = 'ct-official-badges';
+      group.dataset.ctOwned = '';
+      if (target.kind === 'account') {
+        target.name.classList.add('ct-account-badge-name');
+        target.name.appendChild(group);
+      } else target.name.after(group);
+    }
+    group.dataset.ctBadgeUser = target.username;
+    group.dataset.ctBadgeSignature = signature;
+    group.setAttribute('role', 'img');
+    const labelKinds = kinds.filter(kind => !(kind === 'founder' && kinds.includes('fighter')) &&
+      !(kind === 'fighter' && kinds.includes('centurion')));
+    group.setAttribute('aria-label', labelKinds.map(kind => ctOfficialBadgeKinds[kind]).join(' + '));
+    group.title = group.getAttribute('aria-label');
+    group.replaceChildren(...kinds.map(kind => {
+      const img = document.createElement('img');
+      img.src = ctBadgeSource(kind);
+      img.alt = '';
+      img.width = 18;
+      img.height = 18;
+      img.draggable = false;
+      img.addEventListener('error', () => {
+        img.src = `https://app.tweet.app/assets/${kind}-badge-36.png`;
+      }, { once: true });
+      return img;
+    }));
+  }
+
+  async function ctPatchProfileBadges(target) {
+    const group = ctBadgeGroup(target);
+    if (group && group.dataset.ctBadgeUser !== target.username) group.remove();
+    if (ctBadgeNativeImages(target).length) { ctBadgeGroup(target)?.remove(); return; }
+    const pending = ctBadgeRequests.get(target.name);
+    if (pending?.username === target.username) return pending.promise;
+    const request = { username: target.username, promise: null };
+    ctBadgeRequests.set(target.name, request);
+    request.promise = Promise.resolve().then(() => fetchProfile(target.username)).then(user => {
+      const current = ctBadgeCurrentTarget(target);
+      if (!user || ctBadgeRequests.get(target.name) !== request || current?.name !== target.name ||
+          current.username !== target.username || current.host !== target.host) return;
+      const returnedUsername = ctBadgeUsername(user.username || user.handle);
+      if (returnedUsername && returnedUsername !== target.username) return;
+      ctRenderProfileBadges(current, user);
+    }).catch(() => {}).finally(() => {
+      if (ctBadgeRequests.get(target.name) === request) ctBadgeRequests.delete(target.name);
+    });
+    return request.promise;
+  }
+
+  function patchOfficialBadges(root = document) {
+    const images = [...(root.querySelectorAll?.('img[src]') || [])];
+    if (root.matches?.('img[src]')) images.push(root);
+    images.forEach(ctUpgradeBadgeImage);
+    const scopes = new Set(root.querySelectorAll?.('article,[role="dialog"][aria-label="Account menu"]') || []);
+    if (root.matches?.('article,[role="dialog"][aria-label="Account menu"]')) scopes.add(root);
+    const parent = root.closest?.('article,[role="dialog"][aria-label="Account menu"]');
+    if (parent) scopes.add(parent);
+    const requests = [];
+    for (const scope of scopes) {
+      const target = scope.matches('article') ? ctBadgeArticleTarget(scope) : ctBadgeAccountTarget(scope);
+      if (!target) continue;
+      ctInstallBadgeStyle();
+      requests.push(ctPatchProfileBadges(target));
+    }
+    return Promise.all(requests);
   }
 
 
@@ -2270,6 +3098,7 @@ if (/^just\s+now$/i.test(t)) {
       const actionIndex = siblings.indexOf(context.element);
       if (actionIndex < 0) continue;
       const before = siblings.slice(0, actionIndex);
+      const tail = before.slice(before.lastIndexOf(actorElements[actorElements.length - 1]) + 1);
       const directText = before.filter(node => node.nodeType === Node.TEXT_NODE);
       for (const node of directText) {
         const text = clean(node.nodeValue);
@@ -2279,18 +3108,27 @@ if (/^just\s+now$/i.test(t)) {
         else {
           const together = text.match(/^and\s+(\d+)\s+others?$/i);
           if (together) replaceLocalizationText(node, `さんとそのほか${together[1]}人`);
+          else if (tail.includes(node) && /^さんと\d+$/.test(text)) {
+            replaceLocalizationText(node, text.replace(/^さんと(\d+)$/, 'さんとそのほか$1人'));
+          }
         }
       }
-      for (let i = 0; i < before.length; i++) {
-        const node = before[i];
+      for (let i = 0; i < tail.length; i++) {
+        const node = tail[i];
         if (node.nodeType !== Node.TEXT_NODE || !/^\d+$/.test(clean(node.nodeValue))) continue;
-        const next = before.slice(i + 1).find(sibling => clean(sibling.textContent));
-        if (next?.nodeType === Node.TEXT_NODE && /^others?$/i.test(clean(next.nodeValue))) {
+        const next = tail.slice(i + 1).find(sibling => clean(sibling.textContent));
+        const previous = tail.slice(0, i).reverse().find(sibling => clean(sibling.textContent));
+        const otherWord = next?.nodeType === Node.TEXT_NODE && /^others?$/i.test(clean(next.nodeValue));
+        // React may update only the numeric text node after our previous pass.
+        // Its unchanged "others" sibling then remains empty; the scoped native
+        // connector still identifies this as the grouped-actor count.
+        const translatedGroup = previous?.nodeType === Node.TEXT_NODE && /^さんと$/.test(clean(previous.nodeValue));
+        if (otherWord || translatedGroup) {
           replaceLocalizationText(node, `そのほか${clean(node.nodeValue)}人`);
-          next.nodeValue = '';
+          if (otherWord) next.nodeValue = '';
         }
       }
-      const actionText = clean(action.nodeValue);
+      const actionText = clean(action.nodeValue).replace(/^(?:さん)?が?(?=あなた)/, '');
       if (!/^あなた/.test(actionText)) continue;
       const previous = before.slice().reverse().find(node => clean(node.textContent));
       if (!previous) continue;
@@ -3255,931 +4093,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
 
-  function authJSON(
-    path,
-    auth
-  ) {
-    if (
-      !auth?.token
-    ) {
-      return Promise.resolve(
-        null
-      );
-    }
-
-    return requestJSON(
-      path.startsWith(
-        'http'
-      )
-        ? path
-        : API_ORIGIN + path,
-
-      {
-        Authorization:
-          `Bearer ${auth.token}`
-      }
-    );
-  }
-
-  function items(
-    json,
-    keys = []
-  ) {
-    if (
-      Array.isArray(
-        json
-      )
-    ) {
-      return json;
-    }
-
-    if (
-      !json ||
-      typeof json !==
-        'object'
-    ) {
-      return [];
-    }
-
-    for (
-      const key of
-      [
-        ...keys,
-        'items',
-        'notifications',
-        'posts',
-        'replies',
-        'results'
-      ]
-    ) {
-      if (
-        Array.isArray(
-          json[key]
-        )
-      ) {
-        return json[key];
-      }
-    }
-
-    return json.data
-      ? items(
-          json.data,
-          keys
-        )
-      : [];
-  }
-
-  const postId =
-    post =>
-      String(
-        post?.originalPostId
-        ||
-        post?.postId
-        ||
-        post?.id
-        ||
-        ''
-      )
-        .trim();
-
-  const replyCount =
-    post =>
-      Number(
-        post?.replyCount
-        ??
-        post?.comments
-        ??
-        post?.commentCount
-        ??
-        post?.repliesCount
-        ??
-        post?.reply_count
-        ??
-        0
-      )
-      ||
-      0;
-
-  const author =
-    post =>
-      validUser(
-        post?.authorUsername
-        ||
-        post?.authorHandle
-        ||
-        post?.author?.username
-        ||
-        post?.username
-      );
-
-  const postText =
-    post =>
-      String(
-        post?.text
-        ||
-        post?.body
-        ||
-        post?.content
-        ||
-        post?.replyText
-        ||
-        ''
-      );
-
-  const postName =
-    post =>
-      String(
-        post?.authorName
-        ||
-        post?.actorName
-        ||
-        post?.author?.displayName
-        ||
-        author(post)
-        ||
-        ''
-      );
-
-  const postAvatar =
-    post =>
-      String(
-        post?.authorAvatar
-        ||
-        post?.actorAvatar
-        ||
-        post?.author?.avatarUrl
-        ||
-        post?.avatarUrl
-        ||
-        ''
-      );
-
-  const postCreated =
-    post =>
-      String(
-        post?.createdAt
-        ||
-        post?.created_at
-        ||
-        post?.timestamp
-        ||
-        ''
-      );
-
-  function loadReplyNotices() {
-    const list =
-      loadJSON(
-        KEY.replyNotices,
-        []
-      );
-
-    return Array.isArray(
-      list
-    )
-      ? list
-      : [];
-  }
-
-  function saveReplyNotice(
-    reply,
-    parentId = ''
-  ) {
-    const id =
-      postId(
-        reply
-      );
-
-    const username =
-      author(
-        reply
-      );
-
-    if (
-      !id ||
-      !username
-    ) {
-      return;
-    }
-
-    const list =
-      loadReplyNotices();
-
-    const old =
-      list.find(
-        x =>
-          x.id === id
-      );
-
-    const record = {
-      id,
-
-      parentId:
-        String(
-          reply?.parentPostId
-          ||
-          reply?.parentId
-          ||
-          parentId
-          ||
-          ''
-        ),
-
-      authorUsername:
-        username,
-
-      authorName:
-        postName(reply)
-        ||
-        username,
-
-      authorAvatar:
-        postAvatar(reply),
-
-      text:
-        postText(reply),
-
-      createdAt:
-        postCreated(reply)
-        ||
-        new Date()
-          .toISOString(),
-
-      detectedAt:
-        Date.now(),
-
-      read:
-        old?.read || false
-    };
-
-    saveJSON(
-      KEY.replyNotices,
-      [
-        record,
-        ...list.filter(
-          x =>
-            x.id !== id
-        )
-      ]
-        .sort(
-          (a, b) =>
-            new Date(
-              b.createdAt ||
-              b.detectedAt
-            )
-            -
-            new Date(
-              a.createdAt ||
-              a.detectedAt
-            )
-        )
-        .slice(
-          0,
-          100
-        )
-    );
-  }
-
-  function markReplyRead(
-    id
-  ) {
-    const list =
-      loadReplyNotices();
-
-    list.forEach(
-      item => {
-        if (
-          item.id === id
-        ) {
-          item.read =
-            true;
-        }
-      }
-    );
-
-    saveJSON(
-      KEY.replyNotices,
-      list
-    );
-  }
-
-  let replyBusy =
-    false;
-
-  let lastFull =
-    0;
-
-  async function replyWatchTick() {
-    if (replyBusy) {
-      return;
-    }
-
-    replyBusy =
-      true;
-
-    try {
-      const auth =
-        await getAuth();
-
-      if (
-        !auth?.token
-      ) {
-        return;
-      }
-
-      const me =
-        await authJSON(
-          '/api/user-profile',
-          auth
-        );
-
-      const myHandle =
-        validUser(
-          me?.username
-          ||
-          me?.handle
-          ||
-          me?.user?.username
-          ||
-          me?.profile?.username
-        );
-
-      const notificationsJson =
-        await authJSON(
-          '/api/notifications?limit=50',
-          auth
-        );
-
-      for (
-        const notification of
-        items(
-          notificationsJson,
-          ['notifications']
-        )
-      ) {
-        const type =
-          String(
-            notification?.type
-            ||
-            notification?.eventType
-            ||
-            notification?.kind
-            ||
-            notification?.notificationType
-            ||
-            ''
-          )
-            .toUpperCase();
-
-        const message =
-          String(
-            notification?.message
-            ||
-            notification?.text
-            ||
-            ''
-          );
-
-        if (
-          !type.includes(
-            'REPLY'
-          )
-          &&
-          !/replied to|返信/i.test(
-            message
-          )
-        ) {
-          continue;
-        }
-
-        const object =
-          notification?.reply
-          ||
-          notification?.post
-          ||
-          notification?.tweet
-          ||
-          notification;
-
-        const id =
-          postId(
-            object
-          )
-          ||
-          String(
-            notification?.postId
-            ||
-            notification?.replyPostId
-            ||
-            notification?.id
-            ||
-            ''
-          );
-
-        const username =
-          validUser(
-            notification?.actorHandle
-            ||
-            notification?.actorUsername
-            ||
-            notification?.actor?.username
-            ||
-            author(
-              object
-            )
-          );
-
-        if (
-          id &&
-          username
-        ) {
-          saveReplyNotice(
-            {
-              ...object,
-
-              id,
-
-              authorUsername:
-                username,
-
-              authorName:
-                notification?.actorName
-                ||
-                notification?.actorDisplayName
-                ||
-                notification?.actor?.displayName
-                ||
-                postName(
-                  object
-                )
-                ||
-                username,
-
-              authorAvatar:
-                notification?.actorAvatar
-                ||
-                notification?.actor?.avatarUrl
-                ||
-                postAvatar(
-                  object
-                ),
-
-              text:
-                notification?.replyText
-                ||
-                notification?.postText
-                ||
-                postText(
-                  object
-                ),
-
-              createdAt:
-                notification?.createdAt
-                ||
-                notification?.created_at
-                ||
-                postCreated(
-                  object
-                )
-            },
-
-            notification?.parentPostId
-            ||
-            notification?.targetPostId
-            ||
-            ''
-          );
-        }
-      }
-
-      if (!myHandle) {
-        renderReplyPanel();
-        patchReplyBadge();
-        return;
-      }
-
-      const [
-        postsJson,
-        repliesJson
-      ] =
-        await Promise.all([
-          authJSON(
-            `/api/users/${
-              encodeURIComponent(
-                myHandle
-              )
-            }/posts?limit=24`,
-            auth
-          ),
-
-          authJSON(
-            `/api/users/${
-              encodeURIComponent(
-                myHandle
-              )
-            }/replies`,
-            auth
-          )
-        ]);
-
-      const parents =
-        [
-          ...items(
-            postsJson,
-            ['posts']
-          ),
-
-          ...items(
-            repliesJson,
-            ['replies']
-          )
-        ]
-          .filter(
-            post =>
-              postId(post)
-              &&
-              replyCount(post) > 0
-          )
-          .sort(
-            (a, b) =>
-              new Date(
-                postCreated(b) || 0
-              )
-              -
-              new Date(
-                postCreated(a) || 0
-              )
-          )
-          .slice(
-            0,
-            24
-          );
-
-      const counts =
-        loadJSON(
-          KEY.replyCounts,
-          {}
-        );
-
-      const seen =
-        new Set(
-          loadJSON(
-            KEY.replySeen,
-            []
-          )
-        );
-
-      const initialized =
-        localStorage.getItem(
-          KEY.replyInit
-        ) === '1';
-
-      const force =
-        Date.now()
-        -
-        lastFull
-        >
-        10 *
-        60 *
-        1000;
-
-      if (force) {
-        lastFull =
-          Date.now();
-      }
-
-      for (
-        const parent of
-        parents
-      ) {
-        const pid =
-          postId(
-            parent
-          );
-
-        const count =
-          replyCount(
-            parent
-          );
-
-        if (
-          !force &&
-          initialized &&
-          counts[pid] === count
-        ) {
-          continue;
-        }
-
-        const replyJson =
-          await authJSON(
-            `/api/posts/${
-              encodeURIComponent(
-                pid
-              )
-            }/replies?limit=50`,
-            auth
-          );
-
-        for (
-          const reply of
-          items(
-            replyJson,
-            ['replies']
-          )
-        ) {
-          const rid =
-            postId(
-              reply
-            );
-
-          if (
-            !rid ||
-            seen.has(
-              rid
-            )
-          ) {
-            continue;
-          }
-
-          const username =
-            author(
-              reply
-            );
-
-          if (
-            !username
-            ||
-            normUser(
-              username
-            ) ===
-              normUser(
-                myHandle
-              )
-          ) {
-            seen.add(
-              rid
-            );
-
-            continue;
-          }
-
-          if (initialized) {
-            saveReplyNotice(
-              reply,
-              pid
-            );
-          }
-
-          seen.add(
-            rid
-          );
-        }
-
-        counts[pid] =
-          count;
-      }
-
-      saveJSON(
-        KEY.replyCounts,
-        counts
-      );
-
-      saveJSON(
-        KEY.replySeen,
-        [...seen]
-          .slice(
-            -3000
-          )
-      );
-
-      localStorage.setItem(
-        KEY.replyInit,
-        '1'
-      );
-
-      renderReplyPanel();
-      patchReplyBadge();
-
-    } catch(error) {
-      console.debug(
-        '[Classic Twitter JP reply watcher]',
-        error
-      );
-
-    } finally {
-      replyBusy =
-        false;
-    }
-  }
-
-  function closeReplyPanel() {
-    document.getElementById(
-      'ct-reply-panel'
-    )
-      ?.remove();
-  }
-
-  function renderReplyPanel() {
-    if (
-      !location.pathname.startsWith(
-        '/notifications'
-      )
-    ) {
-      closeReplyPanel();
-      return;
-    }
-
-    const data =
-      loadReplyNotices()
-        .filter(
-          item =>
-            !item.read
-        );
-
-    if (!data.length) {
-      closeReplyPanel();
-      return;
-    }
-
-    const r =
-      centerRect();
-
-    if (!r) {
-      return;
-    }
-
-    let panel =
-      document.getElementById(
-        'ct-reply-panel'
-      );
-
-    if (!panel) {
-      panel =
-        document.createElement(
-          'section'
-        );
-
-      panel.id =
-        'ct-reply-panel';
-
-      document.body.appendChild(
-        panel
-      );
-    }
-
-    panel.style.left =
-      `${Math.round(
-        r.left + 12
-      )}px`;
-
-    panel.style.top =
-      `${
-        Math.max(
-          90,
-          Math.round(
-            r.top + 80
-          )
-        )
-      }px`;
-
-    panel.style.width =
-      `${
-        Math.max(
-          280,
-          Math.round(
-            r.width - 24
-          )
-        )
-      }px`;
-
-    panel.innerHTML =
-      '';
-
-    panel.appendChild(
-      panelHead(
-        '↩ 新しい返信',
-        'tweet.app本体で表示されない返信を補完しています',
-
-        () => {
-          data.forEach(
-            item =>
-              markReplyRead(
-                item.id
-              )
-          );
-
-          closeReplyPanel();
-          patchReplyBadge();
-        }
-      )
-    );
-
-    for (
-      const item of
-      data
-    ) {
-      const row =
-        localCard(
-          item,
-          true
-        );
-
-      row.onclick =
-        () => {
-          markReplyRead(
-            item.id
-          );
-
-          if (item.id) {
-            location.href =
-              `/post/${
-                encodeURIComponent(
-                  item.id
-                )
-              }`;
-          }
-
-          renderReplyPanel();
-          patchReplyBadge();
-        };
-
-      panel.appendChild(
-        row
-      );
-    }
-  }
-
-  function patchReplyBadge() {
-    const count =
-      loadReplyNotices()
-        .filter(
-          item =>
-            !item.read
-        )
-        .length;
-
-    let badge =
-      document.getElementById(
-        'ct-reply-badge'
-      );
-
-    const link =
-      [
-        ...document.querySelectorAll(
-          'a,button'
-        )
-      ]
-        .find(
-          el =>
-            /^(Notifications|通知)$/i
-              .test(
-                clean(
-                  el.textContent
-                )
-              )
-        );
-
-    if (
-      !count ||
-      !link
-    ) {
-      badge?.remove();
-      return;
-    }
-
-    if (!badge) {
-      badge =
-        document.createElement(
-          'div'
-        );
-
-      badge.id =
-        'ct-reply-badge';
-
-      document.body.appendChild(
-        badge
-      );
-    }
-
-    const r =
-      link.getBoundingClientRect();
-
-    badge.textContent =
-      String(
-        count
-      );
-
-    badge.style.left =
-      `${Math.round(
-        r.right - 8
-      )}px`;
-
-    badge.style.top =
-      `${Math.round(
-        r.top + 2
-      )}px`;
-  }
-
-
   function patchComposeJapanese(root = document) {
     for (const node of localizationScopeNodes(root)) {
       if (!isLocalizationUI(node)) continue;
@@ -4389,6 +4302,8 @@ if (/^just\s+now$/i.test(t)) {
       renderReplyPanel();
 
       patchReplyBadge();
+    patchNavigation(root);
+    patchOfficialBadges(root);
 
     } catch(error) {
       console.debug(
@@ -4415,6 +4330,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.7.1 loaded'
+    '🐦 Classic Twitter JP v6.7.2 loaded'
   );
 })();

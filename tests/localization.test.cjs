@@ -312,3 +312,24 @@ test('ja: native truncated route heading translates without changing profile nam
   assert.equal(f.text('name'), 'Explore');
   f.dom.window.close();
 });
+
+test('ja: grouped notifications recover when React changes only the count and retains translated action nodes', () => {
+  const f = fixture('ja', '<main><button class="items-start border-b"><p><span class="font-extrabold" id="actorA">Actor A</span>, <span class="font-extrabold" id="actorB">Actor B</span><span id="count"></span><span class="text-tl-app-text-muted" id="action">liked your post</span></p></button></main>', '/notifications');
+  const connector = f.document.createTextNode(' and ');
+  const count = f.document.createTextNode('3');
+  const other = f.document.createTextNode('others');
+  f.document.getElementById('count').replaceWith(connector, count, f.document.createTextNode(' '), other, f.document.createTextNode(' '));
+  f.run();
+  assert.equal(f.document.querySelector('p').textContent, 'Actor Aさん、Actor Bさんとそのほか3人があなたのツイートをお気に入りに登録しました');
+  count.nodeValue = '6'; // Native React reuses its unchanged connectors and others text.
+  f.run();
+  assert.equal(f.document.querySelector('p').textContent, 'Actor Aさん、Actor Bさんとそのほか6人があなたのツイートをお気に入りに登録しました');
+  f.document.getElementById('action').firstChild.nodeValue = 'さんがあなたのツイートをお気に入りに登録しました';
+  f.run();
+  assert.equal(f.text('action'), 'があなたのツイートをお気に入りに登録しました');
+  assert.equal(f.text('actorA'), 'Actor A');
+  assert.equal(f.text('actorB'), 'Actor B');
+  const stable = f.document.body.innerHTML;
+  f.run(); assert.equal(f.document.body.innerHTML, stable);
+  f.dom.window.close();
+});
