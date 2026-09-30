@@ -1,10 +1,11 @@
 /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
   const copy = ja ? {
     tools: '便利ツール', title: '便利ツール', close: '閉じる',
+    appearance: '昔のTwitterの表示', classic: 'クラシック表示を使う', classicHelp: '青いナビゲーションと星のお気に入り。オフにするとTweet標準のレイアウトに戻ります。動きを減らす端末設定にも対応します。',
     scope: 'このブラウザ内でのみ保存されます。同じブラウザの別アカウントにも適用されます。',
     filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
     words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
@@ -34,6 +35,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     post: '投稿',
   } : {
     tools: 'Tools', title: 'Tools', close: 'Close',
+    appearance: 'Classic Twitter appearance', classic: 'Use classic appearance', classicHelp: 'Blue navigation and star favorites. Turn off to restore Tweet’s native layout. Respects your reduced motion preference.',
     scope: 'Saved only in this browser. Applies to other accounts in the same browser, too.',
     filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
     words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
@@ -162,7 +164,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   document.body.append(root);
 
   function openPanel(open, moveFocus = true) {
-    if (open) updateBookmarkControl();
+    if (open) { updateBookmarkControl(); refreshAppearance(); }
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open && moveFocus) close.focus({ preventScroll: true });
@@ -200,6 +202,26 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     input.focus();
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
+
+  let refreshAppearance = () => {};
+  if (typeof getClassicAppearance === 'function' && typeof setClassicAppearance === 'function') {
+    const section = element('section');
+    const label = element('label');
+    const input = element('input', undefined, { type: 'checkbox', id: 'ct-local-classic-appearance', 'aria-describedby': 'ct-local-classic-help' });
+    refreshAppearance = () => { input.checked = !!getClassicAppearance(); };
+    refreshAppearance();
+    label.append(input, document.createTextNode(copy.classic));
+    section.append(element('h3', copy.appearance), label, element('p', copy.classicHelp, { id: 'ct-local-classic-help', class: 'ct-local-note' }));
+    input.addEventListener('change', () => {
+      const requested = input.checked;
+      try {
+        if (setClassicAppearance(requested) === false || !!getClassicAppearance() !== requested) throw new Error('Setting was not saved');
+        announce(copy.saved);
+      } catch { announce(copy.storageError, true); }
+      refreshAppearance();
+    });
+    body.append(section);
+  }
 
   let refreshTranslation = () => {};
   if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {

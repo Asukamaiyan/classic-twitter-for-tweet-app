@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.8.1
-// @description  tweet.appのUIを日本語化。複数写真選択とスライド表示、日本のニュース、翻訳エラー時の待機、対応PCの端末内翻訳。投稿本文・名前と既存の返信通知・バッジ・保存機能を保持。
+// @version      6.9.0
+// @description  昔のTwitter風の青い表示と星のお気に入り。スマホ・デスクトップ対応、控えめな動き、日本語UI、返信通知・バッジ・複数写真・日本ニュース・翻訳・保存ツール。投稿本文や名前を保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -302,12 +302,13 @@
   }
 
   /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
   const copy = ja ? {
     tools: '便利ツール', title: '便利ツール', close: '閉じる',
+    appearance: '昔のTwitterの表示', classic: 'クラシック表示を使う', classicHelp: '青いナビゲーションと星のお気に入り。オフにするとTweet標準のレイアウトに戻ります。動きを減らす端末設定にも対応します。',
     scope: 'このブラウザ内でのみ保存されます。同じブラウザの別アカウントにも適用されます。',
     filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
     words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
@@ -337,6 +338,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     post: '投稿',
   } : {
     tools: 'Tools', title: 'Tools', close: 'Close',
+    appearance: 'Classic Twitter appearance', classic: 'Use classic appearance', classicHelp: 'Blue navigation and star favorites. Turn off to restore Tweet’s native layout. Respects your reduced motion preference.',
     scope: 'Saved only in this browser. Applies to other accounts in the same browser, too.',
     filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
     words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
@@ -465,7 +467,7 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
   document.body.append(root);
 
   function openPanel(open, moveFocus = true) {
-    if (open) updateBookmarkControl();
+    if (open) { updateBookmarkControl(); refreshAppearance(); }
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open && moveFocus) close.focus({ preventScroll: true });
@@ -503,6 +505,26 @@ function installLocalEnhancements({ locale = 'ja', getAutoTranslate, setAutoTran
     input.focus();
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
+
+  let refreshAppearance = () => {};
+  if (typeof getClassicAppearance === 'function' && typeof setClassicAppearance === 'function') {
+    const section = element('section');
+    const label = element('label');
+    const input = element('input', undefined, { type: 'checkbox', id: 'ct-local-classic-appearance', 'aria-describedby': 'ct-local-classic-help' });
+    refreshAppearance = () => { input.checked = !!getClassicAppearance(); };
+    refreshAppearance();
+    label.append(input, document.createTextNode(copy.classic));
+    section.append(element('h3', copy.appearance), label, element('p', copy.classicHelp, { id: 'ct-local-classic-help', class: 'ct-local-note' }));
+    input.addEventListener('change', () => {
+      const requested = input.checked;
+      try {
+        if (setClassicAppearance(requested) === false || !!getClassicAppearance() !== requested) throw new Error('Setting was not saved');
+        announce(copy.saved);
+      } catch { announce(copy.storageError, true); }
+      refreshAppearance();
+    });
+    body.append(section);
+  }
 
   let refreshTranslation = () => {};
   if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {
@@ -1132,6 +1154,525 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   return { supported, prepare, patch, cancel, clear, hide };
 }
 
+    // Classic styling is applied only to the authenticated client structure
+  // checked against Tweet's public bundle. Native nodes and handlers stay put.
+  const ctClassicAppearanceStates = new WeakMap();
+  const ctClassicExcluded = '[data-ct-owned],[data-user-content],blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"]';
+
+  function ctClassicDocument(root) {
+    return root?.nodeType === 9 ? root : root?.ownerDocument || null;
+  }
+
+  function ctClassicOwn(element, article) {
+    return element?.closest('article') === article && !element.closest(ctClassicExcluded);
+  }
+
+  function ctClassicStyle(doc, state) {
+    if (state.style?.isConnected) return true;
+    // An unrelated element claiming this ID must not be replaced.
+    if (doc.getElementById('ct-classic-appearance-style')) return false;
+    const style = doc.createElement('style');
+    style.id = 'ct-classic-appearance-style';
+    style.dataset.ctOwned = 'classic-appearance';
+    style.textContent = `
+      .ct-classic-shell {
+        --ct-classic-blue:#55acee;
+        --ct-classic-blue-hover:#2795e9;
+        --ct-classic-border:var(--tl-app-border);
+        --ct-classic-surface:var(--tl-app-card);
+        --ct-classic-hover:var(--tl-app-bg);
+        --ct-classic-compose:var(--tl-app-card);
+        font-family:"Helvetica Neue",Arial,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif;
+      }
+      .ct-classic-shell[data-app-theme="light"] {
+        --ct-classic-border:#e1e8ed;
+        --ct-classic-hover:#f5f8fa;
+        --ct-classic-compose:#e8f5fd;
+        background:#f5f8fa!important;
+      }
+      .ct-classic-shell[data-app-theme="dark"] {
+        --ct-classic-hover:rgba(255,255,255,.035);
+      }
+      .ct-classic-shell .ct-classic-timeline {
+        background:var(--ct-classic-surface)!important;
+        border-color:var(--ct-classic-border)!important;
+      }
+      .ct-classic-shell .ct-classic-tweet {
+        border-bottom-color:var(--ct-classic-border)!important;
+        border-radius:0;
+        box-shadow:none;
+      }
+      @media (hover:hover) {
+        .ct-classic-shell .ct-classic-tweet:hover {
+          background:var(--ct-classic-hover)!important;
+        }
+      }
+      .ct-classic-shell .ct-classic-avatar {
+        border-radius:4px!important;
+      }
+      .ct-classic-shell .ct-classic-top-tabs {
+        padding-top:0!important;
+        padding-bottom:0!important;
+        background:var(--ct-classic-surface)!important;
+        border-bottom-style:solid!important;
+        border-bottom-color:var(--ct-classic-border)!important;
+        backdrop-filter:none;
+      }
+      .ct-classic-shell .ct-classic-tabs-list {
+        gap:0!important;
+        min-height:46px;
+      }
+      .ct-classic-shell .ct-classic-tab {
+        padding:11px 12px 8px!important;
+        border:0!important;
+        border-bottom:3px solid transparent!important;
+        border-radius:0!important;
+        background:transparent!important;
+        color:var(--tl-app-text-muted)!important;
+        font-size:13px;
+        line-height:20px;
+      }
+      .ct-classic-shell .ct-classic-tab.bg-sky-500 {
+        color:var(--ct-classic-blue)!important;
+        border-bottom-color:var(--ct-classic-blue)!important;
+        font-weight:700;
+      }
+      .ct-classic-shell .ct-classic-tab:hover {
+        color:var(--ct-classic-blue)!important;
+        background:var(--ct-classic-hover)!important;
+      }
+      .ct-classic-shell .ct-classic-nav-item {
+        border-radius:4px!important;
+      }
+      .ct-classic-shell .ct-classic-nav-item.text-sky-500,
+      .ct-classic-shell .ct-classic-nav-item[aria-current="page"] {
+        color:var(--ct-classic-blue)!important;
+      }
+      .ct-classic-shell .ct-classic-nav-desktop {
+        background:var(--ct-classic-surface);
+        border:1px solid var(--ct-classic-border);
+        border-radius:5px;
+        padding:6px;
+      }
+      .ct-classic-shell .ct-classic-side-panel {
+        border-radius:5px!important;
+        border-color:var(--ct-classic-border)!important;
+        box-shadow:none!important;
+      }
+      .ct-classic-shell .ct-classic-header,
+      .ct-classic-shell .ct-classic-nav-mobile {
+        background:var(--ct-classic-surface)!important;
+        border-color:var(--ct-classic-border)!important;
+        backdrop-filter:none;
+      }
+      .ct-classic-shell .ct-classic-composer {
+        background:var(--ct-classic-compose)!important;
+        border-bottom-color:var(--ct-classic-border)!important;
+      }
+      .ct-classic-shell .ct-classic-submit {
+        border-radius:4px!important;
+        background:var(--ct-classic-blue)!important;
+        box-shadow:none!important;
+      }
+      .ct-classic-shell .ct-classic-submit:not(:disabled):hover {
+        background:var(--ct-classic-blue-hover)!important;
+      }
+      .ct-classic-shell .ct-classic-mobile-compose {
+        background:var(--ct-classic-blue)!important;
+        box-shadow:none!important;
+      }
+      .ct-classic-shell .ct-classic-actions > div > button,
+      .ct-classic-shell .ct-classic-actions > button {
+        border-radius:4px;
+      }
+      .ct-classic-shell .ct-classic-favorite-group.text-pink-500,
+      .ct-classic-shell .ct-classic-favorite-group.text-pink-500 > span,
+      .ct-classic-shell .ct-classic-favorite-group.text-pink-500 > [data-testid="tweet-like-action-count"],
+      .ct-classic-shell .ct-classic-favorite-group:hover > span,
+      .ct-classic-shell .ct-classic-favorite-group:hover > [data-testid="tweet-like-action-count"] {
+        color:#ffac33!important;
+      }
+      @supports selector(:has(*)) {
+        .ct-classic-shell .ct-classic-favorite-group:has(> [data-testid="tweet-like-action"].ct-is-liked) > span,
+        .ct-classic-shell .ct-classic-favorite-group:has(> [data-testid="tweet-like-action"].ct-is-liked) > [data-testid="tweet-like-action-count"] {
+          color:#ffac33!important;
+        }
+      }
+      @media (min-width:1024px) {
+        .ct-classic-shell .ct-classic-layout { max-width:1200px; }
+        .ct-classic-shell .ct-classic-grid { column-gap:24px!important; }
+        .ct-classic-shell .ct-classic-timeline {
+          border-top:1px solid var(--ct-classic-border);
+          border-radius:5px 5px 0 0;
+        }
+      }
+      @media (max-width:1023px) {
+        .ct-classic-shell .ct-classic-tabs-list { min-height:44px; }
+        .ct-classic-shell .ct-classic-tab {
+          padding:10px 11px 7px!important;
+          min-height:44px;
+        }
+        .ct-classic-shell .ct-classic-mobile-compose {
+          min-width:44px;
+          min-height:44px;
+        }
+        .ct-classic-shell .ct-classic-actions {
+          flex-wrap:wrap;
+          column-gap:0;
+          row-gap:0;
+        }
+        .ct-classic-shell .ct-classic-actions [data-testid="tweet-like-action"],
+        .ct-classic-shell .ct-classic-actions [data-testid="tweet-open-comment-action"],
+        .ct-classic-shell .ct-classic-actions [data-testid="tweet-repost-action"],
+        .ct-classic-shell .ct-classic-actions [data-testid="tweet-comment-action"],
+        .ct-classic-shell .ct-classic-actions [data-testid="tweet-up-arrow-action"] {
+          min-width:44px;
+          min-height:44px;
+        }
+      }
+    `;
+    (doc.head || doc.documentElement).append(style);
+    state.style = style;
+    return true;
+  }
+
+  function ctClassicDesired(shell) {
+    const wanted = new Map();
+    const mark = (element, name) => {
+      if (!element || element.closest(ctClassicExcluded)) return;
+      if (!wanted.has(element)) wanted.set(element, new Set());
+      wanted.get(element).add(name);
+    };
+    const main = [...shell.querySelectorAll('main')].find(element =>
+      element.classList.contains('lg:col-span-6') &&
+      element.classList.contains('bg-tl-app-card') &&
+      element.parentElement?.classList.contains('lg:grid-cols-12') &&
+      !element.closest(ctClassicExcluded));
+    if (!main) return wanted;
+    mark(shell, 'ct-classic-shell');
+    mark(main, 'ct-classic-timeline');
+    const grid = main.parentElement;
+    mark(grid, 'ct-classic-grid');
+    const layout = grid.parentElement;
+    if (layout?.parentElement === shell && layout.classList.contains('max-w-7xl')) {
+      mark(layout, 'ct-classic-layout');
+    }
+
+    for (const aside of [...grid.children].filter(element =>
+      element.tagName === 'ASIDE' && element.classList.contains('lg:col-span-3'))) {
+      const nav = [...aside.children].find(element => element.tagName === 'NAV' &&
+        element.classList.contains('flex-col') && element.classList.contains('gap-1'));
+      if (nav) {
+        mark(nav, 'ct-classic-nav');
+        mark(nav, 'ct-classic-nav-desktop');
+        for (const control of nav.children) {
+          if (control.matches('button.rounded-2xl') && control.querySelector('svg') &&
+              !control.hasAttribute('data-ct-owned')) mark(control, 'ct-classic-nav-item');
+        }
+        const submit = nav.querySelector('button#public-sidebar-compose-btn');
+        if (submit?.parentElement === nav) mark(submit, 'ct-classic-submit');
+      }
+      for (const panel of aside.children) {
+        if (panel.matches('div.border.bg-tl-app-card') && panel.querySelector(':scope > h3')) {
+          mark(panel, 'ct-classic-side-panel');
+        }
+      }
+    }
+
+    for (const header of shell.children) {
+      if (header.tagName === 'HEADER' && header.classList.contains('lg:hidden') &&
+          header.classList.contains('sticky') && header.querySelector('button[aria-expanded]')) {
+        mark(header, 'ct-classic-header');
+      }
+    }
+    for (const nav of shell.querySelectorAll('nav')) {
+      if (!nav.classList.contains('lg:hidden') || !nav.classList.contains('bottom-0') ||
+          !nav.classList.contains('border-t')) continue;
+      const row = nav.firstElementChild;
+      if (!row?.classList.contains('justify-around')) continue;
+      mark(nav, 'ct-classic-nav');
+      mark(nav, 'ct-classic-nav-mobile');
+      for (const control of row.children) {
+        if (!control.matches('button') || !control.querySelector('svg')) continue;
+        if (control.id === 'public-mobile-compose-btn') mark(control, 'ct-classic-mobile-compose');
+        else if (control.hasAttribute('aria-label')) mark(control, 'ct-classic-nav-item');
+      }
+    }
+
+    for (const container of main.querySelectorAll('div.sticky')) {
+      if (!container.classList.contains('top-app-header') ||
+          !container.classList.contains('border-dashed') ||
+          container.closest('article,[data-ct-owned]')) continue;
+      const list = container.firstElementChild;
+      const controls = list ? [...list.children] : [];
+      if (!list?.classList.contains('overflow-x-auto') || controls.length < 2 ||
+          !controls.every(element => element.matches('button.rounded-full.text-xs'))) continue;
+      mark(container, 'ct-classic-top-tabs');
+      mark(list, 'ct-classic-tabs-list');
+      controls.forEach(control => mark(control, 'ct-classic-tab'));
+    }
+
+    const input = main.querySelector('textarea#public-tweet-input');
+    if (input && !input.closest('article,[data-ct-owned]')) {
+      let composer = input.parentElement;
+      while (composer && composer !== main && !composer.classList.contains('border-b')) {
+        composer = composer.parentElement;
+      }
+      const submit = composer !== main && composer?.querySelector('button#public-tweet-submit-btn');
+      if (submit && !composer.closest('article,[data-ct-owned]')) {
+        mark(composer, 'ct-classic-composer');
+        mark(submit, 'ct-classic-submit');
+      }
+    }
+
+    for (const article of main.querySelectorAll('article')) {
+      if (article.closest(ctClassicExcluded) || !article.classList.contains('py-3')) continue;
+      // The current client renders this paragraph even for media-only Tweets.
+      const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')]
+        .find(element => ctClassicOwn(element, article));
+      const actions = [...article.querySelectorAll('[data-testid="tweet-action-bar"]')]
+        .find(element => ctClassicOwn(element, article) &&
+          ['tweet-like-action', 'tweet-open-comment-action', 'tweet-repost-action'].every(id =>
+            [...element.querySelectorAll(`[data-testid="${id}"]`)]
+              .some(control => control.tagName === 'BUTTON' && ctClassicOwn(control, article))));
+      if (!body || !actions) continue;
+      const author = [...article.querySelectorAll('button.font-bold.truncate')]
+        .find(element => ctClassicOwn(element, article));
+      if (!author) continue;
+      const row = [...article.children].find(element => element.classList.contains('flex') &&
+        element.classList.contains('items-start') && element.classList.contains('gap-3'));
+      const avatar = row?.firstElementChild;
+      const profile = avatar?.matches('button[aria-label^="View @"]') ? avatar :
+        avatar?.querySelector(':scope > button[aria-label^="View @"]');
+      if (!profile || !ctClassicOwn(profile, article)) continue;
+      const wrapper = profile.firstElementChild;
+      const visuals = wrapper?.matches('div.relative.inline-flex.shrink-0.isolate') ? wrapper.children : profile.children;
+      const visual = [...visuals].find(element =>
+        element.classList.contains('rounded-full') && (element.tagName === 'IMG' || element.getAttribute('role') === 'img'));
+      if (!visual) continue;
+      mark(article, 'ct-classic-tweet');
+      mark(actions, 'ct-classic-actions');
+      mark(profile, 'ct-classic-avatar');
+      mark(visual, 'ct-classic-avatar');
+      const favorite = [...actions.querySelectorAll('[data-testid="tweet-like-action"]')]
+        .find(element => ctClassicOwn(element, article));
+      const group = favorite?.parentElement;
+      const count = group?.children[1];
+      if (group?.parentElement === actions && group.firstElementChild === favorite &&
+          ['group', 'flex', 'items-center', 'gap-0.5'].every(name => group.classList.contains(name)) &&
+          group.children.length <= 2 && (!count || (count.children.length === 0 &&
+            /^[\d,.]+$/.test(count.textContent.trim()) &&
+            (count.matches('span.text-xs.tabular-nums') || count.matches('button[data-testid="tweet-like-action-count"]'))))) {
+        mark(group, 'ct-classic-favorite-group');
+      }
+    }
+    return wanted;
+  }
+
+  function ctClassicRemoveClasses(element, record, keep = new Set()) {
+    for (const name of [...record.added]) {
+      if (keep.has(name)) continue;
+      if (element.classList.contains(name)) element.classList.remove(name);
+      record.added.delete(name);
+    }
+    if (record.added.size) return;
+    const originalTokens = (record.originalClass || '').trim().split(/\s+/).filter(Boolean).sort().join(' ');
+    const currentTokens = [...element.classList].sort().join(' ');
+    // Restore the original spelling when native classes have stayed the same;
+    // otherwise retain classes changed by React while the theme was enabled.
+    if (originalTokens === currentTokens && element.getAttribute('class') !== record.originalClass) {
+      if (record.originalClass === null) element.removeAttribute('class');
+      else element.setAttribute('class', record.originalClass);
+    }
+  }
+
+  function patchClassicAppearance(root = document, enabled = true) {
+    const doc = ctClassicDocument(root);
+    if (!doc) return;
+    let state = ctClassicAppearanceStates.get(doc);
+    if (!state) {
+      state = { marked: new Map(), style: null };
+      ctClassicAppearanceStates.set(doc, state);
+    }
+    const wanted = new Map();
+    if (enabled) {
+      const shell = doc.querySelector('#root-container[data-app-theme="light"],#root-container[data-app-theme="dark"]');
+      if (shell && !shell.closest(ctClassicExcluded)) {
+        for (const [element, names] of ctClassicDesired(shell)) wanted.set(element, names);
+      }
+    }
+    if (wanted.size && !ctClassicStyle(doc, state)) wanted.clear();
+    for (const [element, record] of state.marked) {
+      ctClassicRemoveClasses(element, record, wanted.get(element));
+      if (!record.added.size) state.marked.delete(element);
+    }
+    for (const [element, names] of wanted) {
+      let record = state.marked.get(element);
+      for (const name of names) {
+        if (element.classList.contains(name)) continue;
+        if (!record) {
+          record = { originalClass: element.getAttribute('class'), added: new Set() };
+          state.marked.set(element, record);
+        }
+        element.classList.add(name);
+        record.added.add(name);
+      }
+    }
+    if (!wanted.size && state.style) {
+      state.style.remove();
+      state.style = null;
+    }
+  }
+
+    // Local motion is limited to verified classic controls. It never dispatches
+  // clicks or changes native favorite state, labels, counts or event handlers.
+  const ctClassicMotion = {
+    enabled: false, pageActive: true, bound: false, media: null,
+    likes: new WeakMap(), running: new Map(), connectionObserver: null
+  };
+
+  function ctMotionPaused() {
+    return !ctClassicMotion.enabled || !ctClassicMotion.pageActive || document.hidden ||
+      ctClassicMotion.media?.matches === true;
+  }
+
+  function ctClearFavoriteMotion(button, expected, cancel = false) {
+    const job = ctClassicMotion.running.get(button);
+    if (!job || (expected && job !== expected)) return;
+    ctClassicMotion.running.delete(button);
+    clearTimeout(job.timer);
+    if (cancel) { try { job.animation.cancel(); } catch {} }
+    if (!ctClassicMotion.running.size) {
+      ctClassicMotion.connectionObserver?.disconnect();
+      ctClassicMotion.connectionObserver = null;
+    }
+  }
+
+  function ctStopClassicMotion() {
+    for (const [button, job] of ctClassicMotion.running) ctClearFavoriteMotion(button, job, true);
+    // Returning from a hidden tab, reduced motion or OFF is a fresh baseline,
+    // not a new favorite action to replay.
+    ctClassicMotion.likes = new WeakMap();
+  }
+
+  function ctSyncClassicMotion() {
+    const paused = ctMotionPaused();
+    const classes = document.documentElement.classList;
+    if (classes.contains('ct-classic-motion-enabled') !== ctClassicMotion.enabled) classes.toggle('ct-classic-motion-enabled', ctClassicMotion.enabled);
+    if (classes.contains('ct-classic-motion-paused') !== paused) classes.toggle('ct-classic-motion-paused', paused);
+    if (paused) ctStopClassicMotion();
+  }
+
+  function ctBindClassicMotion() {
+    if (ctClassicMotion.bound) return;
+    ctClassicMotion.bound = true;
+    try { ctClassicMotion.media = window.matchMedia?.('(prefers-reduced-motion: reduce)') || null; } catch {}
+    const change = () => { ctStopClassicMotion(); ctSyncClassicMotion(); };
+    if (typeof ctClassicMotion.media?.addEventListener === 'function') ctClassicMotion.media.addEventListener('change', change);
+    else ctClassicMotion.media?.addListener?.(change);
+    document.addEventListener('visibilitychange', change);
+    window.addEventListener('pagehide', () => { ctClassicMotion.pageActive = false; change(); });
+    window.addEventListener('pageshow', () => {
+      // The normal initial pageshow can arrive after the first runtime scan.
+      // Keep that baseline; only an actual return from pagehide needs a reset.
+      if (ctClassicMotion.pageActive) return;
+      ctClassicMotion.pageActive = true;
+      change();
+    });
+  }
+
+  function ctInstallClassicMotionStyle() {
+    if (document.getElementById('ct-classic-motion-style')) return;
+    const style = document.createElement('style');
+    style.id = 'ct-classic-motion-style';
+    const controls = ':is(.ct-classic-nav a, .ct-classic-nav button, .ct-classic-top-tabs button, .ct-classic-timeline [data-testid="tweet-like-action"], .ct-classic-composer button, #ct-local-tools button, #ct-local-tools a)';
+    style.textContent = `
+      html.ct-classic-motion-enabled:not(.ct-classic-motion-paused) ${controls} {
+        transition:color 120ms ease-out, background-color 120ms ease-out, box-shadow 120ms ease-out;
+      }
+      html.ct-classic-motion-enabled ${controls}:focus-visible {
+        outline:2px solid var(--color-tl-app-primary, #1688d4);
+        outline-offset:3px;
+      }
+      html.ct-classic-motion-paused ${controls},
+      html.ct-classic-motion-paused [data-testid="tweet-like-action"] > .ct-star,
+      html.ct-classic-motion-paused #ct-local-tools-panel {
+        animation:none!important;
+        transition:none!important;
+      }
+      @media (prefers-reduced-motion:reduce) {
+        html ${controls}, html [data-testid="tweet-like-action"] > .ct-star,
+        html #ct-local-tools-panel { animation:none!important; transition:none!important; }
+      }
+    `;
+    (document.head || document.documentElement).append(style);
+  }
+
+  function ctAnimateFavorite(button, liked) {
+    if (!button?.matches?.('[data-testid="tweet-like-action"]')) return;
+    const previous = ctClassicMotion.likes.get(button);
+    const selected = liked === true;
+    const article = button.closest('article');
+    // Runtime's verified own permalink identifies a reused React card. If it
+    // is not available, the containing article still guards moved controls.
+    const id = article && typeof articleId === 'function' ? articleId(article) : null;
+    const owner = article || button;
+    const samePost = previous && previous.owner === owner && previous.id === id;
+    ctClassicMotion.likes.set(button, { selected, owner, id });
+    if (previous && !samePost) ctClearFavoriteMotion(button, null, true);
+    if (!selected || !button.isConnected || ctMotionPaused()) {
+      ctClearFavoriteMotion(button, null, true);
+      return;
+    }
+    // Initial selected nodes and React replacements do not represent actions.
+    // A click which leaves native state unchanged also cannot animate.
+    if (!samePost || previous.selected !== false) return;
+    const star = [...button.children].find(node => node.classList.contains('ct-star'));
+    if (!star?.isConnected || typeof star.animate !== 'function') return;
+    ctClearFavoriteMotion(button, null, true);
+    let animation;
+    try {
+      animation = star.animate([
+        { transform: 'scale(1) rotate(0deg)', transformOrigin: '50% 50%', offset: 0 },
+        { transform: 'scale(1.22) rotate(-7deg)', transformOrigin: '50% 50%', offset: .42 },
+        { transform: 'scale(.97) rotate(3deg)', transformOrigin: '50% 50%', offset: .74 },
+        { transform: 'scale(1) rotate(0deg)', transformOrigin: '50% 50%', offset: 1 }
+      ], { duration: 280, easing: 'cubic-bezier(.25,.9,.35,1)', fill: 'none' });
+    } catch { return; }
+    const job = { star, animation, timer: null };
+    ctClassicMotion.running.set(button, job);
+    const finish = () => ctClearFavoriteMotion(button, job);
+    // Safari's Animation.finished and a bounded cleanup both leave no inline
+    // transform behind. Catch cancellation so it never becomes a rejection.
+    animation.finished?.then?.(finish, finish);
+    job.timer = setTimeout(() => ctClearFavoriteMotion(button, job, true), 320);
+    if (!ctClassicMotion.connectionObserver && typeof MutationObserver === 'function') {
+      ctClassicMotion.connectionObserver = new MutationObserver(() => {
+        for (const [target, active] of ctClassicMotion.running) {
+          if (!target.isConnected || !active.star.isConnected || !target.contains(active.star)) {
+            ctClearFavoriteMotion(target, active, true);
+          }
+        }
+      });
+      ctClassicMotion.connectionObserver.observe(document.documentElement, { childList: true, subtree: true });
+    }
+  }
+
+  function patchClassicMotion(root = document, enabled = true) {
+    // This switch is page-wide even when the runtime scans one changed subtree.
+    // The supplied root is intentionally not transformed or animated.
+    if (!root) return;
+    ctBindClassicMotion();
+    ctInstallClassicMotionStyle();
+    const next = enabled === true;
+    if (ctClassicMotion.enabled !== next) ctStopClassicMotion();
+    ctClassicMotion.enabled = next;
+    ctSyncClassicMotion();
+    for (const [button, job] of ctClassicMotion.running) {
+      if (!button.isConnected || !job.star.isConnected) ctClearFavoriteMotion(button, job, true);
+    }
+  }
+
     // Shared runtime; embedded at build time, never fetched remotely.
   const ctAutoSeen = new WeakMap();
   const ctAutoPending = new Map();
@@ -1311,11 +1852,30 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return /^(?:Unlike|Unfavorite|お気に入りを解除)(?:,|$)/i.test(label);
   }
 
+  function classicAppearanceEnabled() {
+    return loadJSON('ct-classic-appearance-v1', true) !== false;
+  }
+
+  function ctEnsureFavoriteStar(button) {
+    if (!button.classList.contains('ct-favorite-button')) button.classList.add('ct-favorite-button');
+    if ([...button.children].some(node => node.matches('span.ct-star'))) return;
+    const star = document.createElement('span');
+    star.className = 'ct-star';
+    star.setAttribute('aria-hidden', 'true');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('focusable', 'false');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M12 2.75 14.86 8.54 21.25 9.47 16.63 13.98 17.72 20.36 12 17.35 6.28 20.36 7.37 13.98 2.75 9.47 9.14 8.54Z');
+    svg.append(path); star.append(svg); button.prepend(star);
+  }
+
   function patchFavoriteButtons(root = document) {
     const buttons = [...root.querySelectorAll?.('[data-testid="tweet-like-action"]') || []];
     if (root.matches?.('[data-testid="tweet-like-action"]')) buttons.push(root);
     for (const button of buttons) {
       const liked = ctIsLiked(button);
+      ctEnsureFavoriteStar(button);
       const action = CT_LOCALE === 'ja' ? (liked ? 'お気に入りを解除' : 'お気に入り') : (liked ? 'Unfavorite' : 'Favorite');
       if (button.title !== action) button.title = action;
       const old = button.getAttribute('aria-label') || '';
@@ -1324,6 +1884,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       ctLikeLabels.set(button, { label, liked });
       if (old !== label) button.setAttribute('aria-label', label);
       if (button.classList.contains('ct-is-liked') !== liked) button.classList.toggle('ct-is-liked', liked);
+      if (typeof ctAnimateFavorite === 'function') ctAnimateFavorite(button, liked);
     }
   }
 
@@ -1349,7 +1910,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   let ctScanning = false;
   let ctPageActive = true;
   let ctStarted = false;
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'class', 'src'];
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'class', 'src', 'data-app-theme'];
   const observer = new MutationObserver(mutations => {
     if (ctScanning || !ctPageActive) return;
     if (!mutations.some(m => {
@@ -1399,7 +1960,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.8.1';
+    document.documentElement.dataset.ctActiveVersion = '6.9.0';
     ctStarted = true;
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
@@ -1408,6 +1969,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
+      getClassicAppearance: classicAppearanceEnabled,
+      setClassicAppearance: enabled => {
+        if (!saveJSON('ct-classic-appearance-v1', enabled === true)) throw new Error('Storage unavailable');
+        ctScheduleScan();
+      },
       getAutoTranslate: autoTranslationEnabled,
       getTranslationEngine: ctTranslationEngine,
       setTranslationEngine: engine => {
@@ -3792,55 +4358,21 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     style.id = 'ct-jp-style';
 
     style.textContent = `
-      [data-testid="tweet-like-action"] svg {
-        display:none!important;
+      [data-testid="tweet-like-action"].ct-favorite-button > svg { display:none!important; }
+      [data-testid="tweet-like-action"].ct-favorite-button::before { content:none!important; }
+      [data-testid="tweet-like-action"] > .ct-star {
+        display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
+        transform-origin:center; pointer-events:none;
       }
-
-      [data-testid="tweet-like-action"]::before {
-        content:"☆";
-        display:inline-block;
-        font:700 23px/18px Arial,sans-serif;
-        transform:translateY(-1px);
-        transform-origin:center;
+      [data-testid="tweet-like-action"] > .ct-star svg {
+        display:block!important; width:20px; height:20px; fill:none; stroke:currentColor;
+        stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;
       }
-
-      [data-testid="tweet-like-action"].ct-is-liked::before,
-      [data-testid="tweet-like-action"][aria-pressed="true"]::before,
-      [data-testid="tweet-like-action"].text-pink-500::before {
-        content:"★";
-        color:#ffac33!important;
-      }
-
-      [data-testid="tweet-like-action"][aria-pressed="true"],
-      [data-testid="tweet-like-action"].text-pink-500 {
-        color:#ffac33!important;
-      }
-
-      [data-testid="tweet-like-action"]:hover {
-        color:#ffac33!important;
-        background:rgba(255,172,51,.12)!important;
-      }
-
-      [data-testid="tweet-like-action"].ct-star-pop::before {
-        animation:ctStarPop .32s cubic-bezier(.34,1.56,.64,1);
-      }
-
-      @keyframes ctStarPop {
-        0% {
-          transform:translateY(-1px) scale(.72) rotate(-8deg);
-          opacity:.55;
-        }
-
-        48% {
-          transform:translateY(-1px) scale(1.3) rotate(6deg);
-        }
-
-        74% {
-          transform:translateY(-1px) scale(.94) rotate(-2deg);
-        }
-
-        100% {
-          transform:translateY(-1px) scale(1);
+      [data-testid="tweet-like-action"].ct-is-liked { color:#ffac33!important; }
+      [data-testid="tweet-like-action"].ct-is-liked > .ct-star svg { fill:currentColor; }
+      @media (hover:hover) {
+        [data-testid="tweet-like-action"].ct-favorite-button:hover {
+          color:#ffac33!important; background:rgba(255,172,51,.12)!important;
         }
       }
 
@@ -4289,7 +4821,13 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   function isOwnedLocalizationElement(el) {
-    return !!el?.closest('[id^="ct-"],[class^="ct-"],[class*=" ct-"],[data-ct-owned],[data-ct-local-ui]');
+    if (el?.closest('[id^="ct-"],[data-ct-owned],[data-ct-local-ui]')) return true;
+    // Classic markers decorate native UI; they do not transfer its text ownership.
+    // Keep every other extension-owned class protected, including local panels.
+    for (let node = el; node; node = node.parentElement) {
+      if ([...node.classList].some(name => name.startsWith('ct-') && !name.startsWith('ct-classic-'))) return true;
+    }
+    return false;
   }
 
   function isNativeSettingsNavigation(el) {
@@ -4968,24 +5506,6 @@ if (/^just\s+now$/i.test(t)) {
 
       const wasLiked =
         ctIsLiked(button);
-
-      button.classList.remove(
-        'ct-star-pop'
-      );
-
-      void button.offsetWidth;
-
-      button.classList.add(
-        'ct-star-pop'
-      );
-
-      setTimeout(
-        () =>
-          button.classList.remove(
-            'ct-star-pop'
-          ),
-        380
-      );
 
       setTimeout(
         () => {
@@ -5684,6 +6204,9 @@ if (/^just\s+now$/i.test(t)) {
       installStyle();
       if (typeof installSafariStyle === 'function') installSafariStyle();
       if (typeof patchMediaInfo === 'function') patchMediaInfo(root);
+      const classicEnabled = classicAppearanceEnabled();
+      patchClassicAppearance(root, classicEnabled);
+      patchClassicMotion(root, classicEnabled);
 
       patchUI(
         root
@@ -5760,6 +6283,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.8.1 loaded'
+    '🐦 Classic Twitter JP v6.9.0 loaded'
   );
 })();

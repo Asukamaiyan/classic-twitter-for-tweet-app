@@ -177,11 +177,30 @@
     return /^(?:Unlike|Unfavorite|お気に入りを解除)(?:,|$)/i.test(label);
   }
 
+  function classicAppearanceEnabled() {
+    return loadJSON('ct-classic-appearance-v1', true) !== false;
+  }
+
+  function ctEnsureFavoriteStar(button) {
+    if (!button.classList.contains('ct-favorite-button')) button.classList.add('ct-favorite-button');
+    if ([...button.children].some(node => node.matches('span.ct-star'))) return;
+    const star = document.createElement('span');
+    star.className = 'ct-star';
+    star.setAttribute('aria-hidden', 'true');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('focusable', 'false');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M12 2.75 14.86 8.54 21.25 9.47 16.63 13.98 17.72 20.36 12 17.35 6.28 20.36 7.37 13.98 2.75 9.47 9.14 8.54Z');
+    svg.append(path); star.append(svg); button.prepend(star);
+  }
+
   function patchFavoriteButtons(root = document) {
     const buttons = [...root.querySelectorAll?.('[data-testid="tweet-like-action"]') || []];
     if (root.matches?.('[data-testid="tweet-like-action"]')) buttons.push(root);
     for (const button of buttons) {
       const liked = ctIsLiked(button);
+      ctEnsureFavoriteStar(button);
       const action = CT_LOCALE === 'ja' ? (liked ? 'お気に入りを解除' : 'お気に入り') : (liked ? 'Unfavorite' : 'Favorite');
       if (button.title !== action) button.title = action;
       const old = button.getAttribute('aria-label') || '';
@@ -190,6 +209,7 @@
       ctLikeLabels.set(button, { label, liked });
       if (old !== label) button.setAttribute('aria-label', label);
       if (button.classList.contains('ct-is-liked') !== liked) button.classList.toggle('ct-is-liked', liked);
+      if (typeof ctAnimateFavorite === 'function') ctAnimateFavorite(button, liked);
     }
   }
 
@@ -215,7 +235,7 @@
   let ctScanning = false;
   let ctPageActive = true;
   let ctStarted = false;
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'class', 'src'];
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'class', 'src', 'data-app-theme'];
   const observer = new MutationObserver(mutations => {
     if (ctScanning || !ctPageActive) return;
     if (!mutations.some(m => {
@@ -265,7 +285,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.8.1';
+    document.documentElement.dataset.ctActiveVersion = '6.9.0';
     ctStarted = true;
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
@@ -274,6 +294,11 @@
     });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
+      getClassicAppearance: classicAppearanceEnabled,
+      setClassicAppearance: enabled => {
+        if (!saveJSON('ct-classic-appearance-v1', enabled === true)) throw new Error('Storage unavailable');
+        ctScheduleScan();
+      },
       getAutoTranslate: autoTranslationEnabled,
       getTranslationEngine: ctTranslationEngine,
       setTranslationEngine: engine => {

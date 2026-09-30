@@ -454,3 +454,20 @@ test('ja: native translation errors and footer controls translate without changi
   assert.equal(f.text('nested-post'), 'Terms');
   f.dom.window.close();
 });
+
+
+for (const language of ['ja', 'en']) {
+  test(`${language}: classic markers retain native UI localization and user content exclusions`, () => {
+    const f=fixture(language, `<div class="ct-classic-shell"><nav class="ct-classic-nav"><button id="classic-nav">Posts</button></nav><main class="ct-classic-timeline"><article class="ct-classic-tweet"><p class="whitespace-pre-wrap break-words" id="classic-body">Posts</p><button class="font-bold truncate" id="classic-name">Like</button></article><textarea id="public-tweet-input" placeholder="What's happening, Alice?">My draft</textarea></main><div class="ct-local-row"><button id="classic-owned">Posts</button></div></div>`);
+    f.document.documentElement.className='ct-classic-motion-enabled';
+    f.run();
+    assert.equal(f.text('classic-nav'),language==='ja'?'ツイート':'Tweets');
+    assert.equal(f.text('classic-body'),'Posts');
+    assert.equal(f.text('classic-name'),'Like');
+    assert.equal(f.text('classic-owned'),'Posts');
+    const draft=f.document.getElementById('public-tweet-input');
+    assert.equal(draft.value,'My draft');
+    assert.equal(draft.placeholder,language==='ja'?'いまどうしてる？':"What's happening, Alice?");
+    f.dom.window.close();
+  });
+}

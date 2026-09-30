@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.8.1
-// @description  Classic interface for tweet.app. Multiple-photo selection, photo slides, Japan/world news and safer automatic translation with optional on-device translation. Preserves posts, reply inbox, badges and local tools.
+// @version      6.9.0
+// @description  Classic blue Twitter layout and vector star Favorites, responsive desktop/mobile styling and reduced-motion-aware feedback. Preserves posts, replies, badges, photo slides, Japan/world news, safer translation and local tools.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -23,6 +23,8 @@
   /* @include network */
   /* @include enhancements */
   /* @include translation */
+  /* @include classic */
+  /* @include motion */
   /* @include runtime */
   /* @include presentation */
   /* @include replies */
@@ -112,36 +114,22 @@
     const style = document.createElement('style');
     style.id = 'ct-en-style';
     style.textContent = `
-      [data-testid="tweet-like-action"] svg { display:none!important; }
-      [data-testid="tweet-like-action"]::before {
-        content:"☆";
-        display:inline-block;
-        font:700 23px/18px Arial,sans-serif;
-        transform:translateY(-1px);
-        transform-origin:center;
+      [data-testid="tweet-like-action"].ct-favorite-button > svg { display:none!important; }
+      [data-testid="tweet-like-action"].ct-favorite-button::before { content:none!important; }
+      [data-testid="tweet-like-action"] > .ct-star {
+        display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
+        transform-origin:center; pointer-events:none;
       }
-      [data-testid="tweet-like-action"].ct-is-liked::before,
-      [data-testid="tweet-like-action"][aria-pressed="true"]::before,
-      [data-testid="tweet-like-action"].text-pink-500::before {
-        content:"★";
-        color:#ffac33!important;
+      [data-testid="tweet-like-action"] > .ct-star svg {
+        display:block!important; width:20px; height:20px; fill:none; stroke:currentColor;
+        stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;
       }
-      [data-testid="tweet-like-action"][aria-pressed="true"],
-      [data-testid="tweet-like-action"].text-pink-500 {
-        color:#ffac33!important;
-      }
-      [data-testid="tweet-like-action"]:hover {
-        color:#ffac33!important;
-        background:rgba(255,172,51,.12)!important;
-      }
-      [data-testid="tweet-like-action"].ct-star-pop::before {
-        animation:ctStarPop .32s cubic-bezier(.34,1.56,.64,1);
-      }
-      @keyframes ctStarPop {
-        0% { transform:translateY(-1px) scale(.72) rotate(-8deg); opacity:.55; }
-        48% { transform:translateY(-1px) scale(1.3) rotate(6deg); }
-        74% { transform:translateY(-1px) scale(.94) rotate(-2deg); }
-        100% { transform:translateY(-1px) scale(1); }
+      [data-testid="tweet-like-action"].ct-is-liked { color:#ffac33!important; }
+      [data-testid="tweet-like-action"].ct-is-liked > .ct-star svg { fill:currentColor; }
+      @media (hover:hover) {
+        [data-testid="tweet-like-action"].ct-favorite-button:hover {
+          color:#ffac33!important; background:rgba(255,172,51,.12)!important;
+        }
       }
 
       .ct-founder,
@@ -339,7 +327,13 @@
   }
 
   function isOwnedLocalizationElement(el) {
-    return !!el?.closest('[id^="ct-"],[class^="ct-"],[class*=" ct-"],[data-ct-owned],[data-ct-local-ui]');
+    if (el?.closest('[id^="ct-"],[data-ct-owned],[data-ct-local-ui]')) return true;
+    // Classic markers decorate native UI; they do not transfer its text ownership.
+    // Keep every other extension-owned class protected, including local panels.
+    for (let node = el; node; node = node.parentElement) {
+      if ([...node.classList].some(name => name.startsWith('ct-') && !name.startsWith('ct-classic-'))) return true;
+    }
+    return false;
   }
 
   function isNativeSettingsNavigation(el) {
@@ -638,11 +632,6 @@
 
       const snapshot = snapshotFavorite(article);
       const wasLiked = ctIsLiked(button);
-
-      button.classList.remove('ct-star-pop');
-      void button.offsetWidth;
-      button.classList.add('ct-star-pop');
-      setTimeout(() => button.classList.remove('ct-star-pop'), 380);
 
       setTimeout(() => {
         const nowLiked = ctIsLiked(button);
@@ -957,6 +946,9 @@
       installStyle();
       if (typeof installSafariStyle === 'function') installSafariStyle();
       if (typeof patchMediaInfo === 'function') patchMediaInfo(root);
+      const classicEnabled = classicAppearanceEnabled();
+      patchClassicAppearance(root, classicEnabled);
+      patchClassicMotion(root, classicEnabled);
       patchUI(root);
       patchInputs(root);
       patchNotifications(root);
@@ -986,5 +978,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.8.1 loaded');
+  console.log('🐦 Classic Twitter EN v6.9.0 loaded');
 })();

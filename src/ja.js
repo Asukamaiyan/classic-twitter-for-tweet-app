@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.8.1
-// @description  tweet.appのUIを日本語化。複数写真選択とスライド表示、日本のニュース、翻訳エラー時の待機、対応PCの端末内翻訳。投稿本文・名前と既存の返信通知・バッジ・保存機能を保持。
+// @version      6.9.0
+// @description  昔のTwitter風の青い表示と星のお気に入り。スマホ・デスクトップ対応、控えめな動き、日本語UI、返信通知・バッジ・複数写真・日本ニュース・翻訳・保存ツール。投稿本文や名前を保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -23,6 +23,8 @@
   /* @include network */
   /* @include enhancements */
   /* @include translation */
+  /* @include classic */
+  /* @include motion */
   /* @include runtime */
   /* @include presentation */
   /* @include replies */
@@ -460,55 +462,21 @@
     style.id = 'ct-jp-style';
 
     style.textContent = `
-      [data-testid="tweet-like-action"] svg {
-        display:none!important;
+      [data-testid="tweet-like-action"].ct-favorite-button > svg { display:none!important; }
+      [data-testid="tweet-like-action"].ct-favorite-button::before { content:none!important; }
+      [data-testid="tweet-like-action"] > .ct-star {
+        display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
+        transform-origin:center; pointer-events:none;
       }
-
-      [data-testid="tweet-like-action"]::before {
-        content:"☆";
-        display:inline-block;
-        font:700 23px/18px Arial,sans-serif;
-        transform:translateY(-1px);
-        transform-origin:center;
+      [data-testid="tweet-like-action"] > .ct-star svg {
+        display:block!important; width:20px; height:20px; fill:none; stroke:currentColor;
+        stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;
       }
-
-      [data-testid="tweet-like-action"].ct-is-liked::before,
-      [data-testid="tweet-like-action"][aria-pressed="true"]::before,
-      [data-testid="tweet-like-action"].text-pink-500::before {
-        content:"★";
-        color:#ffac33!important;
-      }
-
-      [data-testid="tweet-like-action"][aria-pressed="true"],
-      [data-testid="tweet-like-action"].text-pink-500 {
-        color:#ffac33!important;
-      }
-
-      [data-testid="tweet-like-action"]:hover {
-        color:#ffac33!important;
-        background:rgba(255,172,51,.12)!important;
-      }
-
-      [data-testid="tweet-like-action"].ct-star-pop::before {
-        animation:ctStarPop .32s cubic-bezier(.34,1.56,.64,1);
-      }
-
-      @keyframes ctStarPop {
-        0% {
-          transform:translateY(-1px) scale(.72) rotate(-8deg);
-          opacity:.55;
-        }
-
-        48% {
-          transform:translateY(-1px) scale(1.3) rotate(6deg);
-        }
-
-        74% {
-          transform:translateY(-1px) scale(.94) rotate(-2deg);
-        }
-
-        100% {
-          transform:translateY(-1px) scale(1);
+      [data-testid="tweet-like-action"].ct-is-liked { color:#ffac33!important; }
+      [data-testid="tweet-like-action"].ct-is-liked > .ct-star svg { fill:currentColor; }
+      @media (hover:hover) {
+        [data-testid="tweet-like-action"].ct-favorite-button:hover {
+          color:#ffac33!important; background:rgba(255,172,51,.12)!important;
         }
       }
 
@@ -957,7 +925,13 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   function isOwnedLocalizationElement(el) {
-    return !!el?.closest('[id^="ct-"],[class^="ct-"],[class*=" ct-"],[data-ct-owned],[data-ct-local-ui]');
+    if (el?.closest('[id^="ct-"],[data-ct-owned],[data-ct-local-ui]')) return true;
+    // Classic markers decorate native UI; they do not transfer its text ownership.
+    // Keep every other extension-owned class protected, including local panels.
+    for (let node = el; node; node = node.parentElement) {
+      if ([...node.classList].some(name => name.startsWith('ct-') && !name.startsWith('ct-classic-'))) return true;
+    }
+    return false;
   }
 
   function isNativeSettingsNavigation(el) {
@@ -1636,24 +1610,6 @@ if (/^just\s+now$/i.test(t)) {
 
       const wasLiked =
         ctIsLiked(button);
-
-      button.classList.remove(
-        'ct-star-pop'
-      );
-
-      void button.offsetWidth;
-
-      button.classList.add(
-        'ct-star-pop'
-      );
-
-      setTimeout(
-        () =>
-          button.classList.remove(
-            'ct-star-pop'
-          ),
-        380
-      );
 
       setTimeout(
         () => {
@@ -2352,6 +2308,9 @@ if (/^just\s+now$/i.test(t)) {
       installStyle();
       if (typeof installSafariStyle === 'function') installSafariStyle();
       if (typeof patchMediaInfo === 'function') patchMediaInfo(root);
+      const classicEnabled = classicAppearanceEnabled();
+      patchClassicAppearance(root, classicEnabled);
+      patchClassicMotion(root, classicEnabled);
 
       patchUI(
         root
@@ -2428,6 +2387,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.8.1 loaded'
+    '🐦 Classic Twitter JP v6.9.0 loaded'
   );
 })();

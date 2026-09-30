@@ -111,3 +111,10 @@ The live HTML still referenced `index-DCFw2ga2.js`. A new download was 1,656,389
 The three Greasy Fork distributions were still 6.8.0 and matched the repository after excluding Greasy Fork's added update metadata. In the current authenticated Chromium page, temporary injection preserved 19 post bodies and the draft value, hid all avatar-follow overlays, and moved through a real three-photo post and its native enlarged viewer. The reply inbox and 20 individually resolved notification-avatar links also remained available. Current public RSS was fetched again for all four categories; the news screen rendered ten headlines and five visible source images through the same GM transport shim described above.
 
 Two local lifecycle bugs were reproduced independently of a client deployment: a pending on-device translation invalidated by backgrounding could remain permanently marked as attempted, and an unchanged news page had no timer to refresh at its cache deadline. Version 6.8.1 restores unfinished translation attempts without concurrent model requests and adds a single deadline timer scoped to visible Japanese news. It does not introduce new first-party API routes.
+
+
+## 6.9.0 classic interface review (2026-09-30)
+
+Re-fetched the current HTML, `index-DCFw2ga2.js` and public media configuration. The bundle remains 1,656,389 bytes with SHA-256 `8ec6038a2a88b5255e1bb8ad8df425c38cad8063bffe8aa7cc7f80bbdfdc500f`, and the advertised image/video settings remain unchanged. Live Chrome structure confirms the theme-bearing root, native 12-column grid, feed tabs, public composer, direct native avatar profile buttons, action bars and mobile navigation used for the scoped appearance markers. No new API is needed for this visual update.
+
+Favorite motion follows the client’s visible `hasLiked`/ARIA state. The official client updates that state optimistically before its request finishes; a later server failure can roll it back. The userscript does not intercept that request, send additional favorite calls or claim server-confirmed success. “A state change animates” describes the actual boundary.
