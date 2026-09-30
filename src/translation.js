@@ -31,6 +31,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const queue = new Map();
   let detector = null;
   let busy = false;
+  let current = null;
   let preparing = false;
   let generation = 0;
   let style = null;
@@ -97,6 +98,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (automatic && record.attempted) continue;
       processed = true;
       record.attempted = true;
+      current = record;
       const token = generation;
       record.button.disabled = true;
       record.button.textContent = copy.working;
@@ -130,6 +132,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           record.output.hidden = false;
         }
       } finally {
+        current = null;
         record.button.disabled = false;
         record.button.textContent = record.shown ? copy.hide : copy.translate;
       }
@@ -178,7 +181,18 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     void process();
   }
 
-  function cancel() { generation++; queue.clear(); }
+  function cancel() {
+    generation++;
+    queue.clear();
+    // A hidden-tab or settings cancellation invalidates the pending result,
+    // but has not completed this post's automatic attempt. Let the next active
+    // scan resume it. process() remains sequential, so a scan before the old
+    // request settles queues work rather than starting a second request. A late
+    // successful translation can then be reused from cache.
+    if (current && !current.shown && !current.dismissed && !isManual(current.article)) {
+      current.attempted = false;
+    }
+  }
   function hide(article) {
     const record = records.get(article);
     if (!record) return;

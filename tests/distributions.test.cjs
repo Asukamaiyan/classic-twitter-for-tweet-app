@@ -95,7 +95,7 @@ for (const file of ['classic-twitter-ja.user.js', 'classic-twitter-ja-safari.use
       window.eval(fs.readFileSync(path.join(root,file),'utf8'));
       await new Promise(resolve => setTimeout(resolve,400));
       assert.deepEqual(errors,[]);
-      assert.equal(window.document.documentElement.dataset.ctActiveVersion,'6.8.0');
+      assert.equal(window.document.documentElement.dataset.ctActiveVersion,'6.8.1');
       assert.equal(window.document.querySelector('.ct-media-carousel-controls [role="status"]').textContent,'1 / 2');
       assert.equal(window.document.querySelector('article p').textContent,'News Photos Home');
       assert.equal(window.document.querySelector('textarea').value,'My draft');

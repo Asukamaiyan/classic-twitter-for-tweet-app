@@ -4,7 +4,7 @@
 
 ## インストール・更新
 
-バージョン **6.8.0** です。使う環境に合った **1本だけ** を有効にしてください。
+バージョン **6.8.1** です。使う環境に合った **1本だけ** を有効にしてください。
 
 | 環境 | Greasy Fork | ファイル |
 |---|---|---|
@@ -13,6 +13,12 @@
 | English | [English version](https://greasyfork.org/en/scripts/594603) | `classic-twitter-en.user.js` |
 
 Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込みしてください。既存のスクリプト名とnamespaceを維持しています。重複する旧版やテスト版は無効にしてください。日本ニュース機能は本体へ統合しました。旧ニュース試験版は無効にしてください。
+
+## 6.8.1 の修正（2026-09-30）
+
+- 端末内翻訳の処理中にタブを離れた場合、戻った後に未表示の翻訳を再開。完了済みの結果を再利用し、重複実行を防ぎます。手動の原文選択・訳文を閉じた状態・失敗後の待機は保持します。
+- 日本ニュースは画面を開いている間、15分のキャッシュ期限で見出しを更新。世界ニュース・別画面・バックグラウンドでは更新を止め、戻った時に期限切れなら再取得します。
+- 9月30日の公式クライアントとメディア設定を再確認。通常表示／拡大表示の写真切り替え、アイコンの＋非表示、本文・下書き保持を実画面で確認しました。
 
 ## 6.8.0 の改善
 
@@ -25,7 +31,7 @@ Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込み
 
 画像枚数・ファイルサイズ・長さ・1日あたりの投稿枠やサーバーでの再圧縮は、tweet.appが決める条件です。**無制限の投稿、無制限のサイト翻訳、4K HDRの保持は実装・保証していません。** 4Kの元ファイルでも、サーバー出力で解像度やHDRが維持されるとは限りません。端末内翻訳にもモデル・対応言語・端末資源の条件があります。
 
-6.8.0の検証範囲と公開先の照合結果は[検証記録](docs/VALIDATION.md)を参照してください。
+最新の検証範囲と公開先の照合結果は[検証記録](docs/VALIDATION.md)を参照してください。
 
 ## 6.7.3 の修正
 
@@ -92,6 +98,8 @@ npm run check
 バグ報告にはブラウザ・スクリプト版・画面名・操作手順を記載してください。認証情報や非公開の投稿内容を含めないでください。
 
 ## English
+
+Version 6.8.1 resumes unfinished on-device translation after returning to the tab and refreshes Japanese news at the 15-minute cache deadline while visible. Background tabs, world news and unrelated routes do not trigger refresh requests.
 
 Version 6.8.0 adds multiple-photo selection, a swipeable photo gallery, safer sequential automatic translation, optional desktop Chrome on-device translation, and Japan/world news with feed-provided images. The three distributions share the same modules. Actual Tampermonkey installation and physical Safari/Stay acceptance remain unverified. Server upload quotas, native translation quotas and preservation of 4K HDR cannot be removed or guaranteed by this userscript. Safari/mobile do not gain Chrome built-in AI support.
 

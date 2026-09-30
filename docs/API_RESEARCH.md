@@ -103,3 +103,11 @@ A temporary injection into the actual Chromium page confirmed that the live feed
 Earlier in implementation, browser requests were blocked with `ERR_BLOCKED_BY_CLIENT`, shell requests could not resolve external hosts, and the sandbox denied a local HTTP server. Those restrictions describe the earlier test stage; subsequent pre-publication reads and the Chromium checks above supersede the earlier RSS, image-delivery and media-configuration gaps. Automated tests additionally use controlled native-DOM, RSS and browser-AI fixtures.
 
 No real post or media upload was submitted. Server-side upload acceptance, preservation of 4K/HDR after processing, installed Tampermonkey behavior, physical Safari/Stay behavior, and actual browser-model download and translation quality remain unverified.
+
+## 2026-09-30 compatibility review
+
+The live HTML still referenced `index-DCFw2ga2.js`. A new download was 1,656,389 bytes and had the same SHA-256 `8ec6038a2a88b5255e1bb8ad8df425c38cad8063bffe8aa7cc7f80bbdfdc500f`. The public media configuration still advertised images at 10 MiB, four per post and 20 per day, and video at 50 MiB, 30 seconds and five per day. These remain advertised settings rather than upload acceptance results.
+
+The three Greasy Fork distributions were still 6.8.0 and matched the repository after excluding Greasy Fork's added update metadata. In the current authenticated Chromium page, temporary injection preserved 19 post bodies and the draft value, hid all avatar-follow overlays, and moved through a real three-photo post and its native enlarged viewer. The reply inbox and 20 individually resolved notification-avatar links also remained available. Current public RSS was fetched again for all four categories; the news screen rendered ten headlines and five visible source images through the same GM transport shim described above.
+
+Two local lifecycle bugs were reproduced independently of a client deployment: a pending on-device translation invalidated by backgrounding could remain permanently marked as attempted, and an unchanged news page had no timer to refresh at its cache deadline. Version 6.8.1 restores unfinished translation attempts without concurrent model requests and adds a single deadline timer scoped to visible Japanese news. It does not introduce new first-party API routes.

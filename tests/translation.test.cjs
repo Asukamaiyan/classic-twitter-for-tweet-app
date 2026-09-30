@@ -30,7 +30,9 @@ function harness(t, options = {}) {
     window.LanguageDetector = {
       availability: async () => 'downloadable',
       create: async () => { stats.creates++; return { detect: async () => {
-        stats.detects++; return [{ detectedLanguage: options.source || 'en', confidence: options.confidence ?? 0.99 }];
+        stats.detects++;
+        if (options.detect) return options.detect();
+        return [{ detectedLanguage: options.source || 'en', confidence: options.confidence ?? 0.99 }];
       } }; }
     };
   }
@@ -118,6 +120,65 @@ test('switching engine, backgrounding or native manual choice cannot apply a lat
     finish('遅い結果'); await f.flush();
     assert.equal(f.document.body.textContent.includes('遅い結果'), false, mode);
   }
+});
+
+test('backgrounded language detection resumes automatically after returning to the page', async t => {
+  let finish;
+  let detects = 0;
+  const result = [{ detectedLanguage: 'en', confidence: 0.99 }];
+  const f = harness(t, { detect: () => ++detects === 1 ? new Promise(resolve => { finish = resolve; }) : result });
+  await f.engine.prepare('en'); f.engine.patch(f.document, true); await f.flush();
+  f.active(false); f.engine.cancel(); finish(result); await f.flush();
+  assert.equal(f.stats.translates, 0); assert.equal(f.output().hidden, true);
+  f.active(true); f.engine.patch(f.document, true); await f.flush();
+  assert.equal(f.stats.detects, 2); assert.equal(f.stats.translates, 1);
+  assert.equal(f.output().textContent, 'これは投稿です。'); assert.equal(f.output().hidden, false);
+});
+
+test('backgrounded translation resumes from cache without another model request', async t => {
+  let finish;
+  const f = harness(t, { translate: () => new Promise(resolve => { finish = resolve; }) });
+  await f.engine.prepare('en'); f.engine.patch(f.document, true); await f.flush();
+  f.active(false); f.engine.cancel(); finish('キャッシュした訳文'); await f.flush();
+  assert.equal(f.output().hidden, true);
+  f.active(true); f.engine.patch(f.document, true); await f.flush();
+  assert.equal(f.stats.detects, 1); assert.equal(f.stats.translates, 1);
+  assert.equal(f.output().textContent, 'キャッシュした訳文'); assert.equal(f.output().hidden, false);
+});
+
+test('returning before a canceled translation settles does not create concurrent requests', async t => {
+  let finish;
+  const f = harness(t, { translate: () => new Promise(resolve => { finish = resolve; }) });
+  await f.engine.prepare('en'); f.engine.patch(f.document, true); await f.flush();
+  f.active(false); f.engine.cancel(); f.active(true);
+  for (let i = 0; i < 3; i++) { f.engine.patch(f.document, true); await f.flush(); }
+  assert.equal(f.stats.translates, 1); assert.equal(f.stats.detects, 1);
+  finish('遅れて完了した訳文'); await f.flush();
+  assert.equal(f.stats.translates, 1); assert.equal(f.stats.detects, 1);
+  assert.equal(f.output().textContent, '遅れて完了した訳文'); assert.equal(f.output().hidden, false);
+});
+
+test('cancellation preserves failed attempts and manual choices instead of automatically retrying them', async t => {
+  const failed = harness(t, { failure: true });
+  await failed.engine.prepare('en'); failed.engine.patch(failed.document, true); await failed.flush();
+  failed.active(false); failed.engine.cancel(); failed.active(true);
+  failed.engine.patch(failed.document, true); await failed.flush();
+  assert.equal(failed.stats.translates, 1); assert.match(failed.output().textContent, /失敗/);
+
+  const dismissed = harness(t);
+  await dismissed.engine.prepare('en'); dismissed.engine.patch(dismissed.document, true); await dismissed.flush();
+  dismissed.button().click(); dismissed.active(false); dismissed.engine.cancel(); dismissed.active(true);
+  dismissed.engine.patch(dismissed.document, true); await dismissed.flush();
+  assert.equal(dismissed.stats.translates, 1); assert.equal(dismissed.output().hidden, true);
+
+  let finish;
+  const manual = harness(t, { translate: () => new Promise(resolve => { finish = resolve; }) });
+  await manual.engine.prepare('en'); manual.engine.patch(manual.document, true); await manual.flush();
+  const article = manual.document.querySelector('article');
+  manual.manual(article); manual.engine.hide(article); manual.active(false); manual.engine.cancel();
+  manual.active(true); manual.engine.patch(manual.document, true); finish('遅い結果'); await manual.flush();
+  assert.equal(manual.stats.translates, 1); assert.equal(manual.output().hidden, true);
+  assert.equal(manual.output().textContent, '');
 });
 
 test('native Show original preference survives body replacement and prevents device auto recreation', async t => {

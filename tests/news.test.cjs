@@ -12,11 +12,47 @@ const rss = items => `<?xml version="1.0"?><rss version="2.0" xmlns:media="http:
 function layout(active = 'News', extra = '') {
   return `<main><div class="w-full min-w-0 flex flex-col"><div class="sticky"><div class="overflow-x-auto">${['For you', 'Following', 'News', 'Sports', 'Entertainment', 'Technology'].map(label => `<button class="rounded-full whitespace-nowrap ${active === label ? 'bg-sky-500 text-white' : ''}">${label}</button>`).join('')}</div></div>${extra}<div id="native-news"><a id="native-story" href="https://example.com">Original world news</a></div></div></main>`;
 }
+function fakeClock(window) {
+  let now = Date.parse('2026-09-30T03:00:00Z');
+  let serial = 0;
+  let hidden = false;
+  const timers = new Map();
+  window.Date.now = () => now;
+  window.setTimeout = (callback, delay = 0) => {
+    const id = ++serial;
+    timers.set(id, { callback, at: now + Math.max(0, Number(delay) || 0) });
+    return id;
+  };
+  window.clearTimeout = id => timers.delete(id);
+  Object.defineProperty(window.document, 'hidden', { configurable: true, get: () => hidden });
+  return {
+    timers,
+    jump(milliseconds) { now += milliseconds; },
+    async tick(milliseconds) {
+      const end = now + milliseconds;
+      for (;;) {
+        const next = [...timers].filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next) break;
+        now = Math.max(now, next[1].at);
+        timers.delete(next[0]);
+        next[1].callback();
+        await flush();
+      }
+      now = end;
+      await flush();
+    },
+    setHidden(value) {
+      hidden = value;
+      window.document.dispatchEvent(new window.Event('visibilitychange'));
+    }
+  };
+}
 function setup(t, options = {}) {
   const dom = new JSDOM(`<html><head></head><body>${options.html ?? layout()}</body></html>`, {
     url: options.url || 'https://tweet.app/feed', runScripts: 'outside-only', pretendToBeVisual: true
   });
   const window = dom.window;
+  const clock = options.clock ? fakeClock(window) : null;
   if (options.region) window.localStorage.setItem('ct-news-region-v1', options.region);
   if (options.cache) window.sessionStorage.setItem('ct-japanese-news-cache-v1', options.cache);
   if (options.gm) window.GM_xmlhttpRequest = options.gm;
@@ -26,7 +62,7 @@ function setup(t, options = {}) {
   const news = window.news;
   news.state.timeout = 30;
   t.after(() => window.close());
-  return { window, document: window.document, news };
+  return { window, document: window.document, news, clock };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const gmSuccess = xml => options => { queueMicrotask(() => options.onload({ status: 200, responseText: xml, finalUrl: options.url })); };
@@ -244,4 +280,172 @@ test('a pending result after route change cannot hide native content or recreate
   request.onload({ status: 200, responseText: rss(item()) }); await flush();
   assert.equal(document.querySelector('.ct-japanese-news'), null);
   assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+});
+
+test('visible Japanese headlines refresh at cache expiry even when the page has no DOM changes', async t => {
+  let calls = 0;
+  const { news, document, clock } = setup(t, { clock: true, gm: options => {
+    calls++; gmSuccess(rss(item(`News ${calls}`)))(options);
+  } });
+  const native = document.querySelector('#native-news');
+  news.patch(); await flush();
+  assert.equal(calls, 1);
+  await clock.tick(news.state.ttl - 1);
+  assert.equal(calls, 1);
+  await clock.tick(1);
+  assert.equal(calls, 2, 'expiry must refresh the visible topic without a mutation scan');
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'News 2');
+  assert.equal(document.querySelector('#native-news'), native);
+  assert.equal(native.classList.contains('ct-news-native-hidden'), true);
+  assert.equal(clock.timers.size, 1, 'only the next expiry should remain scheduled');
+  const timer = news.state.refreshTimer;
+  news.patch(); news.patch();
+  assert.equal(news.state.refreshTimer, timer, 'unrelated scans must retain the same deadline timer');
+  assert.equal(calls, 2);
+});
+
+test('background and pagehide stop expiry timers; foreground and pageshow refresh expired headlines', async t => {
+  let calls = 0;
+  const { news, document, window, clock } = setup(t, { clock: true, gm: options => {
+    calls++; gmSuccess(rss(item(`News ${calls}`)))(options);
+  } });
+  news.patch(); await flush();
+  assert.equal(calls, 1);
+  clock.setHidden(true);
+  assert.equal(clock.timers.size, 0);
+  news.patch();
+  await clock.tick(news.state.ttl + 1);
+  assert.equal(calls, 1, 'background scans and elapsed time must not request headlines');
+  clock.setHidden(false); await flush();
+  assert.equal(calls, 2);
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'News 2');
+  assert.equal(clock.timers.size, 1);
+
+  window.dispatchEvent(new window.Event('pagehide'));
+  assert.equal(clock.timers.size, 0);
+  await clock.tick(news.state.ttl + 1);
+  news.patch(); clock.setHidden(false); await flush();
+  assert.equal(calls, 2, 'visibility alone must not reactivate a page after pagehide');
+  window.dispatchEvent(new window.Event('pageshow')); await flush();
+  assert.equal(calls, 3);
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'News 3');
+  assert.equal(clock.timers.size, 1);
+});
+
+test('World, For you and another route cancel the news deadline and retain native contents', async t => {
+  for (const destination of ['World', 'For you', 'route']) {
+    let calls = 0;
+    const { news, document, window, clock } = setup(t, { clock: true, gm: options => {
+      calls++; gmSuccess(rss(item()))(options);
+    } });
+    const native = document.querySelector('#native-news');
+    let clicked = 0;
+    document.querySelector('#native-story').addEventListener('click', event => { event.preventDefault(); clicked++; });
+    news.patch(); await flush();
+    if (destination === 'World') document.querySelector('[data-ct-news-region="world"]').click();
+    else if (destination === 'For you') { select(document, 'For you'); news.patch(); }
+    else { window.history.replaceState({}, '', '/notifications'); news.patch(); }
+    assert.equal(clock.timers.size, 0, destination);
+    await clock.tick(news.state.ttl * 2);
+    assert.equal(calls, 1, destination);
+    assert.equal(document.querySelector('#native-news'), native);
+    assert.equal(native.classList.contains('ct-news-native-hidden'), false);
+    document.querySelector('#native-story').click(); assert.equal(clicked, 1);
+
+    if (destination === 'World') document.querySelector('[data-ct-news-region="jp"]').click();
+    else if (destination === 'For you') { select(document, 'News'); news.patch(); }
+    else { window.history.replaceState({}, '', '/feed'); news.patch(); }
+    await flush();
+    assert.equal(calls, 2, `returning from ${destination} must refresh the expired cache`);
+    assert.equal(clock.timers.size, 1);
+  }
+});
+
+test('failed foreground refreshes wait for each retry deadline and recover without a DOM mutation', async t => {
+  let calls = 0;
+  const { news, document, clock } = setup(t, { clock: true, gm: options => {
+    calls++; gmSuccess(calls < 3 ? '<html>blocked</html>' : rss(item('Recovered')))(options);
+  } });
+  news.patch(); await flush();
+  assert.equal(calls, 1);
+  assert.equal(clock.timers.size, 1);
+  news.patch(); news.patch(); await flush();
+  await clock.tick(news.state.retryDelay - 1);
+  assert.equal(calls, 1);
+  await clock.tick(1);
+  assert.equal(calls, 2);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+  assert.equal(clock.timers.size, 1, 'another failure must schedule one backoff, not a tight loop');
+  await clock.tick(news.state.retryDelay);
+  assert.equal(calls, 3);
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'Recovered');
+  assert.equal(clock.timers.size, 1, 'successful recovery schedules the next cache expiry');
+});
+
+test('a hanging request remains deduplicated and retries only after its timeout and backoff', async t => {
+  let calls = 0;
+  let aborts = 0;
+  const { news, clock } = setup(t, { clock: true, gm: options => {
+    calls++;
+    if (calls > 1) gmSuccess(rss(item()))(options);
+    return { abort() { aborts++; } };
+  } });
+  news.patch(); news.patch(); await flush();
+  assert.equal(calls, 1);
+  await clock.tick(news.state.timeout - 1);
+  news.patch(); assert.equal(calls, 1);
+  await clock.tick(1);
+  assert.equal(aborts, 1);
+  assert.equal(calls, 1);
+  assert.equal(clock.timers.size, 1);
+  await clock.tick(news.state.retryDelay - 1); assert.equal(calls, 1);
+  await clock.tick(1); assert.equal(calls, 2);
+  assert.equal(clock.timers.size, 1);
+});
+
+test('an old request completion rechecks For you before the queued application scan', async t => {
+  let request;
+  const { news, document, clock } = setup(t, { clock: true, gm: options => { request = options; } });
+  news.patch();
+  select(document, 'For you'); // The application has changed tabs; its observer scan has not run yet.
+  request.onload({ status: 200, responseText: rss(item()) }); await flush();
+  assert.equal(document.querySelector('.ct-japanese-news'), null);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+  assert.equal(clock.timers.size, 0);
+});
+
+test('a large clock jump refreshes once without replaying missed cache periods or scheduling immediate loops', async t => {
+  let calls = 0;
+  const { news, clock } = setup(t, { clock: true, gm: options => {
+    calls++; gmSuccess(rss(item()))(options);
+  } });
+  news.patch(); await flush();
+  clock.jump(news.state.ttl * 1000);
+  await clock.tick(0);
+  assert.equal(calls, 2, 'the overdue deadline should make one current request');
+  assert.equal(clock.timers.size, 1);
+  await clock.tick(news.state.ttl - 1);
+  assert.equal(calls, 2, 'the next request should use a new full cache period');
+  await clock.tick(1);
+  assert.equal(calls, 3);
+});
+
+test('a request that fails in the background waits for foreground and honors its remaining retry deadline', async t => {
+  let request;
+  let calls = 0;
+  const { news, document, clock } = setup(t, { clock: true, gm: options => {
+    calls++;
+    if (calls === 1) request = options;
+    else gmSuccess(rss(item('Recovered')))(options);
+  } });
+  news.patch(); clock.setHidden(true);
+  request.onerror(); await flush();
+  assert.equal(clock.timers.size, 0, 'an in-flight background completion must not arm another request');
+  await clock.tick(news.state.retryDelay - 1);
+  clock.setHidden(false); await flush();
+  assert.equal(calls, 1, 'foreground must preserve the remaining failure backoff');
+  assert.equal(clock.timers.size, 1);
+  await clock.tick(1);
+  assert.equal(calls, 2);
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'Recovered');
 });
