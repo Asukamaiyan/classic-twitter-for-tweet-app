@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.8.0
+// @version      6.8.1
 // @description  tweet.appのUIを日本語化。複数写真選択とスライド表示、日本のニュース、翻訳エラー時の待機、対応PCの端末内翻訳。投稿本文・名前と既存の返信通知・バッジ・保存機能を保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -954,6 +954,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const queue = new Map();
   let detector = null;
   let busy = false;
+  let current = null;
   let preparing = false;
   let generation = 0;
   let style = null;
@@ -1020,6 +1021,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (automatic && record.attempted) continue;
       processed = true;
       record.attempted = true;
+      current = record;
       const token = generation;
       record.button.disabled = true;
       record.button.textContent = copy.working;
@@ -1053,6 +1055,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           record.output.hidden = false;
         }
       } finally {
+        current = null;
         record.button.disabled = false;
         record.button.textContent = record.shown ? copy.hide : copy.translate;
       }
@@ -1101,7 +1104,18 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     void process();
   }
 
-  function cancel() { generation++; queue.clear(); }
+  function cancel() {
+    generation++;
+    queue.clear();
+    // A hidden-tab or settings cancellation invalidates the pending result,
+    // but has not completed this post's automatic attempt. Let the next active
+    // scan resume it. process() remains sequential, so a scan before the old
+    // request settles queues work rather than starting a second request. A late
+    // successful translation can then be reused from cache.
+    if (current && !current.shown && !current.dismissed && !isManual(current.article)) {
+      current.attempted = false;
+    }
+  }
   function hide(article) {
     const record = records.get(article);
     if (!record) return;
@@ -1384,7 +1398,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.8.0';
+    document.documentElement.dataset.ctActiveVersion = '6.8.1';
     ctStarted = true;
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
@@ -2812,7 +2826,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   ]);
   const ctNewsState = {
     region: null, mounts: new Map(), cache: new Map(), pending: new Map(), retryAt: new Map(),
-    ttl: 15 * 60 * 1000, retryDelay: 60 * 1000, timeout: 10000
+    ttl: 15 * 60 * 1000, retryDelay: 60 * 1000, timeout: 10000,
+    refreshTimer: null, refreshAt: 0, lifecycleBound: false, pageActive: true
   };
   const ctNewsPreferenceKey = 'ct-news-region-v1';
   const ctNewsCacheKey = 'ct-japanese-news-cache-v1';
@@ -2972,6 +2987,53 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     return targets;
   }
+  function ctNewsCancelRefresh() {
+    clearTimeout(ctNewsState.refreshTimer);
+    ctNewsState.refreshTimer = null;
+    ctNewsState.refreshAt = 0;
+  }
+  function ctNewsScheduleRefresh() {
+    // A static news page produces no mutation to trigger the normal scan. Keep
+    // one deadline for its visible topic; never poll the whole application.
+    if (!ctNewsState.pageActive || document.hidden || ctNewsState.region !== 'jp') {
+      ctNewsCancelRefresh(); return;
+    }
+    const now = Date.now();
+    let deadline = Infinity;
+    for (const target of ctNewsTargets()) {
+      if (!ctNewsState.mounts.has(target.container) || ctNewsState.pending.has(target.topic)) continue;
+      const cached = ctNewsState.cache.get(target.topic);
+      const expires = cached && now >= cached.at && now - cached.at < ctNewsState.ttl
+        ? cached.at + ctNewsState.ttl : ctNewsState.retryAt.get(target.topic);
+      if (expires > now) deadline = Math.min(deadline, expires);
+    }
+    if (!Number.isFinite(deadline)) { ctNewsCancelRefresh(); return; }
+    if (ctNewsState.refreshTimer !== null && ctNewsState.refreshAt === deadline) return;
+    ctNewsCancelRefresh();
+    ctNewsState.refreshAt = deadline;
+    ctNewsState.refreshTimer = setTimeout(() => {
+      ctNewsState.refreshTimer = null;
+      ctNewsState.refreshAt = 0;
+      // Recheck the native tab/route before requesting or hiding any content.
+      patchJapaneseNews();
+    }, deadline - now);
+  }
+  function ctNewsBindLifecycle() {
+    if (ctNewsState.lifecycleBound) return;
+    ctNewsState.lifecycleBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) ctNewsCancelRefresh();
+      else if (ctNewsState.pageActive) patchJapaneseNews();
+    });
+    window.addEventListener('pagehide', () => {
+      ctNewsState.pageActive = false;
+      ctNewsCancelRefresh();
+    });
+    window.addEventListener('pageshow', () => {
+      ctNewsState.pageActive = true;
+      patchJapaneseNews();
+    });
+  }
   function ctNewsSetText(node, text) { if (node.textContent !== text) node.textContent = text; }
   function ctNewsUnhide(mount) {
     if (mount.container.classList.contains('ct-news-native-hidden')) mount.container.classList.remove('ct-news-native-hidden');
@@ -3059,6 +3121,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       ctNewsSetText(mount.status, ja ? 'Yahoo!ニュース · 見出しを押すと記事が開きます' : 'Yahoo! News Japan · Open a headline to read the article');
       return;
     }
+    // Already-started requests may finish in the background. Their completion
+    // must not start another request until the page is visible again.
+    if (!ctNewsState.pageActive || document.hidden) return;
     ctNewsUnhide(mount);
     if (!mount.list.hidden) mount.list.hidden = true;
     if ((ctNewsState.retryAt.get(mount.topic) || 0) > Date.now()) {
@@ -3071,10 +3136,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     mount.loading = topic;
     ctLoadJapaneseNews(topic).finally(() => {
       if (mount.loading === topic) mount.loading = null;
-      if (mount.panel.isConnected && ctNewsState.mounts.get(mount.container) === mount) ctNewsRefreshMount(mount);
+      if (mount.panel.isConnected && ctNewsState.mounts.get(mount.container) === mount) patchJapaneseNews();
     });
   }
   function patchJapaneseNews() {
+    ctNewsBindLifecycle();
     if (ctNewsState.region === null) {
       let value;
       try { value = localStorage.getItem(ctNewsPreferenceKey); } catch {}
@@ -3088,7 +3154,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         ctNewsUnhide(mount); mount.panel.remove(); ctNewsState.mounts.delete(container);
       }
     }
-    if (!targets.length) return;
+    if (!targets.length) { ctNewsCancelRefresh(); return; }
     if (!document.getElementById('ct-japanese-news-style')) {
       const style = document.createElement('style'); style.id = 'ct-japanese-news-style';
       style.textContent = `.ct-news-native-hidden{display:none!important}.ct-news-controls{display:flex;gap:8px;padding:12px 16px 4px}.ct-news-controls button{min-height:44px;border:1px solid var(--color-tl-app-border,#ccd6dd);border-radius:999px;background:transparent;color:inherit;font:inherit;font-size:13px;font-weight:700;padding:5px 14px;cursor:pointer}.ct-news-controls button[aria-pressed="true"]{background:#1d9bf0;border-color:#1d9bf0;color:#fff}.ct-news-controls button:focus-visible{outline:2px solid #1d9bf0;outline-offset:3px}.ct-news-status{margin:0;padding:4px 16px 10px;font-size:12px;line-height:1.5;color:inherit;opacity:.72}.ct-news-status:empty{display:none}.ct-news-article{display:block;padding:12px 16px;border-bottom:1px solid var(--color-tl-app-border,#ccd6dd);color:inherit;text-decoration:none}.ct-news-article:hover{background:rgba(127,127,127,.06)}.ct-news-article img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:16px;border:1px solid var(--color-tl-app-border,#ccd6dd)}.ct-news-article img[hidden]{display:none}.ct-news-article h3{font-size:17px;line-height:1.4;font-weight:700;margin:12px 0 6px}.ct-news-source{margin:0;font-size:13px;line-height:1.5;opacity:.7}.ct-news-list[hidden]{display:none}`;
@@ -3103,6 +3169,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       mount.topic = target.topic;
       ctNewsRefreshMount(mount);
     }
+    ctNewsScheduleRefresh();
   }
 
 
@@ -5503,6 +5570,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.8.0 loaded'
+    '🐦 Classic Twitter JP v6.8.1 loaded'
   );
 })();

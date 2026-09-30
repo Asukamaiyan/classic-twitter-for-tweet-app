@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.8.0
+// @version      6.8.1
 // @description  Classic interface for tweet.app. Multiple-photo selection, photo slides, Japan/world news and safer automatic translation with optional on-device translation. Preserves posts, reply inbox, badges and local tools.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -986,5 +986,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.8.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.8.1 loaded');
 })();
