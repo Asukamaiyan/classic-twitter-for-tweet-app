@@ -11,7 +11,20 @@
 
 最終3版を実サイトへ一時注入し、6.8.1起動・本文19件と下書きの保持・画像だけの複数選択・＋非表示を確認しました。日本語版の投稿欄、英語版の英語Toolsとネイティブ投稿欄を確認。Safari向けコードはChromiumの幅390pxで横はみ出し0px、スマホのプロフィールメニューに公式バッジ5個を表示。コンソールエラーは0件でした。
 
-公開照合は作業中です。実Chrome翻訳モデル、実Tampermonkey、物理Safari＋Stay、実アップロード、サーバー変換後の4K／HDR保持は未検証です。実投稿・フォロー・いいねの送信は行っていません。
+実Chrome翻訳モデル、実Tampermonkey、物理Safari＋Stay、実アップロード、サーバー変換後の4K／HDR保持は未検証です。実投稿・フォロー・いいねの送信は行っていません。
+
+
+## 6.8.1 公開先照合
+
+[PR #6](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/6)をmainへマージ済み（`bc1e779fefcde82683b01b313b569466e928d278`）。最終PRコミットとマージ後のGitHub Actionsが成功しました。
+
+Greasy Forkの3版すべてで6.8.1の掲載を確認しました。通常のインストールURLから取得したコードは、Greasy Fork追加のdownloadURL／updateURLメタデータと改行差を除き、検証済みファイルと一致しました。英語版は最初に旧配布キャッシュを返し、その後同じURLで6.8.1への反映を確認しました。既存のUnlisted設定を維持しています。
+
+| Greasy Fork ID | 配布内容 SHA-256 |
+|---|---|
+| 594601 | `b0592bdf670d052781eaef80791d6b951032d2c80fd23e3389ebffc9386ac214` |
+| 594602 | `4a60b2c5c3551bf45b62712091181c9fe0d0af1a8ab2a810eb35757842bb9b67` |
+| 594603 | `c0049b03edccc90695a770ed5dcbf8ee7ad1957c0d680ebf48b4c16b69eadeb6` |
 
 ---
 
