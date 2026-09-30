@@ -583,3 +583,28 @@ test('unsupported device translation is explained and disabled without changing 
   assert.equal(document.getElementById('ct-local-translation-prepare').disabled, true);
   assert.equal(engine, 'native'); assert.match(document.getElementById('ct-local-tools').textContent, /Safari\/Stay/);
 });
+
+test('classic display toggle saves and restores without changing a draft or other local tools', t => {
+  let enabled = true;
+  const { document, window } = setup(t, { html:'<textarea id="native-draft">Keep my draft</textarea>', settings:state({searches:['saved search']}), options:{
+    getClassicAppearance:()=>enabled,
+    setClassicAppearance:next=>{enabled=next;}
+  }});
+  const input = document.getElementById('ct-local-classic-appearance');
+  assert.equal(input.checked,true);
+  input.click(); assert.equal(enabled,false); assert.equal(input.checked,false);
+  assert.equal(document.getElementById('native-draft').value,'Keep my draft');
+  assert.deepEqual(JSON.parse(window.localStorage.getItem(KEY)).searches,['saved search']);
+  enabled=true;
+  document.getElementById('ct-local-tools-toggle').click();
+  assert.equal(input.checked,true,'opening tools reflects another tab’s preference');
+});
+
+test('classic display toggle reports storage failure and rolls its checkbox back', t => {
+  const {document} = setup(t,{options:{getClassicAppearance:()=>true,setClassicAppearance:()=>{throw new Error('blocked');}}});
+  const input=document.getElementById('ct-local-classic-appearance');
+  input.click();
+  assert.equal(input.checked,true);
+  assert.equal(document.getElementById('ct-local-tools-status').dataset.error,'true');
+  assert.match(document.getElementById('ct-local-tools-status').textContent,/Could not save/);
+});

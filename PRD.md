@@ -50,3 +50,15 @@ User-requested scope for all three editions:
 - Server-advertised upload quotas and server image/video processing remain outside userscript control. Do not claim unlimited uploads, unlimited native translation or retained 4K HDR. Document current evidence and unsupported browser/device paths.
 
 - Japanese editions default to Japan-focused news, with an explicit Japan/world selector in all editions. Display publisher-provided article images when present, preserve topic categories, cache public feed reads, and restore native news on failure. Never guess an image or fabricate news.
+
+
+## 6.9.0 classic appearance and responsive motion
+
+User now explicitly requests a site-wide appearance closer to old Twitter, prioritizing star Favorites over current X terminology. This extends the former appearance exclusion. Target the 2014–2015 star era without replacing Tweet's brand or inventing X server capabilities.
+
+- Desktop: a pale light-theme page with a continuous white timeline, blue navigation, thin solid separators and modest corner radii. Retain native three-column information/navigation and dark theme choice.
+- Mobile: adapt verified native top/bottom navigation, horizontal feed tabs and composer; keep usable tap targets and safe areas at 320–430px without horizontal page overflow. Do not move native React nodes or cover native dialogs.
+- Favorites: crisp inline vector stars with the existing Favorite/お気に入り names. Animate only a verified false-to-true native state transition; no initial liked-card animation, unchanged-click celebration or automatic engagement.
+- Motion: short purposeful feedback, no continuous feed entrance animations; reduced motion and hidden/page lifecycle cancel animations. Native event handlers, focus, draft text and IME layout remain intact.
+- Appearance is on by default for this requested update; a persistent browser-local toggle restores native layout and disables the additional motion. Other extension features and storage remain intact. Storage failure retains the previous option.
+- Unknown shell structures receive no classic styling. Repeated scans settle without self-triggering mutations. Test all three generated editions, plus desktop/mobile actual Chromium views; state unverified physical Safari/Stay paths separately.

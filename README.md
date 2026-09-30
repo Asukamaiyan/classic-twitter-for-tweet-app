@@ -4,7 +4,7 @@
 
 ## インストール・更新
 
-バージョン **6.8.1** です。使う環境に合った **1本だけ** を有効にしてください。
+バージョン **6.9.0** です。使う環境に合った **1本だけ** を有効にしてください。
 
 | 環境 | Greasy Fork | ファイル |
 |---|---|---|
@@ -13,6 +13,13 @@
 | English | [English version](https://greasyfork.org/en/scripts/594603) | `classic-twitter-en.user.js` |
 
 Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込みしてください。既存のスクリプト名とnamespaceを維持しています。重複する旧版やテスト版は無効にしてください。日本ニュース機能は本体へ統合しました。旧ニュース試験版は無効にしてください。
+
+## 6.9.0 の改善（2026-09-30）
+
+- **昔のTwitterに近い表示**：2014〜2015年ごろの青、白いタイムライン、細い実線の区切り、角丸を抑えた投稿者アイコンとボタン。デスクトップの3列とスマホの上下ナビゲーションをそれぞれ整えます。サイトのライト／ダーク設定を維持します。
+- **星のお気に入り**：文字の星を拡大しても鮮明なSVGに変更。「お気に入り／Favorite」の呼び方を継続。実際にお気に入り状態になったときだけ星が短く弾み、初回表示・解除・状態が変わらない操作では動きません。
+- **動きと操作**：短い色の変化、押した反応、キーボードのフォーカス表示を追加。端末の「視差効果を減らす／動きを減らす」を尊重し、背景へ移るとアニメーションを止めます。
+- **標準表示へ復帰**：便利ツールの「クラシック表示を使う」をオフにすると元のレイアウトへ戻ります。日本語UI、星、通知、バッジ、写真、ニュース、保存済みデータは引き続き使えます。
 
 ## 6.8.1 の修正（2026-09-30）
 
@@ -99,7 +106,7 @@ npm run check
 
 ## English
 
-Version 6.8.1 resumes unfinished on-device translation after returning to the tab and refreshes Japanese news at the 15-minute cache deadline while visible. Background tabs, world news and unrelated routes do not trigger refresh requests.
+Version 6.9.0 adds the 2014–2015 blue layout, crisp vector favorites, responsive desktop/mobile styling and reduced-motion-aware feedback. Tools can restore the native layout. It retains the prior resume and refresh fixes: version 6.8.1 resumes unfinished on-device translation after returning to the tab and refreshes Japanese news at the 15-minute cache deadline while visible. Background tabs, world news and unrelated routes do not trigger refresh requests.
 
 Version 6.8.0 adds multiple-photo selection, a swipeable photo gallery, safer sequential automatic translation, optional desktop Chrome on-device translation, and Japan/world news with feed-provided images. The three distributions share the same modules. Actual Tampermonkey installation and physical Safari/Stay acceptance remain unverified. Server upload quotas, native translation quotas and preservation of 4K HDR cannot be removed or guaranteed by this userscript. Safari/mobile do not gain Chrome built-in AI support.
 

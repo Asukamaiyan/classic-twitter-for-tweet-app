@@ -390,3 +390,40 @@ test('unmounting an in-flight native translation pauses new requests instead of 
   const two = countClicks(f, 'two'); f.qa.patchAutoTranslation(); await f.advance(2000);
   assert.equal(two(), 0); assert.match(f.settings.getTranslationStatus(), /完了を確認できない/);
 });
+
+test('favorite vector preserves the native icon, click handler and count on React updates', t => {
+  const f = harness(t, '<button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 14 likes"><svg class="lucide-heart"><path></path></svg></button>');
+  const button = f.document.querySelector('button');
+  const native = button.querySelector('svg');
+  let clicks = 0; button.addEventListener('click', () => clicks++);
+  f.qa.patchFavoriteButtons(); f.qa.patchFavoriteButtons();
+  assert.equal(button.querySelectorAll('.ct-star').length, 1);
+  assert.equal(button.querySelector('.ct-star').getAttribute('aria-hidden'), 'true');
+  assert.equal(button.querySelector('svg.lucide-heart'), native);
+  assert.match(button.getAttribute('aria-label'), /14/);
+  button.click(); assert.equal(clicks, 1);
+  button.className = 'text-pink-500';
+  button.querySelector('.ct-star').remove(); // Native React can replace icon children.
+  f.qa.patchFavoriteButtons();
+  assert.equal(button.querySelectorAll('.ct-star svg').length, 1);
+  assert.equal(button.querySelector('svg.lucide-heart'), native);
+  assert.equal(button.classList.contains('ct-is-liked'), true);
+});
+
+test('classic appearance defaults on and persists independently of existing settings', t => {
+  const f = harness(t, '', { values: {'autoTranslate.optInV2': true, 'existing-favorite-key': [{id:'saved'}]} });
+  f.qa.start();
+  assert.equal(f.settings.getClassicAppearance(), true);
+  f.settings.setClassicAppearance(false);
+  assert.equal(f.settings.getClassicAppearance(), false);
+  assert.equal(f.qa.autoTranslationEnabled(), true);
+  f.settings.setClassicAppearance(true);
+  assert.equal(f.settings.getClassicAppearance(), true);
+});
+
+test('failed appearance save retains the previous option', t => {
+  const f = harness(t, '', { storageFailure: true });
+  f.qa.start();
+  assert.throws(() => f.settings.setClassicAppearance(false), /Storage unavailable/);
+  assert.equal(f.settings.getClassicAppearance(), true);
+});
