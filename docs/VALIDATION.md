@@ -18,6 +18,18 @@
 
 お気に入りは、このブラウザで操作した投稿のアカウント別ローカル保存です。サーバーの全お気に入り履歴・他人の履歴・端末間同期は提供しません。写真・動画欄は確認済み投稿APIと最新100件の本人の返信から構成し、以前の投稿は明示的な追加取得で確認します。削除済み・他人の投稿を推測で補いません。返信通知はブラウザ内の既読履歴で、OSのプッシュ通知ではありません。
 
+## 公開先の照合
+
+GitHub [PR #8](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/8) をmainへマージ済み。マージコミット `d131df8dcbbc16e78e733ae7e7d8fa13ee8800d9` の[GitHub Actions](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/actions/runs/36708227298) は成功しました。
+
+Greasy Forkの既存3版を6.10.0へ更新し、掲載ページの版表示と、通常のインストールURLの配布コードを確認。追加されるdownloadURL/updateURLと改行差を除き、全版が検証済みファイルと一致しました。英語版は初回に6.9.0の配布キャッシュを返しましたが、同じ通常URLで6.10.0への反映を確認しました。既存のUnlisted設定は維持しています。
+
+| Greasy Fork ID | 配布内容 SHA-256 |
+|---|---|
+| 594601 | `2006c8133d1c22eecbf1577b4d9f6903eae3b869882addc8c3caf5c81cffba70` |
+| 594602 | `9df562fd587c84b50a55212ba04ee3b6d83481a96eb1e9d9eb39bbd4b2876122` |
+| 594603 | `d47b817cd666558f2346e9e760110e7ebaf6ca7deb55e2a7ba0bf0f22ab62149` |
+
 ---
 
 # 6.9.0 検証記録
