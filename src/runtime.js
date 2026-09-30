@@ -181,6 +181,57 @@
     return loadJSON('ct-classic-appearance-v1', true) !== false;
   }
 
+  const ctFavoriteStarPath = 'M12 2.75 14.86 8.54 21.25 9.47 16.63 13.98 17.72 20.36 12 17.35 6.28 20.36 7.37 13.98 2.75 9.47 9.14 8.54Z';
+
+  function ctInstallFavoriteStyle(doc = document) {
+    if (doc.getElementById('ct-favorite-presentation-style')) return;
+    const style = doc.createElement('style');
+    style.id = 'ct-favorite-presentation-style';
+    style.dataset.ctOwned = 'favorite-presentation';
+    const mask = fill => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${ctFavoriteStarPath}" fill="${fill ? 'black' : 'none'}" stroke="black" stroke-width="1.8" stroke-linejoin="round"/></svg>`)}")`;
+    const button = 'button[data-testid="tweet-like-action"][data-testid]';
+    const selected = `${button}:is([aria-pressed="true"],:not([aria-pressed]).text-pink-500,:not([aria-pressed]):not(.text-tl-app-text-muted):not(.text-pink-500).ct-is-liked)`;
+    const notification = '#root-container main button.w-full.flex.items-start.border-b > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]';
+    // React may replace both className and the icon before the next scan.
+    // Stable native test IDs hide the heart immediately; the CSS vector fills
+    // the brief gap until our motion-capable star is restored.
+    style.textContent = `
+      ${button} > svg { display:none!important; }
+      ${button} { color:var(--color-tl-app-text-muted, var(--tl-app-text-muted, #657786))!important; }
+      ${button}::before {
+        content:""!important; display:inline-block!important;
+        flex:0 0 20px; width:20px; height:20px;
+        background:currentColor;
+        -webkit-mask:${mask(false)} center/contain no-repeat;
+        mask:${mask(false)} center/contain no-repeat;
+      }
+      ${button} > .ct-star svg { fill:none!important; stroke:currentColor; }
+      ${selected} { color:#ffac33!important; }
+      ${selected}::before {
+        -webkit-mask-image:${mask(true)};
+        mask-image:${mask(true)};
+      }
+      ${selected} > .ct-star svg { fill:currentColor!important; }
+      ${selected} + :is(span.text-xs.tabular-nums,button[data-testid="tweet-like-action-count"]) { color:#ffac33!important; }
+      ${notification} {
+        background:#ffac33!important;
+        -webkit-mask:${mask(true)} center/contain no-repeat;
+        mask:${mask(true)} center/contain no-repeat;
+      }
+      ${notification} * { visibility:hidden!important; }
+      @supports selector(:has(*)) {
+        ${button}:has(> span.ct-star)::before { display:none!important; }
+      }
+      @supports not selector(:has(*)) {
+        ${button} > span.ct-star { display:none!important; }
+      }
+      @media (hover:hover) {
+        ${button}:hover { color:#ffac33!important; }
+      }
+    `;
+    (doc.head || doc.documentElement).append(style);
+  }
+
   function ctEnsureFavoriteStar(button) {
     if (!button.classList.contains('ct-favorite-button')) button.classList.add('ct-favorite-button');
     if ([...button.children].some(node => node.matches('span.ct-star'))) return;
@@ -191,11 +242,12 @@
     svg.setAttribute('viewBox', '0 0 24 24');
     svg.setAttribute('focusable', 'false');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', 'M12 2.75 14.86 8.54 21.25 9.47 16.63 13.98 17.72 20.36 12 17.35 6.28 20.36 7.37 13.98 2.75 9.47 9.14 8.54Z');
+    path.setAttribute('d', ctFavoriteStarPath);
     svg.append(path); star.append(svg); button.prepend(star);
   }
 
   function patchFavoriteButtons(root = document) {
+    ctInstallFavoriteStyle(root.nodeType === 9 ? root : root.ownerDocument || document);
     const buttons = [...root.querySelectorAll?.('[data-testid="tweet-like-action"]') || []];
     if (root.matches?.('[data-testid="tweet-like-action"]')) buttons.push(root);
     for (const button of buttons) {
@@ -227,7 +279,8 @@
       } catch {}
     }
     const detail = location.pathname.match(/^\/post\/([A-Za-z0-9_-]+)\/?$/)?.[1];
-    return detail && article === document.querySelector('article') &&
+    return detail && article === [...document.querySelectorAll('article')].find(el =>
+      !el.closest('[hidden],[aria-hidden="true"],[data-ct-owned],[data-ct-local-ui]')) &&
       !article.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"]') ? detail : null;
   }
 
@@ -285,7 +338,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.9.0';
+    document.documentElement.dataset.ctActiveVersion = '6.10.0';
     ctStarted = true;
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),

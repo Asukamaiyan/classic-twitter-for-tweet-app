@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.9.0
+// @version      6.10.0
 // @description  昔のTwitter風の青い表示と星のお気に入り。スマホ・デスクトップ対応、控えめな動き、日本語UI、返信通知・バッジ・複数写真・日本ニュース・翻訳・保存ツール。投稿本文や名前を保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1174,6 +1174,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const style = doc.createElement('style');
     style.id = 'ct-classic-appearance-style';
     style.dataset.ctOwned = 'classic-appearance';
+    const composerAvatar = sizes => `:is(${sizes.map(size =>
+      `img[width="${size}"][height="${size}"],[role="img"][style*="width: ${size}px"][style*="height: ${size}px"]`).join(',')}).border.object-cover.shrink-0:first-child:not([data-ct-owned] *,[data-user-content] *,blockquote *,[aria-label^="Quoted post"] *,[data-testid="quote-tweet"] *)`;
     style.textContent = `
       .ct-classic-shell {
         --ct-classic-blue:#55acee;
@@ -1209,6 +1211,18 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
       .ct-classic-shell .ct-classic-avatar {
         border-radius:4px!important;
+      }
+      .ct-classic-composer-avatar {
+        border-radius:4px!important;
+      }
+      @supports selector(:has(*)) {
+        /* These native rows keep replacement avatars square before a scan. */
+        #root-container[data-app-theme] div.flex.gap-3:has(textarea#public-tweet-input) > ${composerAvatar([40])},
+        div.bg-tl-app-card.border.rounded-3xl.max-w-lg > div.flex.gap-4.mt-2:has(textarea#public-modal-tweet-input) > ${composerAvatar([48])},
+        #root-container[data-app-theme] [role="form"].flex.items-start.gap-3:has(textarea[maxlength="280"]) > ${composerAvatar([32,40])},
+        #root-container[data-app-theme] [role="form"] > div.flex.items-start.gap-3:has(textarea[maxlength="280"]) > ${composerAvatar([32,40])} {
+          border-radius:4px!important;
+        }
       }
       .ct-classic-shell .ct-classic-top-tabs {
         padding-top:0!important;
@@ -1343,6 +1357,20 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (!wanted.has(element)) wanted.set(element, new Set());
       wanted.get(element).add(name);
     };
+    const markComposerAvatar = (input, scope, rowMatches, sizes) => {
+      if (!input || input.closest(ctClassicExcluded)) return;
+      for (let row = input.parentElement; row && row !== scope; row = row.parentElement) {
+        if (!rowMatches(row)) continue;
+        const avatar = row.firstElementChild;
+        if (!avatar?.matches('img.border.object-cover.shrink-0,[role="img"].border.object-cover.shrink-0') ||
+            !avatar.classList.contains('rounded-full')) continue;
+        const width = Number(avatar.getAttribute('width') || parseFloat(avatar.style.width));
+        const height = Number(avatar.getAttribute('height') || parseFloat(avatar.style.height));
+        if (width !== height || !sizes.includes(width)) continue;
+        mark(avatar, 'ct-classic-composer-avatar');
+        return;
+      }
+    };
     const main = [...shell.querySelectorAll('main')].find(element =>
       element.classList.contains('lg:col-span-6') &&
       element.classList.contains('bg-tl-app-card') &&
@@ -1422,7 +1450,22 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (submit && !composer.closest('article,[data-ct-owned]')) {
         mark(composer, 'ct-classic-composer');
         mark(submit, 'ct-classic-submit');
+        markComposerAvatar(input, composer, row => row.classList.contains('flex') && row.classList.contains('gap-3'), [40]);
       }
+    }
+
+    const modalInput = shell.ownerDocument.querySelector('textarea#public-modal-tweet-input');
+    markComposerAvatar(modalInput, shell.ownerDocument.body, row =>
+      ['flex', 'gap-4', 'mt-2'].every(name => row.classList.contains(name)) &&
+      row.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg'), [48]);
+    for (const form of shell.querySelectorAll('[role="form"]')) {
+      if (form.closest(ctClassicExcluded)) continue;
+      const replyInput = form.querySelector('textarea[maxlength="280"]');
+      if (!replyInput || replyInput.closest('[role="form"]') !== form ||
+          replyInput.getAttribute('autocomplete') !== 'off') continue;
+      markComposerAvatar(replyInput, form.parentElement, row =>
+        ['flex', 'items-start', 'gap-3'].every(name => row.classList.contains(name)) &&
+        (row === form || row.parentElement === form), [32, 40]);
     }
 
     for (const article of main.querySelectorAll('article')) {
@@ -1856,6 +1899,57 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return loadJSON('ct-classic-appearance-v1', true) !== false;
   }
 
+  const ctFavoriteStarPath = 'M12 2.75 14.86 8.54 21.25 9.47 16.63 13.98 17.72 20.36 12 17.35 6.28 20.36 7.37 13.98 2.75 9.47 9.14 8.54Z';
+
+  function ctInstallFavoriteStyle(doc = document) {
+    if (doc.getElementById('ct-favorite-presentation-style')) return;
+    const style = doc.createElement('style');
+    style.id = 'ct-favorite-presentation-style';
+    style.dataset.ctOwned = 'favorite-presentation';
+    const mask = fill => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${ctFavoriteStarPath}" fill="${fill ? 'black' : 'none'}" stroke="black" stroke-width="1.8" stroke-linejoin="round"/></svg>`)}")`;
+    const button = 'button[data-testid="tweet-like-action"][data-testid]';
+    const selected = `${button}:is([aria-pressed="true"],:not([aria-pressed]).text-pink-500,:not([aria-pressed]):not(.text-tl-app-text-muted):not(.text-pink-500).ct-is-liked)`;
+    const notification = '#root-container main button.w-full.flex.items-start.border-b > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]';
+    // React may replace both className and the icon before the next scan.
+    // Stable native test IDs hide the heart immediately; the CSS vector fills
+    // the brief gap until our motion-capable star is restored.
+    style.textContent = `
+      ${button} > svg { display:none!important; }
+      ${button} { color:var(--color-tl-app-text-muted, var(--tl-app-text-muted, #657786))!important; }
+      ${button}::before {
+        content:""!important; display:inline-block!important;
+        flex:0 0 20px; width:20px; height:20px;
+        background:currentColor;
+        -webkit-mask:${mask(false)} center/contain no-repeat;
+        mask:${mask(false)} center/contain no-repeat;
+      }
+      ${button} > .ct-star svg { fill:none!important; stroke:currentColor; }
+      ${selected} { color:#ffac33!important; }
+      ${selected}::before {
+        -webkit-mask-image:${mask(true)};
+        mask-image:${mask(true)};
+      }
+      ${selected} > .ct-star svg { fill:currentColor!important; }
+      ${selected} + :is(span.text-xs.tabular-nums,button[data-testid="tweet-like-action-count"]) { color:#ffac33!important; }
+      ${notification} {
+        background:#ffac33!important;
+        -webkit-mask:${mask(true)} center/contain no-repeat;
+        mask:${mask(true)} center/contain no-repeat;
+      }
+      ${notification} * { visibility:hidden!important; }
+      @supports selector(:has(*)) {
+        ${button}:has(> span.ct-star)::before { display:none!important; }
+      }
+      @supports not selector(:has(*)) {
+        ${button} > span.ct-star { display:none!important; }
+      }
+      @media (hover:hover) {
+        ${button}:hover { color:#ffac33!important; }
+      }
+    `;
+    (doc.head || doc.documentElement).append(style);
+  }
+
   function ctEnsureFavoriteStar(button) {
     if (!button.classList.contains('ct-favorite-button')) button.classList.add('ct-favorite-button');
     if ([...button.children].some(node => node.matches('span.ct-star'))) return;
@@ -1866,11 +1960,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     svg.setAttribute('viewBox', '0 0 24 24');
     svg.setAttribute('focusable', 'false');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', 'M12 2.75 14.86 8.54 21.25 9.47 16.63 13.98 17.72 20.36 12 17.35 6.28 20.36 7.37 13.98 2.75 9.47 9.14 8.54Z');
+    path.setAttribute('d', ctFavoriteStarPath);
     svg.append(path); star.append(svg); button.prepend(star);
   }
 
   function patchFavoriteButtons(root = document) {
+    ctInstallFavoriteStyle(root.nodeType === 9 ? root : root.ownerDocument || document);
     const buttons = [...root.querySelectorAll?.('[data-testid="tweet-like-action"]') || []];
     if (root.matches?.('[data-testid="tweet-like-action"]')) buttons.push(root);
     for (const button of buttons) {
@@ -1902,7 +1997,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       } catch {}
     }
     const detail = location.pathname.match(/^\/post\/([A-Za-z0-9_-]+)\/?$/)?.[1];
-    return detail && article === document.querySelector('article') &&
+    return detail && article === [...document.querySelectorAll('article')].find(el =>
+      !el.closest('[hidden],[aria-hidden="true"],[data-ct-owned],[data-ct-local-ui]')) &&
       !article.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"]') ? detail : null;
   }
 
@@ -1960,7 +2056,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.9.0';
+    document.documentElement.dataset.ctActiveVersion = '6.10.0';
     ctStarted = true;
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
@@ -2111,11 +2207,726 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       href: `${location.origin}/post/${encodeURIComponent(id)}`, savedAt: Date.now() };
   }
 
+    // Profile additions use Tweet's verified posts GET. Favorites are browser-local
+  // snapshots, scoped to the signed-in account; no favorite-history endpoint is assumed.
+  const ctProfileState = {
+    path: '', user: '', uid: null, authSeen: undefined, accountUser: '', active: '', tablist: null,
+    timeline: null, panel: null, sequence: 0, identityBusy: false, identityRetry: 0,
+    nativeSelection: new Map(), tabsBound: new WeakSet(), rendered: '', media: null,
+    storageBound: false, storageError: false, memory: new Map(), dirtyMemory: new Set(), viewer: null
+  };
+  function ctProfileText(ja, en) { return CT_LOCALE === 'ja' ? ja : en; }
+  function ctProfileId(value) {
+    return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : null;
+  }
+  function ctProfileHandle(value) {
+    return typeof value === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(value) ? value.toLowerCase() : null;
+  }
+  function ctProfileURL(value) {
+    if (typeof value !== 'string' || value.length > 4000) return '';
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+    } catch { return ''; }
+  }
+  function ctProfileUID() {
+    return typeof ctNetworkState !== 'undefined' ? ctProfileId(ctNetworkState.authUID) : null;
+  }
+  function ctProfileMediaAssets(post) {
+    const media = [];
+    for (const asset of Array.isArray(post?.media_assets) ? post.media_assets.slice(0, 16) : []) {
+      const url = ctProfileURL(asset?.public_url);
+      if (url && ['image', 'video'].includes(asset?.media_type)) media.push({
+        type: asset.media_type, url, poster: ctProfileURL(asset.thumbnail_url)
+      });
+    }
+    const image = ctProfileURL(post?.image);
+    if (!media.length && image) media.push({ type: 'image', url: image, poster: '' });
+    return media;
+  }
+  function ctProfileFavoriteItems(data) {
+    if (!Array.isArray(data)) return [];
+    return [...new Map(data.filter(item => ctProfileId(item?.id)).slice(0, 500).map(item => [item.id, {
+      id: item.id, username: ctProfileHandle(item.username) || '',
+      name: typeof item.name === 'string' ? item.name.slice(0, 200) : '',
+      text: typeof item.text === 'string' ? item.text.slice(0, 10000) : '',
+      avatar: ctProfileURL(item.avatar), savedAt: Number(item.savedAt) || 0,
+      createdAt: typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) ? item.createdAt : '',
+      href: `${location.origin}/post/${encodeURIComponent(item.id)}`,
+      media: Array.isArray(item.media) ? item.media.slice(0, 16).filter(asset =>
+        ['image', 'video'].includes(asset?.type) && ctProfileURL(asset.url)).map(asset => ({
+          type: asset.type, url: ctProfileURL(asset.url), poster: ctProfileURL(asset.poster)
+        })) : []
+    }])).values()];
+  }
+  function ctProfileFavoriteKey(uid) { return KEY.favorites + ':uid:' + encodeURIComponent(uid); }
+  function ctProfileLoadFavorites() {
+    const uid = ctProfileUID();
+    if (!uid) return [];
+    const key = ctProfileFavoriteKey(uid);
+    if (ctProfileState.dirtyMemory.has(uid)) return ctProfileState.memory.get(uid) || [];
+    try {
+      const data = ctProfileFavoriteItems(JSON.parse(localStorage.getItem(key) || '[]'));
+      ctProfileState.memory.set(uid, data);
+      return data;
+    } catch { return ctProfileState.memory.get(uid) || []; }
+  }
+  function ctProfileWriteFavorites(uid, data) {
+    if (!uid || uid !== ctProfileUID()) return false;
+    const items = ctProfileFavoriteItems(data);
+    ctProfileState.memory.set(uid, items);
+    try {
+      localStorage.setItem(ctProfileFavoriteKey(uid), JSON.stringify(items));
+      ctProfileState.storageError = false; ctProfileState.dirtyMemory.delete(uid);
+    } catch { ctProfileState.storageError = true; ctProfileState.dirtyMemory.add(uid); }
+    if (favoritesActive) renderFavoritesPanel();
+    return true;
+  }
+  function ctProfileSaveFavorite(item, expectedUid = ctProfileUID()) {
+    if (!ctProfileId(item?.id) || !expectedUid || expectedUid !== ctProfileUID()) return false;
+    return ctProfileWriteFavorites(expectedUid, [item, ...ctProfileLoadFavorites().filter(row => row.id !== item.id)].slice(0, 500));
+  }
+  function ctProfileRemoveFavorite(id, expectedUid = ctProfileUID()) {
+    if (!ctProfileId(id) || !expectedUid || expectedUid !== ctProfileUID()) return false;
+    return ctProfileWriteFavorites(expectedUid, ctProfileLoadFavorites().filter(row => row.id !== id));
+  }
+  function ctProfileLegacyFavorites() {
+    try {
+      // Old storage had no account identity. Import is explicit and remains
+      // available only until its owner is recorded; the original data is retained.
+      if (localStorage.getItem(KEY.favorites + ':owner')) return [];
+      return ctProfileFavoriteItems(JSON.parse(localStorage.getItem(KEY.favorites) || '[]'));
+    } catch { return []; }
+  }
+  function ctProfileImportFavorites() {
+    const uid = ctProfileUID();
+    const legacy = ctProfileLegacyFavorites();
+    if (!uid || !legacy.length) return;
+    try {
+      const merged = [...ctProfileLoadFavorites(), ...legacy];
+      const items = ctProfileFavoriteItems(merged).slice(0, 500);
+      localStorage.setItem(ctProfileFavoriteKey(uid), JSON.stringify(items));
+      localStorage.setItem(KEY.favorites + ':owner', uid);
+      ctProfileState.memory.set(uid, items);
+      ctProfileState.storageError = false;
+    } catch { ctProfileState.storageError = true; }
+    renderFavoritesPanel();
+  }
+  function ctProfileContext() {
+    if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) return null;
+    const main = document.querySelector('main');
+    if (!main) return null;
+    for (const tablist of main.querySelectorAll('[role="tablist"]')) {
+      if (tablist.closest('article,[data-ct-owned],[data-ct-local-ui],[hidden],[aria-hidden="true"]')) continue;
+      const nativeTabs = [...tablist.children].filter(el => el.matches('button[role="tab"]') && !el.id.startsWith('ct-'));
+      if (nativeTabs.length !== 3) continue;
+      const labels = nativeTabs.map(el => (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent).trim());
+      if (!/^(Tweets|Posts|ツイート|呟き)$/.test(labels[0]) || !/^(Replies|リプライ|返信)$/.test(labels[1]) ||
+          !/^(Reposts|Retweets|リツイート|リポスト)$/.test(labels[2])) continue;
+      const header = [...tablist.parentElement.children].filter(el =>
+        el !== tablist && !!(el.compareDocumentPosition(tablist) & Node.DOCUMENT_POSITION_FOLLOWING));
+      const handles = new Set(header.flatMap(el => [...el.querySelectorAll('div.mt-3.flex.flex-col.gap-1')])
+        .filter(el => el.querySelector(':scope > h2.font-extrabold'))
+        .flatMap(el => [...el.querySelectorAll(':scope > p.text-tl-app-text-muted')])
+        .filter(el => !el.children.length)
+        .map(el => /^@([A-Za-z0-9_.-]{1,80})$/.exec(el.textContent.trim())?.[1]).filter(Boolean).map(ctProfileHandle));
+      if (handles.size !== 1) continue;
+      const user = [...handles][0];
+      if (location.pathname.startsWith('/user/')) {
+        let route;
+        try { route = ctProfileHandle(decodeURIComponent(location.pathname.split('/')[2])); } catch { continue; }
+        if (!route || route !== user) continue;
+      }
+      let timeline = tablist.nextElementSibling;
+      while (timeline?.matches('[data-ct-profile-panel]')) timeline = timeline.nextElementSibling;
+      // Current profile component renders one direct DIV for the active native
+      // timeline. Never hide an unknown container, header, form or tab control.
+      if (!timeline?.matches('div') || timeline.matches('[role],[data-ct-owned],[data-ct-local-ui]') ||
+          timeline.querySelector('input,textarea,[role="form"]')) continue;
+      return { path: location.pathname, user, main, tablist, timeline, nativeTabs };
+    }
+    return null;
+  }
+  function ctProfileStyles() {
+    if (document.getElementById('ct-profile-style')) return;
+    const style = document.createElement('style');
+    style.id = 'ct-profile-style';
+    style.textContent = `
+      [data-ct-profile-tabs]{overflow-x:auto;scrollbar-width:none;min-width:0}
+      [data-ct-profile-tabs]::-webkit-scrollbar{display:none}
+      [data-ct-profile-tabs]>button[role=tab]{min-width:54px;min-height:48px;flex:1 0 54px}
+      [data-ct-profile-active]>button:not([data-ct-profile-tab])>span{color:var(--color-tl-app-text-muted,#657786)!important}
+      [data-ct-profile-active]>button:not([data-ct-profile-tab])>span>span{display:none!important}
+      [data-ct-profile-timeline-hidden]{display:none!important}
+      .ct-profile-tab{position:relative;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;padding:8px 4px;border:0;background:transparent;color:var(--color-tl-app-text-muted,#657786);font:inherit;cursor:pointer}
+      .ct-profile-tab svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8}
+      .ct-profile-tab-label{font-size:10px;white-space:nowrap;line-height:14px}
+      .ct-profile-tab[aria-selected=true]{color:var(--color-tl-app-text,#14171a);font-weight:700}
+      .ct-profile-tab[aria-selected=true]:after{content:'';position:absolute;bottom:0;width:28px;height:4px;border-radius:2px;background:#55acee}
+      .ct-profile-tab[data-ct-profile-tab=favorites] svg{color:#ffac33}
+      .ct-profile-tab:focus-visible,.ct-profile-control:focus-visible,.ct-profile-photo:focus-visible{outline:2px solid #55acee;outline-offset:-3px}
+      [data-ct-profile-panel]{position:relative!important;inset:auto!important;max-height:none!important;width:auto!important;max-width:100%;padding:0!important;margin:0!important;border:0!important;border-radius:0!important;background:inherit!important;color:inherit;box-shadow:none!important;z-index:auto!important}
+      .ct-profile-status{padding:12px 16px;border-bottom:1px solid var(--color-tl-app-border,#8b98a544);font-size:12px;color:var(--color-tl-app-text-muted,#657786);line-height:1.6}
+      .ct-profile-empty{padding:32px 16px;text-align:center;color:var(--color-tl-app-text-muted,#657786);font-size:14px}
+      .ct-profile-control{min-height:44px;padding:8px 14px;border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:4px 0}
+      .ct-profile-control:disabled{cursor:wait;opacity:.6}
+      .ct-profile-row{display:flex;gap:12px;padding:16px;border-bottom:1px solid var(--color-tl-app-border,#8b98a544)}
+      .ct-profile-avatar{width:40px;height:40px;flex:none;border-radius:4px;object-fit:cover}
+      .ct-profile-row-main{min-width:0;flex:1}
+      .ct-profile-meta{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;font-size:14px;line-height:20px}
+      .ct-profile-name{font-weight:700;color:inherit;text-decoration:none}
+      .ct-profile-handle,.ct-profile-time{font-size:12px;color:var(--color-tl-app-text-muted,#657786);text-decoration:none}
+      .ct-profile-text{font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 10px}
+      .ct-profile-gallery{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;border-radius:4px;scrollbar-width:thin}
+      .ct-profile-photo{display:block;flex:0 0 100%;min-width:0;padding:0;background:var(--color-tl-app-bg,#f5f8fa);border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;overflow:hidden;scroll-snap-align:start;cursor:zoom-in}
+      .ct-profile-photo img{display:block;width:100%;height:auto;max-height:480px;object-fit:contain}
+      .ct-profile-video{display:block;width:100%;max-height:480px;background:#000;border-radius:4px;margin:8px 0}
+      .ct-profile-media-note{font-size:12px;color:var(--color-tl-app-text-muted,#657786);margin:6px 0}
+      .ct-profile-post-link{display:inline-flex;align-items:center;min-height:44px;color:#55acee;font-size:13px;text-decoration:none}
+      .ct-profile-post-link:hover,.ct-profile-name:hover{text-decoration:underline}
+      .ct-profile-viewer{padding:0;border:0;background:#000;color:#fff;width:min(100vw,1000px);max-width:100vw;max-height:100dvh;overflow:auto}
+      .ct-profile-viewer::backdrop{background:#000c}
+      .ct-profile-viewer img{display:block;max-width:100%;max-height:calc(100dvh - 64px);object-fit:contain;margin:auto}
+      .ct-profile-viewer-nav{display:flex;align-items:center;justify-content:space-between;padding:8px;gap:8px}
+      .ct-profile-viewer-nav button{min-width:44px;min-height:44px;border:1px solid #ffffff55;border-radius:4px;color:inherit;background:transparent;font:inherit;cursor:pointer}
+      @media(max-width:480px){.ct-profile-row{padding:12px;gap:10px}.ct-profile-photo img,.ct-profile-video{max-height:360px}}
+      @media(prefers-reduced-motion:no-preference){.ct-profile-tab,.ct-profile-control{transition:color 120ms ease,background-color 120ms ease}}
+    `;
+    document.head.appendChild(style);
+  }
+  function ctProfileCloseViewer() {
+    const viewer = ctProfileState.viewer;
+    if (!viewer) return;
+    ctProfileState.viewer = null;
+    try { viewer.dialog.close(); } catch {}
+    viewer.dialog.remove();
+    if (viewer.trigger?.isConnected) viewer.trigger.focus({ preventScroll: true });
+  }
+  function ctProfileOpenViewer(images, index, trigger) {
+    ctProfileCloseViewer();
+    const dialog = document.createElement('dialog');
+    // If a browser lacks modal dialogs, the unchanged post link still opens
+    // Tweet's own media viewer. Do not emulate a broken focus trap.
+    if (typeof dialog.showModal !== 'function') return;
+    dialog.className = 'ct-profile-viewer';
+    dialog.dataset.ctLocalUi = 'profile-media-viewer';
+    dialog.setAttribute('aria-label', ctProfileText('写真を拡大', 'Enlarged photos'));
+    const img = document.createElement('img');
+    img.referrerPolicy = 'no-referrer';
+    const nav = document.createElement('div'); nav.className = 'ct-profile-viewer-nav';
+    const previous = document.createElement('button'); previous.type = 'button'; previous.textContent = '‹';
+    previous.setAttribute('aria-label', ctProfileText('前の写真', 'Previous photo'));
+    const count = document.createElement('span'); count.setAttribute('aria-live', 'polite');
+    const next = document.createElement('button'); next.type = 'button'; next.textContent = '›';
+    next.setAttribute('aria-label', ctProfileText('次の写真', 'Next photo'));
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '×';
+    close.setAttribute('aria-label', ctProfileText('閉じる', 'Close'));
+    const show = () => {
+      img.src = images[index].url;
+      img.alt = ctProfileText(`写真 ${index + 1}/${images.length}`, `Photo ${index + 1}/${images.length}`);
+      count.textContent = `${index + 1} / ${images.length}`;
+      previous.disabled = index === 0; next.disabled = index === images.length - 1;
+    };
+    const move = step => { index = Math.max(0, Math.min(images.length - 1, index + step)); show(); };
+    previous.onclick = () => move(-1); next.onclick = () => move(1); close.onclick = ctProfileCloseViewer;
+    dialog.addEventListener('keydown', event => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault(); move(event.key === 'ArrowLeft' ? -1 : 1);
+      }
+    });
+    dialog.addEventListener('cancel', event => { event.preventDefault(); ctProfileCloseViewer(); });
+    nav.append(previous, count, next, close); dialog.append(img, nav); document.body.append(dialog);
+    ctProfileState.viewer = { dialog, trigger };
+    show();
+    try { dialog.showModal(); close.focus(); } catch { ctProfileCloseViewer(); }
+  }
+  function ctProfileRestoreNative() {
+    ctProfileState.timeline?.removeAttribute('data-ct-profile-timeline-hidden');
+    ctProfileState.tablist?.removeAttribute('data-ct-profile-active');
+    for (const [tab, selected] of ctProfileState.nativeSelection) {
+      if (tab.isConnected && tab.getAttribute('aria-selected') === 'false') tab.setAttribute('aria-selected', selected);
+    }
+    ctProfileState.nativeSelection.clear();
+    ctProfileState.panel?.remove(); ctProfileState.panel = null;
+    ctProfileState.rendered = '';
+    ctProfileCloseViewer();
+  }
+  function closeFavoritesPanel() {
+    ctProfileState.sequence++;
+    ctProfileState.active = ''; favoritesActive = false;
+    ctProfileRestoreNative();
+    for (const tab of ctProfileState.tablist?.querySelectorAll('[data-ct-profile-tab]') || []) {
+      if (tab.getAttribute('aria-selected') !== 'false') tab.setAttribute('aria-selected', 'false');
+    }
+  }
+  function ctProfileReset() {
+    closeFavoritesPanel();
+    ctProfileState.tablist?.removeAttribute('data-ct-profile-tabs');
+    for (const tab of ctProfileState.tablist?.querySelectorAll('[data-ct-profile-tab]') || []) tab.remove();
+    ctProfileState.tablist = null; ctProfileState.timeline = null; ctProfileState.media = null;
+    ctProfileState.path = ''; ctProfileState.user = '';
+  }
+  function ctProfileBindStorage() {
+    if (ctProfileState.storageBound) return;
+    ctProfileState.storageBound = true;
+    window.addEventListener('storage', event => {
+      if (event.key === ctProfileFavoriteKey(ctProfileUID() || '') || event.key === KEY.favorites + ':owner') renderFavoritesPanel();
+    });
+    window.addEventListener('pagehide', ctProfileCloseViewer);
+  }
+  async function ctProfileEnsureIdentity(context) {
+    if (ctProfileState.identityBusy || Date.now() < ctProfileState.identityRetry) return;
+    ctProfileState.identityBusy = true;
+    const path = context.path;
+    try {
+      const auth = await getAuth();
+      if (location.pathname !== path || ctProfileUID() !== (auth?.uid || null)) return;
+      if (!auth?.uid || !auth?.token) { ctProfileState.identityRetry = Date.now() + 10000; return; }
+      if (ctProfileState.uid === auth.uid && ctProfileState.accountUser) return;
+      ctProfileState.identityRetry = Date.now() + 10000;
+      const json = await requestJSON(API_ORIGIN + '/api/user-profile/' + encodeURIComponent(auth.uid), {
+        Authorization: `Bearer ${auth.token}`
+      });
+      if (location.pathname !== path || ctProfileUID() !== auth.uid || ctProfileContext()?.user !== context.user) return;
+      const user = json?.success !== false && !json?.error ? ctProfileHandle(json?.profile?.username) : null;
+      if (!user) { ctProfileState.identityRetry = Date.now() + 10000; return; }
+      ctProfileState.uid = auth.uid; ctProfileState.accountUser = user;
+      patchFavoriteProfileTab();
+    } finally { ctProfileState.identityBusy = false; }
+  }
+  function ctProfileCreateTab(type) {
+    const tab = document.createElement('button');
+    tab.id = type === 'favorites' ? 'ct-favorites-tab' : 'ct-media-tab';
+    tab.type = 'button'; tab.className = 'ct-profile-tab'; tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', 'false'); tab.dataset.ctProfileTab = type;
+    const label = type === 'favorites' ? ctProfileText('お気に入り', 'Favorites') : ctProfileText('写真・動画', 'Media');
+    tab.setAttribute('aria-label', label); tab.title = label; tab.setAttribute('aria-controls', type === 'favorites' ? 'ct-favorites-panel' : 'ct-media-panel');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', type === 'favorites' ? 'm12 3 2.8 5.7 6.3.9-4.55 4.43 1.08 6.26L12 17.34l-5.63 2.95 1.08-6.26L2.9 9.6l6.3-.9L12 3Z' : 'M4 4h16v16H4z M4 16l5-5 4 4 3-3 4 4 M16 8h.01');
+    svg.append(path); const text = document.createElement('span'); text.className = 'ct-profile-tab-label'; text.textContent = label;
+    tab.append(svg, text);
+    tab.onclick = event => {
+      event.preventDefault(); event.stopPropagation();
+      const context = ctProfileContext();
+      if (!context || context.tablist !== ctProfileState.tablist) return;
+      if (type === 'favorites' && (!ctProfileUID() || ctProfileState.accountUser !== context.user)) return;
+      if (ctProfileState.active === type) return;
+      ctProfileCloseViewer(); ctProfileState.sequence++;
+      ctProfileState.active = type; favoritesActive = type === 'favorites'; ctProfileState.rendered = '';
+      ctProfileShow(context);
+      if (type === 'media' && !ctProfileMediaState().started) ctProfileLoadMedia();
+    };
+    return tab;
+  }
+  function patchFavoriteProfileTab() {
+    ctProfileBindStorage();
+    const context = ctProfileContext();
+    if (!context) { ctProfileReset(); return; }
+    const knownUid = ctProfileUID();
+    if (ctProfileState.authSeen !== knownUid) {
+      ctProfileState.authSeen = knownUid; ctProfileState.identityRetry = 0;
+    }
+    if (ctProfileState.uid && ctProfileState.uid !== knownUid) {
+      ctProfileReset(); ctProfileState.uid = null; ctProfileState.accountUser = ''; ctProfileState.identityRetry = 0;
+    }
+    if (ctProfileState.path !== context.path || ctProfileState.user !== context.user || ctProfileState.tablist !== context.tablist) {
+      ctProfileReset();
+      ctProfileState.path = context.path; ctProfileState.user = context.user;
+      ctProfileState.tablist = context.tablist; ctProfileState.timeline = context.timeline;
+    } else if (ctProfileState.timeline !== context.timeline) {
+      // React replaced its current list. Restore the detached list's marker and
+      // apply only to the new, verified direct timeline sibling.
+      ctProfileState.timeline?.removeAttribute('data-ct-profile-timeline-hidden');
+      ctProfileState.timeline = context.timeline;
+    }
+    ctProfileStyles();
+    if (!context.tablist.hasAttribute('data-ct-profile-tabs')) context.tablist.setAttribute('data-ct-profile-tabs', '');
+    if (!context.tablist.querySelector('#ct-media-tab')) context.tablist.append(ctProfileCreateTab('media'));
+    if (/^\/profile\/?$/.test(context.path) && ctProfileState.accountUser && ctProfileState.accountUser !== context.user) {
+      // Native profile edits can change the handle without changing Firebase uid.
+      // Recheck once; a mismatching server response is throttled by identityRetry.
+      ctProfileState.accountUser = '';
+    }
+    const own = knownUid && ctProfileState.uid === knownUid && ctProfileState.accountUser === context.user;
+    let favorites = context.tablist.querySelector('#ct-favorites-tab');
+    if (own && !favorites) context.tablist.append(ctProfileCreateTab('favorites'));
+    if (!own && favorites) { favorites.remove(); if (favoritesActive) closeFavoritesPanel(); }
+    if (!ctProfileState.tabsBound.has(context.tablist)) {
+      ctProfileState.tabsBound.add(context.tablist);
+      context.tablist.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        const target = event.target.closest('button[role="tab"]');
+        const tabs = [...context.tablist.children].filter(el => el.matches('button[role="tab"]'));
+        const index = tabs.indexOf(target);
+        if (index < 0) return;
+        event.preventDefault();
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 :
+          (index + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length;
+        tabs[next].focus();
+      });
+    }
+    for (const tab of context.nativeTabs) {
+      if (ctProfileState.tabsBound.has(tab)) continue;
+      ctProfileState.tabsBound.add(tab);
+      tab.addEventListener('click', () => closeFavoritesPanel(), true);
+    }
+    if (!ctProfileState.uid || !ctProfileState.accountUser) ctProfileEnsureIdentity(context);
+    if (ctProfileState.active) ctProfileShow(context);
+  }
+  function ctProfileShow(context) {
+    if (!ctProfileState.active || !context || context.path !== ctProfileState.path || context.user !== ctProfileState.user) return;
+    if (!context.timeline.hasAttribute('data-ct-profile-timeline-hidden')) context.timeline.setAttribute('data-ct-profile-timeline-hidden', '');
+    if (context.tablist.dataset.ctProfileActive !== ctProfileState.active) context.tablist.dataset.ctProfileActive = ctProfileState.active;
+    for (const tab of context.nativeTabs) {
+      if (!ctProfileState.nativeSelection.has(tab)) ctProfileState.nativeSelection.set(tab, tab.getAttribute('aria-selected') || 'false');
+      if (tab.getAttribute('aria-selected') !== 'false') tab.setAttribute('aria-selected', 'false');
+    }
+    for (const tab of context.tablist.querySelectorAll('[data-ct-profile-tab]')) {
+      const selected = String(tab.dataset.ctProfileTab === ctProfileState.active);
+      if (tab.getAttribute('aria-selected') !== selected) tab.setAttribute('aria-selected', selected);
+    }
+    if (!ctProfileState.panel?.isConnected) {
+      const panel = document.createElement('section'); panel.dataset.ctProfilePanel = ''; panel.dataset.ctLocalUi = 'profile';
+      panel.id = ctProfileState.active === 'favorites' ? 'ct-favorites-panel' : 'ct-media-panel';
+      panel.setAttribute('role', 'tabpanel');
+      ctProfileState.panel = panel; context.tablist.after(panel); ctProfileState.rendered = '';
+    }
+    const panel = ctProfileState.panel;
+    const id = ctProfileState.active === 'favorites' ? 'ct-favorites-panel' : 'ct-media-panel';
+    if (panel.id !== id) panel.id = id;
+    const label = ctProfileState.active === 'favorites' ? 'ct-favorites-tab' : 'ct-media-tab';
+    if (panel.getAttribute('aria-labelledby') !== label) panel.setAttribute('aria-labelledby', label);
+    if (ctProfileState.active === 'favorites') renderFavoritesPanel();
+    else ctProfileRenderMedia();
+  }
+  function ctProfileStatus(text) {
+    const el = document.createElement('div'); el.className = 'ct-profile-status'; el.textContent = text; return el;
+  }
+  function ctProfileControl(text, action) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'ct-profile-control';
+    button.textContent = text; button.onclick = action; return button;
+  }
+  function ctProfileRow(item) {
+    const row = document.createElement('div'); row.className = 'ct-profile-row'; row.dataset.ctProfilePost = item.id;
+    if (item.avatar) {
+      const avatarLink = document.createElement('a'); avatarLink.href = '/user/' + encodeURIComponent(item.username);
+      const avatar = document.createElement('img'); avatar.className = 'ct-profile-avatar'; avatar.src = item.avatar;
+      avatar.alt = ctProfileText(`${item.name || item.username}のプロフィール`, `${item.name || item.username}'s profile`);
+      avatar.loading = 'lazy'; avatar.referrerPolicy = 'no-referrer'; avatarLink.append(avatar); row.append(avatarLink);
+    }
+    const main = document.createElement('div'); main.className = 'ct-profile-row-main';
+    const meta = document.createElement('div'); meta.className = 'ct-profile-meta';
+    const name = document.createElement('a'); name.className = 'ct-profile-name'; name.href = item.username ? '/user/' + encodeURIComponent(item.username) : item.href;
+    name.textContent = item.name || item.username; meta.append(name);
+    if (item.username) {
+      const handle = document.createElement('span'); handle.className = 'ct-profile-handle'; handle.textContent = '@' + item.username; meta.append(handle);
+    }
+    if (Number.isFinite(Date.parse(item.createdAt))) {
+      const time = document.createElement('time'); time.className = 'ct-profile-time'; time.dateTime = item.createdAt;
+      time.textContent = new Date(item.createdAt).toLocaleDateString(CT_LOCALE === 'ja' ? 'ja-JP' : 'en-US'); meta.append(time);
+    }
+    main.append(meta);
+    if (item.text) { const text = document.createElement('p'); text.className = 'ct-profile-text'; text.textContent = item.text; main.append(text); }
+    const images = (item.media || []).filter(asset => asset.type === 'image');
+    if (images.length) {
+      const gallery = document.createElement('div'); gallery.className = 'ct-profile-gallery';
+      gallery.setAttribute('aria-label', ctProfileText('投稿の写真', 'Post photos'));
+      for (const [index, asset] of images.entries()) {
+        const photo = document.createElement('button'); photo.type = 'button'; photo.className = 'ct-profile-photo';
+        photo.setAttribute('aria-label', ctProfileText(`写真 ${index + 1}/${images.length}を拡大`, `Enlarge photo ${index + 1}/${images.length}`));
+        const image = document.createElement('img'); image.src = asset.url; image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
+        image.alt = ctProfileText(`投稿の写真 ${index + 1}/${images.length}`, `Post photo ${index + 1}/${images.length}`);
+        photo.append(image); photo.onclick = () => ctProfileOpenViewer(images, index, photo); gallery.append(photo);
+      }
+      main.append(gallery);
+      if (images.length > 1) {
+        const note = document.createElement('p'); note.className = 'ct-profile-media-note';
+        note.textContent = ctProfileText(`写真${images.length}枚 · 横にスクロールして表示`, `${images.length} photos · Scroll sideways to view all`); main.append(note);
+      }
+    }
+    for (const asset of (item.media || []).filter(asset => asset.type === 'video')) {
+      const video = document.createElement('video'); video.className = 'ct-profile-video'; video.src = asset.url;
+      if (asset.poster) video.poster = asset.poster; video.controls = true; video.playsInline = true; video.preload = 'none';
+      video.setAttribute('aria-label', ctProfileText('投稿の動画', 'Post video')); main.append(video);
+    }
+    const link = document.createElement('a'); link.className = 'ct-profile-post-link'; link.href = item.href;
+    link.textContent = ctProfileText('元のツイートを開く', 'Open original Tweet'); main.append(link); row.append(main); return row;
+  }
+  function renderFavoritesPanel() {
+    if (!favoritesActive || ctProfileState.active !== 'favorites') return;
+    const context = ctProfileContext();
+    if (!context || !ctProfileUID() || ctProfileState.uid !== ctProfileUID() || ctProfileState.accountUser !== context.user) {
+      closeFavoritesPanel(); return;
+    }
+    const panel = ctProfileState.panel;
+    if (!panel?.isConnected) return;
+    const items = ctProfileLoadFavorites(); const legacy = ctProfileLegacyFavorites();
+    const signature = JSON.stringify(['favorites', ctProfileUID(), items, legacy.length, ctProfileState.storageError]);
+    if (signature === ctProfileState.rendered) return;
+    ctProfileState.rendered = signature;
+    const content = document.createDocumentFragment();
+    content.append(ctProfileStatus(ctProfileText('このブラウザで保存したお気に入りです。過去の全履歴や他の人のお気に入りは取得できません。', 'Favorites saved in this browser. Complete older history and other users’ Favorites are unavailable.')));
+    if (legacy.length) {
+      const migration = ctProfileStatus(ctProfileText('以前の保存データがあります。使用中のアカウントのものか確認して取り込めます。', 'Older saved data is available. Import it if it belongs to this account.'));
+      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), ctProfileImportFavorites)); content.append(migration);
+    }
+    if (ctProfileState.storageError) content.append(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。保存設定を確認してください。', 'Browser storage is unavailable. Check your storage settings.')));
+    if (!items.length) { const empty = document.createElement('p'); empty.className = 'ct-profile-empty'; empty.textContent = ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.'); content.append(empty); }
+    else for (const item of items) content.append(ctProfileRow(item));
+    panel.replaceChildren(content);
+  }
+  function ctProfileMediaState() {
+    const uid = ctProfileUID();
+    if (!ctProfileState.media || ctProfileState.media.user !== ctProfileState.user || (ctProfileState.media.uid && ctProfileState.media.uid !== uid)) {
+      ctProfileState.media = { user: ctProfileState.user, uid, items: [], postItems: [], replyItems: [],
+        scanned: 0, replyScanned: 0, cursor: null, started: false, postsStarted: false, repliesChecked: false,
+        busy: false, error: '', postError: '', replyError: '', done: false, retryRefresh: false, replyLimited: false };
+    }
+    if (uid && !ctProfileState.media.uid) ctProfileState.media.uid = uid;
+    return ctProfileState.media;
+  }
+  function ctProfilePostItem(post, user) {
+    if (!ctProfileId(post?.id) || ctProfileHandle(post.authorUsername) !== user || post.isDeleted ||
+        post.isRepost || post.originalPostId || post.repostedBy) return null;
+    const media = ctProfileMediaAssets(post);
+    if (!media.length) return null;
+    return { id: post.id, username: user,
+      name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : user,
+      avatar: ctProfileURL(post.authorAvatar), text: typeof post.text === 'string' ? post.text.slice(0, 10000) : '',
+      createdAt: typeof (post.createdAt ?? post.created_at) === 'string' ? (post.createdAt ?? post.created_at) : '',
+      href: '/post/' + encodeURIComponent(post.id), media };
+  }
+  async function ctProfileLoadMedia(refresh = false) {
+    if (ctProfileState.active !== 'media' || document.hidden || (typeof ctPageActive !== 'undefined' && !ctPageActive)) return;
+    const state = ctProfileMediaState();
+    refresh = refresh || (state.postError && state.retryRefresh);
+    if (state.busy || (!refresh && state.started && state.done && !state.error)) return;
+    const loadPosts = refresh || !state.postsStarted || !!state.postError || (!state.done && !state.replyError);
+    const loadReplies = refresh || !state.repliesChecked || !!state.replyError;
+    state.busy = true; state.error = ''; const sequence = ctProfileState.sequence;
+    const path = ctProfileState.path; const user = ctProfileState.user;
+    ctProfileRenderMedia();
+    try {
+      const auth = await getAuth();
+      if (!auth?.token || !ctProfileId(auth.uid)) throw new Error('sign-in');
+      if (sequence !== ctProfileState.sequence || location.pathname !== path || ctProfileState.user !== user || ctProfileUID() !== auth.uid) return;
+      if (state.uid && state.uid !== auth.uid) return;
+      state.uid = auth.uid;
+      const query = new URLSearchParams({ limit: '24' });
+      const cursor = refresh ? null : state.cursor;
+      if (cursor) query.set('cursor', cursor);
+      const headers = { Authorization: `Bearer ${auth.token}` };
+      // Only the native posts route has a verified cursor. The native replies
+      // route returns wrappers without pagination; display its newest 100 safely.
+      const [postsJSON, repliesJSON] = await Promise.all([
+        loadPosts ? requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/posts?' + query, headers) : null,
+        loadReplies ? requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/replies', headers) : null
+      ]);
+      const current = await getAuth(); const context = ctProfileContext();
+      if (sequence !== ctProfileState.sequence || location.pathname !== path || !context || context.user !== user || current?.uid !== auth.uid) return;
+      state.started = true;
+      if (loadPosts) {
+        if (!postsJSON || postsJSON.success === false || postsJSON.error || !Array.isArray(postsJSON.posts) || postsJSON.posts.length > 100) {
+          state.postError = ctProfileText('ツイートの写真・動画を取得できませんでした。もう一度お試しください。', 'Tweet photos and videos could not be loaded. Try again.');
+          state.retryRefresh = !!refresh;
+        } else {
+          const items = postsJSON.posts.map(post => ctProfilePostItem(post, user)).filter(Boolean);
+          state.postItems = [...new Map([...(refresh ? [] : state.postItems), ...items].map(item => [item.id, item])).values()];
+          state.scanned = (refresh ? 0 : state.scanned) + postsJSON.posts.length;
+          const next = typeof postsJSON.nextCursor === 'string' && postsJSON.nextCursor.length <= 2000 && postsJSON.nextCursor ? postsJSON.nextCursor : null;
+          state.cursor = next && next !== cursor ? next : null;
+          state.done = !state.cursor; state.postsStarted = true; state.postError = ''; state.retryRefresh = false;
+        }
+      }
+      if (loadReplies) {
+        if (!repliesJSON || repliesJSON.success === false || repliesJSON.error || !Array.isArray(repliesJSON.replies)) {
+          state.replyError = ctProfileText('返信の写真・動画を取得できませんでした。再試行すると返信を再確認します。', 'Reply photos and videos could not be loaded. Try again to recheck replies.');
+        } else {
+          const replies = repliesJSON.replies.map(item => item?.post).filter(post =>
+            ctProfileId(post?.id) && ctProfileHandle(post.authorUsername) === user)
+            .sort((a, b) => (Date.parse(b.createdAt ?? b.created_at) || 0) - (Date.parse(a.createdAt ?? a.created_at) || 0));
+          const checked = replies.slice(0, 100);
+          state.replyItems = checked.map(post => ctProfilePostItem(post, user)).filter(Boolean);
+          state.replyScanned = checked.length; state.replyLimited = replies.length > 100;
+          state.repliesChecked = true; state.replyError = '';
+        }
+      }
+      state.items = [...new Map([...state.postItems, ...state.replyItems].map(item => [item.id, item])).values()]
+        .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+      state.error = [state.postError, state.replyError].filter(Boolean).join(' ');
+    } catch {
+      if (sequence === ctProfileState.sequence) {
+        state.postError = ctProfileText('写真・動画を取得できませんでした。ログイン状態を確認して、もう一度お試しください。', 'Photos and videos could not be loaded. Check your sign-in and try again.');
+        state.error = state.postError; state.retryRefresh = !!refresh;
+      }
+    } finally {
+      state.busy = false;
+      if (ctProfileState.media === state && ctProfileState.active === 'media' && ctProfileState.path === path && ctProfileState.user === user) {
+        ctProfileRenderMedia();
+        // Returning to Media while its discarded first request was completing
+        // starts one fresh request after it finishes, never in parallel.
+        if (sequence !== ctProfileState.sequence && !state.started && !state.error) ctProfileLoadMedia();
+      }
+    }
+  }
+  function ctProfileRenderMedia() {
+    if (ctProfileState.active !== 'media' || !ctProfileState.panel?.isConnected) return;
+    const state = ctProfileMediaState();
+    const signature = JSON.stringify(['media', state.uid, state.items, state.scanned, state.replyScanned, state.busy, state.error, state.done, state.replyLimited]);
+    if (signature === ctProfileState.rendered) return;
+    ctProfileState.rendered = signature;
+    const content = document.createDocumentFragment();
+    const note = ctProfileStatus(ctProfileText(`投稿${state.scanned}件・返信${state.replyScanned}件を確認 · 写真・動画`, `${state.scanned} posts and ${state.replyScanned} replies checked · Photos and videos`));
+    const scope = document.createElement('div');
+    scope.textContent = ctProfileText('返信は最新100件まで含みます。以前のツイートは下から読み込めます。', 'Includes up to the latest 100 replies. Load older Tweets below.');
+    note.append(scope, document.createElement('br'), ctProfileControl(ctProfileText('更新', 'Refresh'), () => ctProfileLoadMedia(true)));
+    note.querySelector('button').disabled = state.busy; content.append(note);
+    for (const item of state.items) content.append(ctProfileRow(item));
+    if (!state.items.length) {
+      const empty = document.createElement('p'); empty.className = 'ct-profile-empty'; empty.setAttribute('role', 'status');
+      empty.textContent = state.busy ? ctProfileText('写真・動画を読み込み中…', 'Loading photos and videos…') :
+        state.done && !state.error ? ctProfileText('写真・動画のあるツイートはありません。', 'No Tweets with photos or videos.') :
+          ctProfileText('ここまでの投稿には写真・動画がありません。以前の投稿を確認できます。', 'No photos or videos in the posts checked so far. You can check older posts.');
+      content.append(empty);
+    }
+    if (state.error) content.append(ctProfileStatus(state.error));
+    if (!state.done || state.error) {
+      const footer = ctProfileStatus('');
+      const next = ctProfileControl(state.busy ? ctProfileText('読み込み中…', 'Loading…') :
+        state.error ? ctProfileText('再試行', 'Try again') : ctProfileText('以前の投稿を確認', 'Check older posts'), () => ctProfileLoadMedia());
+      next.disabled = state.busy; footer.append(next); content.append(footer);
+    }
+    ctProfileState.panel.replaceChildren(content);
+  }
+
+    // Native feed cards have no permalink. Resolve only an exact author/time/body
+  // match through the author's established read-only posts route, never a quote
+  // link, text search, React internals or an extra engagement request.
+  const ctFavoriteCaptures = new WeakMap();
+  const ctFavoritePostCache = new Map();
+  const ctFavoriteStateWatchers = new WeakMap();
+
+  function ctWatchFavoriteRollback(button, snapshot, uid, generation, liked) {
+    let currentLiked = liked;
+    const stop = () => { observer.disconnect(); clearTimeout(timer); ctFavoriteStateWatchers.delete(button); };
+    const observer = new MutationObserver(() => {
+      if (!button.isConnected || ctNetworkState.authUID !== uid || ctFavoriteCaptures.get(button) !== generation) { stop(); return; }
+      const next = ctIsLiked(button);
+      if (next === currentLiked) return;
+      currentLiked = next;
+      if (next) saveFavorite(snapshot, uid);
+      else removeFavorite(snapshot.id, uid);
+    });
+    observer.observe(button, {attributes:true, attributeFilter:['aria-pressed','class','aria-label']});
+    // The native client toggles optimistically and can roll back a slow failure.
+    // Observe this single button briefly, without polling or retaining cards.
+    const timer = setTimeout(stop, 30000);
+    ctFavoriteStateWatchers.set(button, stop);
+  }
+
+  function ctFavoriteDOMMedia(article) {
+    return [...article.querySelectorAll('img[alt="Attached media"],video[src]')].filter(el =>
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-ct-owned],[data-ct-local-ui]'))
+      .slice(0, 16).map(el => ({type: el.tagName === 'VIDEO' ? 'video' : 'image',
+        url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : ''})).filter(asset => asset.url);
+  }
+
+  function ctFavoriteCandidate(article) {
+    const timestamp = [...article.querySelectorAll('span.text-tl-app-text-muted.hover\\:underline[title]')].find(el =>
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote') &&
+      /^\d{4}-\d{2}-\d{2}T/.test(el.title) && Number.isFinite(Date.parse(el.title)));
+    const known = snapshotFavorite(article);
+    if (known) return { ...known, createdAt: timestamp?.title || '', media: ctFavoriteDOMMedia(article) };
+    const username = validUser(articleAuthor(article));
+    const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')].find(el =>
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[aria-live]'));
+    if (!username || !body || !timestamp) return null;
+    const author = [...article.querySelectorAll('button.truncate.font-bold')].find(el =>
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote'));
+    return { username, name: author?.textContent || username, text: body.textContent,
+      avatar: articleAvatar(article), createdAt: timestamp.title, savedAt: Date.now() };
+  }
+
+  async function ctFavoriteAuthorPosts(username, auth) {
+    const key = auth.uid + ':' + username.toLowerCase();
+    const previous = ctFavoritePostCache.get(key);
+    if (previous?.pending) return previous.pending;
+    if (previous && Date.now() - previous.at < 60000) return previous.posts;
+    const record = { at: Date.now(), posts: [], pending: null };
+    record.pending = (async () => {
+      let cursor = null;
+      for (let page = 0; page < 3; page++) {
+        const query = new URLSearchParams({ limit: '50' });
+        if (cursor) query.set('cursor', cursor);
+        const json = await requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(username) + '/posts?' + query,
+          { Authorization: `Bearer ${auth.token}` });
+        if (!json || json.success === false || json.error || !Array.isArray(json.posts)) break;
+        record.posts.push(...json.posts);
+        const next = typeof json.nextCursor === 'string' && json.nextCursor.length <= 2000 ? json.nextCursor : null;
+        if (!next || next === cursor) break;
+        cursor = next;
+      }
+      return record.posts;
+    })();
+    ctFavoritePostCache.set(key, record);
+    while (ctFavoritePostCache.size > 40) ctFavoritePostCache.delete(ctFavoritePostCache.keys().next().value);
+    try { return await record.pending; }
+    finally { record.pending = null; record.at = Date.now(); }
+  }
+
+  async function ctResolveFavorite(candidate, uid) {
+    if (!candidate || !uid) return null;
+    const auth = await getAuth();
+    if (!auth?.token || auth.uid !== uid) return null;
+    if (candidate.id) return candidate;
+    const posts = await ctFavoriteAuthorPosts(candidate.username, auth);
+    const current = await getAuth();
+    if (current?.uid !== uid) return null;
+    const matches = posts.filter(post => typeof post.id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(post.id) &&
+      !post.isDeleted && !post.originalPostId && !post.isRepost &&
+      post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&
+      Date.parse(post.createdAt ?? post.created_at) === Date.parse(candidate.createdAt) &&
+      typeof post.text === 'string' && post.text === candidate.text);
+    const unique = [...new Map(matches.map(post => [post.id, post])).values()];
+    if (unique.length !== 1) return null;
+    return { ...candidate, id: unique[0].id, href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
+      avatar: ctProfileURL(unique[0].authorAvatar) || candidate.avatar,
+      media: ctProfileMediaAssets(unique[0]) };
+  }
+
+  function ctCaptureFavoriteClick(event) {
+    const button = event.target.closest?.('button[data-testid="tweet-like-action"]');
+    const article = button?.closest('article');
+    if (!article || article.closest('[data-ct-owned],[data-ct-local-ui]')) return;
+    ctFavoriteStateWatchers.get(button)?.();
+    const candidate = ctFavoriteCandidate(article);
+    const uid = ctNetworkState.authUID;
+    if (!candidate || !uid) return;
+    const wasLiked = ctIsLiked(button);
+    const generation = (ctFavoriteCaptures.get(button) || 0) + 1;
+    ctFavoriteCaptures.set(button, generation);
+    setTimeout(async () => {
+      try {
+        if (ctFavoriteCaptures.get(button) !== generation || !button.isConnected || ctNetworkState.authUID !== uid) return;
+        const liked = ctIsLiked(button);
+        if (liked === wasLiked) return;
+        const snapshot = await ctResolveFavorite(candidate, uid);
+        if (!snapshot || ctFavoriteCaptures.get(button) !== generation || !button.isConnected ||
+            ctNetworkState.authUID !== uid || ctIsLiked(button) !== liked) return;
+        if (liked) saveFavorite(snapshot, uid);
+        else removeFavorite(snapshot.id, uid);
+        ctWatchFavoriteRollback(button, snapshot, uid, generation, liked);
+        if (favoritesActive) renderFavoritesPanel();
+      } catch { /* Native favorite actions remain available if a read fails. */ }
+    }, 450);
+  }
+
     // Browser-local reply inbox. All routes and response shapes come from Tweet's own client.
   // No native notification is marked read and no posting/following API is called here.
   const ctReplyState = {
     uid: null, data: null, busy: false, lastAttempt: -Infinity, error: '', storageError: false,
-    rendered: '', storageBound: false
+    rendered: '', storageBound: false, tabActive: false, mount: null
   };
   const CT_REPLY_PREFIX = 'ct-replies-v2:';
   const CT_REPLY_INTERVAL = 90000;
@@ -2140,6 +2951,14 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctReplyEmpty() {
     return { startedAt: Date.now(), checkedAt: 0, notices: [], seen: [], threads: {} };
   }
+  function ctReplyBadgeMetadata(item) {
+    return {
+      authorBadges: Array.isArray(item.authorBadges) ? item.authorBadges.filter(value =>
+        typeof value === 'string' && /^(team_member|centurion|founding_special|founding|wing|ambassador|press)$/.test(value)) : [],
+      authorFoundingMemberNumber: /^\d{1,20}$/.test(String(item.authorFoundingMemberNumber ?? ''))
+        ? String(item.authorFoundingMemberNumber) : null
+    };
+  }
   function ctReplyRead(uid) {
     try {
       const raw = JSON.parse(localStorage.getItem(CT_REPLY_PREFIX + encodeURIComponent(uid)) || 'null');
@@ -2147,7 +2966,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       return {
         startedAt: Number(raw.startedAt) || Date.now(), checkedAt: Number(raw.checkedAt) || 0,
         notices: raw.notices.filter(item => ctReplyId(item?.id) && ctReplyHandle(item?.authorUsername))
-          .slice(0, 100).map(item => ({ ...item, read: item.read === true })),
+          .slice(0, 100).map(item => ({
+            id: item.id, parentId: ctReplyId(item.parentId), authorUsername: item.authorUsername,
+            authorName: typeof item.authorName === 'string' ? item.authorName.slice(0, 200) : item.authorUsername,
+            authorAvatar: ctReplyAvatar(item.authorAvatar), text: typeof item.text === 'string' ? item.text.slice(0, 4000) : '',
+            createdAt: typeof item.createdAt === 'string' ? item.createdAt : '', detectedAt: Number(item.detectedAt) || 0,
+            read: item.read === true, ...ctReplyBadgeMetadata(item)
+          })),
         seen: Array.isArray(raw.seen) ? raw.seen.filter(ctReplyId).slice(-4000) : [],
         threads: raw.threads && typeof raw.threads === 'object' && !Array.isArray(raw.threads) ? raw.threads : {}
       };
@@ -2228,6 +3053,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       id, parentId, authorUsername: handle,
       authorName: typeof reply.authorName === 'string' ? reply.authorName.slice(0, 200) : handle,
       authorAvatar: ctReplyAvatar(reply.authorAvatar),
+      ...ctReplyBadgeMetadata(reply),
       text: typeof reply.text === 'string' ? reply.text.slice(0, 4000) : '',
       createdAt, detectedAt: existing?.detectedAt || Date.now(),
       // Historical replies are useful history, but never an initial unread flood.
@@ -2323,7 +3149,30 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       patchReplyBadge();
     }
   }
-  function closeReplyPanel() { document.getElementById('ct-reply-panel')?.remove(); ctReplyState.rendered = ''; }
+  function ctReplyRestoreNative() {
+    const mount = ctReplyState.mount;
+    if (!mount) return;
+    for (const [element, original] of mount.hidden) {
+      if (element.style.getPropertyValue('display') === 'none' && element.style.getPropertyPriority('display') === 'important') {
+        if (original.display) element.style.setProperty('display', original.display, original.priority);
+        else element.style.removeProperty('display');
+      }
+      if (element.getAttribute('aria-hidden') === 'true') {
+        if (original.aria === null) element.removeAttribute('aria-hidden');
+        else element.setAttribute('aria-hidden', original.aria);
+      }
+    }
+    mount.hidden.clear();
+    mount.bar.removeAttribute('data-ct-reply-tabs-active');
+  }
+  function closeReplyPanel() {
+    ctReplyRestoreNative();
+    ctReplyState.mount?.button.remove();
+    document.getElementById('ct-reply-panel')?.remove();
+    ctReplyState.mount = null;
+    ctReplyState.tabActive = false;
+    ctReplyState.rendered = '';
+  }
   function ctReplyBindStorage() {
     if (ctReplyState.storageBound) return;
     ctReplyState.storageBound = true;
@@ -2335,134 +3184,314 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
     });
   }
+  function ctReplyInstallStyle() {
+    if (document.getElementById('ct-reply-ui-style')) return;
+    const style = document.createElement('style');
+    style.id = 'ct-reply-ui-style';
+    style.textContent = `
+      #ct-reply-tab { position:relative; flex:1; display:flex; align-items:center; justify-content:center; gap:4px; min-height:48px; min-width:0; padding:8px 6px; border:0; background:transparent; color:var(--tl-app-text-muted,inherit); font:inherit; font-size:15px; font-weight:500; line-height:1.3; cursor:pointer; }
+      #ct-reply-tab[aria-pressed="true"] { color:var(--tl-app-text,inherit); font-weight:800; }
+      #ct-reply-tab[aria-pressed="true"]::after { content:""; position:absolute; bottom:0; height:4px; width:56px; max-width:70%; border-radius:999px; background:var(--ct-classic-blue,#0ea5e9); }
+      #ct-reply-tab > [data-ct-reply-unread] { color:var(--ct-classic-blue,#0ea5e9); font-size:12px; }
+      [data-ct-reply-tabs-active] > button:not(#ct-reply-tab) > span { color:var(--tl-app-text-muted,inherit)!important; font-weight:500!important; }
+      [data-ct-reply-tabs-active] > button:not(#ct-reply-tab) > span.absolute.bottom-0 { display:none!important; }
+      #ct-reply-panel { --ct-reply-border:var(--ct-classic-border,var(--tl-app-border,#8b98a544)); --ct-reply-muted:var(--tl-app-text-muted,#657786); --ct-reply-accent:var(--ct-classic-blue,#0ea5e9); }
+      #ct-reply-panel summary { display:flex; align-items:center; justify-content:space-between; min-height:48px; padding:12px 16px; border-bottom:1px solid var(--ct-reply-border); cursor:pointer; list-style:none; font-weight:800; }
+      #ct-reply-panel summary::-webkit-details-marker { display:none; }
+      #ct-reply-panel summary::after { content:"⌄"; font-size:18px; color:var(--ct-reply-muted); }
+      #ct-reply-panel details[open] > summary::after { transform:rotate(180deg); }
+      #ct-reply-panel .ct-reply-controls { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; padding:8px 16px; border-bottom:1px solid var(--ct-reply-border); }
+      #ct-reply-panel .ct-reply-status { flex:1 1 150px; font-size:12px; line-height:1.5; color:var(--ct-reply-muted); overflow-wrap:anywhere; margin:0; }
+      #ct-reply-panel .ct-reply-control { min-height:44px; padding:8px 10px; border:0; background:transparent; color:var(--ct-reply-accent); border-radius:4px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+      #ct-reply-panel .ct-reply-control:disabled { cursor:default; opacity:.5; }
+      #ct-reply-panel .ct-reply-help { margin:0; padding:0 16px 10px; font-size:12px; line-height:1.5; color:var(--ct-reply-muted); }
+      #ct-reply-panel .ct-reply-empty { margin:0; padding:40px 20px; color:var(--ct-reply-muted); font-size:15px; line-height:1.5; text-align:center; }
+      #ct-reply-panel .ct-local-reply-row { display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:1px solid var(--ct-reply-border); }
+      #ct-reply-panel .ct-local-reply-row[data-unread="true"] { background:color-mix(in srgb,var(--ct-reply-accent) 5%,transparent); }
+      #ct-reply-panel .ct-reply-avatar-link { display:flex; align-items:center; justify-content:center; flex:0 0 40px; width:40px; height:40px; border-radius:50%; overflow:hidden; color:var(--ct-reply-accent); background:var(--tl-app-bg,#f5f8fa); font-size:18px; font-weight:700; text-decoration:none; }
+      #ct-reply-panel .ct-reply-avatar-link img { width:40px; height:40px; object-fit:cover; }
+      .ct-classic-shell #ct-reply-panel .ct-reply-avatar-link { border-radius:4px; }
+      #ct-reply-panel .ct-reply-content { flex:1; min-width:0; overflow-wrap:anywhere; }
+      #ct-reply-panel .ct-reply-actor-line { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 5px; font-size:15px; line-height:1.4; }
+      #ct-reply-panel .ct-reply-author { display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:100%; color:inherit; font-weight:800; text-decoration:none; }
+      #ct-reply-panel .ct-reply-name { overflow-wrap:anywhere; }
+      #ct-reply-panel .ct-reply-handle,#ct-reply-panel time { color:var(--ct-reply-muted); font-size:13px; }
+      #ct-reply-panel .ct-reply-unread { color:var(--ct-reply-accent); font-size:11px; }
+      #ct-reply-panel .ct-reply-body { display:block; margin:4px 0; color:inherit; text-decoration:none; font-size:15px; line-height:1.5; white-space:pre-wrap; }
+      #ct-reply-panel .ct-reply-parent { display:inline-flex; align-items:center; min-height:44px; color:var(--ct-reply-muted); font-size:12px; text-decoration:none; }
+      #ct-reply-panel .ct-official-badges { display:inline-flex; align-items:center; gap:2px; }
+      #ct-reply-panel .ct-official-badges img { width:18px; height:18px; object-fit:contain; }
+      #ct-reply-panel a:focus-visible,#ct-reply-panel button:focus-visible,#ct-reply-panel summary:focus-visible,#ct-reply-tab:focus-visible { outline:2px solid var(--ct-classic-blue,#0ea5e9); outline-offset:-2px; }
+      @media(hover:hover) { #ct-reply-tab:hover,#ct-reply-panel .ct-reply-control:hover,#ct-reply-panel .ct-local-reply-row:hover { background:var(--ct-classic-hover,var(--tl-app-bg,#f5f8fa)); } #ct-reply-panel .ct-reply-author:hover,#ct-reply-panel .ct-reply-parent:hover { text-decoration:underline; } }
+    `;
+    (document.head || document.documentElement).append(style);
+  }
+  function ctReplyNativeTabbar(main) {
+    // Tweet's kie notification component owns this exact row. Do not treat
+    // arbitrary sticky navigation, profile tabs or a hidden shell as its inbox.
+    return [...main.querySelectorAll('div.sticky')].find(bar => {
+      if (bar.closest('[data-ct-local-ui],[hidden],[aria-hidden="true"]') ||
+          !['flex', 'items-stretch', 'top-app-header', 'border-b', 'border-tl-app-border'].every(name => bar.classList.contains(name))) return false;
+      const nativeButtons = [...bar.children].filter(child => child.matches('button[type="button"]') && child.id !== 'ct-reply-tab');
+      return nativeButtons.length >= 2 && nativeButtons.every(button => button.classList.contains('flex-1')) &&
+        nativeButtons.some(button => /^(All|すべて)$/.test(button.textContent.trim())) &&
+        nativeButtons.some(button => /^(Mentions|メンション|@ツイート)$/.test(button.textContent.trim()));
+    }) || null;
+  }
+  function ctReplyMountTab(bar, panel) {
+    let mount = ctReplyState.mount;
+    if (mount?.bar !== bar) {
+      ctReplyRestoreNative();
+      mount?.button.remove();
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.id = 'ct-reply-tab';
+      button.dataset.ctLocalUi = 'reply-tab';
+      button.setAttribute('aria-controls', 'ct-reply-panel');
+      button.title = ctReplyText('このブラウザのリプライ通知', 'Reply notifications saved in this browser');
+      button.addEventListener('click', () => {
+        ctReplyState.tabActive = true;
+        renderReplyPanel();
+      });
+      mount = { bar, button, hidden: new Map() };
+      ctReplyState.mount = mount;
+      bar.addEventListener('click', event => {
+        const button = event.target.closest?.('button');
+        if (ctReplyState.mount?.bar !== bar || !button || button.id === 'ct-reply-tab' || button.parentElement !== bar) return;
+        ctReplyState.tabActive = false;
+        ctReplyRestoreNative();
+        renderReplyPanel();
+      }, true);
+      ctReplyState.rendered = '';
+    }
+    if (mount.button.parentElement !== bar) bar.append(mount.button);
+    if (panel.previousElementSibling !== bar) bar.after(panel);
+    if (mount.button.getAttribute('aria-pressed') !== String(ctReplyState.tabActive)) mount.button.setAttribute('aria-pressed', String(ctReplyState.tabActive));
+    if (ctReplyState.tabActive) {
+      if (!bar.hasAttribute('data-ct-reply-tabs-active')) bar.dataset.ctReplyTabsActive = '1';
+      for (const element of [...bar.parentElement.children]) {
+        if (element === bar || element === panel || element.hasAttribute('data-ct-local-ui')) continue;
+        if (!mount.hidden.has(element)) mount.hidden.set(element, {
+          display: element.style.getPropertyValue('display'), priority: element.style.getPropertyPriority('display'),
+          aria: element.getAttribute('aria-hidden')
+        });
+        if (element.style.getPropertyValue('display') !== 'none' || element.style.getPropertyPriority('display') !== 'important') element.style.setProperty('display', 'none', 'important');
+        if (element.getAttribute('aria-hidden') !== 'true') element.setAttribute('aria-hidden', 'true');
+      }
+    } else ctReplyRestoreNative();
+    return mount.button;
+  }
+  function ctReplyAppendBadges(actor, item) {
+    if (typeof ctProfileBadgeKinds !== 'function' || typeof ctBadgeSource !== 'function') return;
+    const kinds = ctProfileBadgeKinds({ badges: item.authorBadges, foundingMemberNumber: item.authorFoundingMemberNumber });
+    if (!kinds.length) return;
+    const group = document.createElement('span');
+    group.className = 'ct-official-badges';
+    group.setAttribute('role', 'img');
+    group.setAttribute('aria-label', kinds.map(kind => ctOfficialBadgeKinds[kind]).join(' + '));
+    group.title = group.getAttribute('aria-label');
+    for (const kind of kinds) {
+      const image = document.createElement('img');
+      image.src = ctBadgeSource(kind);
+      image.alt = '';
+      image.width = 18;
+      image.height = 18;
+      image.loading = 'lazy';
+      image.addEventListener('error', () => { image.src = `https://app.tweet.app/assets/${kind}-badge-36.png`; }, { once: true });
+      group.append(image);
+    }
+    actor.append(group);
+  }
   function renderReplyPanel() {
     ctReplyCheckKnownIdentity();
     ctReplyBindStorage();
     if (!/^\/notifications\/?$/.test(location.pathname)) { closeReplyPanel(); return; }
     const main = document.querySelector('main');
-    if (!main) return;
+    if (!main) { closeReplyPanel(); return; }
+    ctReplyInstallStyle();
     let panel = document.getElementById('ct-reply-panel');
     if (!panel) {
       panel = document.createElement('section');
       panel.id = 'ct-reply-panel';
       panel.dataset.ctLocalUi = 'replies';
       panel.setAttribute('aria-label', ctReplyText('リプライ通知', 'Reply notifications'));
-      // Override legacy panel styling: stay in normal document flow at every screen width.
-      panel.style.cssText = 'position:relative!important;inset:auto!important;width:auto!important;max-width:100%!important;max-height:none!important;margin:12px!important;padding:0!important;z-index:auto!important;box-shadow:none!important;border:1px solid var(--color-tl-app-border,#8b98a544)!important;border-radius:12px!important;color:inherit!important;background:inherit!important;overflow:hidden!important';
+      // Retire legacy floating-card rules while keeping the native document flow.
+      panel.style.cssText = 'position:relative!important;inset:auto!important;width:100%!important;max-width:100%!important;max-height:none!important;margin:0!important;padding:0!important;z-index:auto!important;box-shadow:none!important;border:0!important;border-radius:0!important;color:inherit!important;background:var(--tl-app-card,inherit)!important;overflow:visible!important';
+      ctReplyState.rendered = '';
+    }
+    const bar = ctReplyNativeTabbar(main);
+    let tab = null;
+    if (bar) {
+      tab = ctReplyMountTab(bar, panel);
+      panel.dataset.ctReplyMode = 'tab';
+      panel.hidden = !ctReplyState.tabActive;
+      panel.style.setProperty('display', ctReplyState.tabActive ? 'block' : 'none', 'important');
+    } else {
+      ctReplyRestoreNative();
+      ctReplyState.mount?.button.remove();
+      ctReplyState.mount = null;
+      if (panel.dataset.ctReplyMode !== 'inline') ctReplyState.rendered = '';
+      panel.dataset.ctReplyMode = 'inline';
+      panel.hidden = false;
+      panel.style.setProperty('display', 'block', 'important');
       const heading = [...main.querySelectorAll('h1,h2')].find(el =>
         !el.closest('[data-ct-local-ui],[hidden],[aria-hidden="true"]') && /^(Notifications|通知)$/.test(el.textContent.trim()));
       const header = heading?.closest('.sticky') || heading?.parentElement;
-      if (header && header !== main) header.after(panel);
-      else main.prepend(panel);
-      ctReplyState.rendered = '';
+      if (header && header !== main) { if (panel.previousElementSibling !== header) header.after(panel); }
+      else if (panel.parentElement !== main) main.prepend(panel);
     }
     const notices = loadReplyNotices();
     const unread = notices.filter(item => !item.read).length;
-    const signature = JSON.stringify([ctReplyState.uid, notices, ctReplyState.busy, ctReplyState.error, ctReplyState.storageError, ctReplyState.data?.checkedAt]);
+    if (tab) {
+      const label = ctReplyText('リプライ', 'Replies');
+      const text = label + (unread ? ` ${unread}` : '');
+      if (tab.textContent !== text) {
+        tab.textContent = label;
+        if (unread) {
+          const count = document.createElement('span');
+          count.dataset.ctReplyUnread = '1';
+          count.textContent = ' ' + unread;
+          tab.append(count);
+        }
+      }
+    }
+    const signature = JSON.stringify([ctReplyState.uid, notices, ctReplyState.busy, ctReplyState.error, ctReplyState.storageError, ctReplyState.data?.checkedAt, panel.dataset.ctReplyMode, ctReplyState.tabActive]);
     if (signature === ctReplyState.rendered) return;
     ctReplyState.rendered = signature;
     const open = panel.querySelector('details')?.open ?? false;
     const focused = panel.contains(document.activeElement) ? document.activeElement?.dataset?.replyAction : null;
     panel.replaceChildren();
-    const details = document.createElement('details');
-    details.open = open;
-    const summary = document.createElement('summary');
-    summary.style.cssText = 'padding:12px 14px;cursor:pointer;font-weight:700;line-height:1.4';
-    summary.textContent = ctReplyText('↩ リプライ通知', '↩ Reply notifications') + (unread ? ` (${unread})` : '');
-    summary.dataset.replyAction = 'summary';
-    details.append(summary);
-    const body = document.createElement('div');
-    body.style.cssText = 'padding:0 14px 14px;overflow-wrap:anywhere';
-    const help = document.createElement('p');
-    help.style.cssText = 'font-size:12px;line-height:1.5;opacity:.75;margin:0 0 10px';
-    help.textContent = ctReplyText(
-      'このアカウントの最新24件の投稿・返信を、このタブを表示している間90秒ごとに順番に確認します。履歴と既読はこのブラウザ内のみ。過去の返信は既読で追加します。',
-      'Checks replies to your latest 24 posts and replies in batches every 90 seconds while this tab is visible. History and read status stay in this browser. Older replies are added as read.');
-    body.append(help);
+    let host = panel;
+    if (!tab) {
+      const details = document.createElement('details');
+      details.open = open;
+      const summary = document.createElement('summary');
+      summary.textContent = ctReplyText('リプライ通知', 'Reply notifications') + (unread ? ` (${unread})` : '');
+      summary.dataset.replyAction = 'summary';
+      details.append(summary);
+      panel.append(details);
+      host = details;
+    }
+    const controls = document.createElement('div');
+    controls.className = 'ct-reply-controls';
     const status = document.createElement('p');
+    status.className = 'ct-reply-status';
     status.setAttribute('role', 'status');
-    status.style.cssText = 'font-size:13px;line-height:1.5;margin:0 0 10px';
     status.textContent = ctReplyState.storageError
-      ? ctReplyText('保存できません。通知はこのページを閉じるまで表示します。', 'Storage is unavailable. Replies will remain only until this page closes.')
+      ? ctReplyText('保存できません。このページを閉じると通知履歴が消えます。', 'Storage is unavailable. History will disappear when this page closes.')
       : ctReplyState.busy ? ctReplyText('返信を確認中…', 'Checking replies…')
       : ctReplyState.error || (!ctReplyState.uid ? ctReplyText('ログイン後に返信を確認します。', 'Sign in to check replies.')
         : ctReplyState.data?.checkedAt ? ctReplyText('最終確認 ', 'Last checked ') + new Date(ctReplyState.data.checkedAt).toLocaleTimeString(CT_LOCALE, { hour: '2-digit', minute: '2-digit' })
           : ctReplyText('返信の確認を待っています。', 'Waiting to check replies.'));
-    body.append(status);
-    const controls = document.createElement('div');
-    controls.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px';
+    controls.append(status);
     function control(label, action, callback) {
       const button = document.createElement('button');
       button.type = 'button';
+      button.className = 'ct-reply-control';
       button.textContent = label;
       button.dataset.replyAction = action;
-      button.style.cssText = 'font:inherit;font-size:13px;color:inherit;border:1px solid var(--color-tl-app-border,#8b98a566);background:transparent;border-radius:999px;padding:7px 12px;min-height:36px;cursor:pointer';
       button.addEventListener('click', callback);
       controls.append(button);
       return button;
     }
     const refresh = control(ctReplyText('再確認', 'Check now'), 'refresh', () => replyWatchTick(true));
     refresh.disabled = ctReplyState.busy;
-    const read = control(ctReplyText('すべて既読にする', 'Mark all read'), 'read', () => markReplyRead());
+    const read = control(ctReplyText('すべて既読', 'Mark all read'), 'read', () => markReplyRead());
     read.disabled = !unread;
-    body.append(controls);
+    host.append(controls);
+    const help = document.createElement('p');
+    help.className = 'ct-reply-help';
+    help.textContent = ctReplyText('通知履歴・既読はこのブラウザに保存されます。', 'Notification history and read status are saved in this browser.');
+    host.append(help);
     if (!notices.length) {
       const empty = document.createElement('p');
-      empty.style.cssText = 'font-size:14px;margin:8px 0';
+      empty.className = 'ct-reply-empty';
       empty.textContent = ctReplyText('確認した返信はまだありません。', 'No replies have been found yet.');
-      body.append(empty);
+      host.append(empty);
     }
     const list = document.createElement('div');
-    list.style.cssText = 'max-height:420px;overflow:auto;overscroll-behavior:contain';
+    list.dataset.ctReplyList = '1';
     for (const item of notices) {
       const row = document.createElement('article');
+      row.className = 'ct-local-reply-row';
       row.dataset.ctReplyId = item.id;
-      row.style.cssText = 'padding:12px 0;border-top:1px solid var(--color-tl-app-border,#8b98a544)';
-      const actor = document.createElement('a');
-      actor.href = '/user/' + encodeURIComponent(item.authorUsername);
-      actor.textContent = `${item.authorName || item.authorUsername} @${item.authorUsername}`;
-      actor.style.cssText = 'display:inline-flex;align-items:center;gap:8px;max-width:100%;font-size:14px;font-weight:700;color:inherit;text-decoration:none';
+      row.dataset.unread = String(!item.read);
+      const avatarLink = document.createElement('a');
+      avatarLink.className = 'ct-reply-avatar-link';
+      avatarLink.href = '/user/' + encodeURIComponent(item.authorUsername);
+      avatarLink.setAttribute('aria-label', ctReplyText(`${item.authorName || item.authorUsername}のプロフィール`, `${item.authorName || item.authorUsername}'s profile`));
+      avatarLink.dataset.replyAction = 'avatar:' + item.id;
+      avatarLink.textContent = Array.from(item.authorName || item.authorUsername)[0] || '';
       const avatarURL = ctReplyAvatar(item.authorAvatar);
       if (avatarURL) {
         const avatar = document.createElement('img');
         avatar.src = avatarURL;
         avatar.alt = '';
-        avatar.width = 28;
-        avatar.height = 28;
+        avatar.width = 40;
+        avatar.height = 40;
         avatar.loading = 'lazy';
         avatar.referrerPolicy = 'no-referrer';
-        avatar.style.cssText = 'width:28px;height:28px;object-fit:cover;border-radius:50%;flex-shrink:0';
-        avatar.addEventListener('error', () => avatar.remove(), { once: true });
-        // The avatar and author name share one verified profile destination.
-        actor.prepend(avatar);
+        avatar.addEventListener('error', () => { avatarLink.textContent = Array.from(item.authorName || item.authorUsername)[0] || ''; }, { once: true });
+        avatarLink.replaceChildren(avatar);
       }
-      row.append(actor);
-      if (!item.read) {
-        const marker = document.createElement('span');
-        marker.style.cssText = 'font-size:11px;margin-left:8px;color:#1d9bf0';
-        marker.textContent = ctReplyText('未読', 'Unread');
-        row.append(marker);
-      }
-      const link = document.createElement('a');
-      link.href = '/post/' + encodeURIComponent(item.id);
-      link.style.cssText = 'display:block;color:inherit;text-decoration:none;font-size:14px;white-space:pre-wrap;line-height:1.5;margin:5px 0';
-      link.textContent = item.text || ctReplyText('返信を開く', 'Open reply');
-      link.addEventListener('click', () => markReplyRead(item.id, true));
-      row.append(link);
+      row.append(avatarLink);
+      const content = document.createElement('div');
+      content.className = 'ct-reply-content';
+      const actorLine = document.createElement('div');
+      actorLine.className = 'ct-reply-actor-line';
+      const actor = document.createElement('a');
+      actor.className = 'ct-reply-author';
+      actor.href = avatarLink.href;
+      actor.dataset.replyAction = 'profile:' + item.id;
+      const name = document.createElement('span');
+      name.className = 'ct-reply-name';
+      name.textContent = item.authorName || item.authorUsername;
+      actor.append(name);
+      ctReplyAppendBadges(actor, item);
+      actorLine.append(actor);
+      const handle = document.createElement('span');
+      handle.className = 'ct-reply-handle';
+      handle.textContent = '@' + item.authorUsername;
+      actorLine.append(handle);
       const date = new Date(item.createdAt);
       if (Number.isFinite(date.getTime())) {
         const time = document.createElement('time');
         time.dateTime = date.toISOString();
-        time.textContent = date.toLocaleString(CT_LOCALE);
-        time.style.cssText = 'font-size:12px;opacity:.7';
-        row.append(time);
+        time.title = date.toLocaleString(CT_LOCALE);
+        time.textContent = '· ' + date.toLocaleString(CT_LOCALE, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        actorLine.append(time);
       }
+      if (!item.read) {
+        const marker = document.createElement('span');
+        marker.className = 'ct-reply-unread';
+        marker.textContent = ctReplyText('未読', 'Unread');
+        actorLine.append(marker);
+      }
+      content.append(actorLine);
+      const link = document.createElement('a');
+      link.className = 'ct-reply-body';
+      link.href = '/post/' + encodeURIComponent(item.id);
+      link.dataset.replyAction = 'open:' + item.id;
+      link.textContent = item.text || ctReplyText('返信を開く', 'Open reply');
+      link.addEventListener('click', () => markReplyRead(item.id, true));
+      content.append(link);
+      if (ctReplyId(item.parentId)) {
+        const parent = document.createElement('a');
+        parent.className = 'ct-reply-parent';
+        parent.href = '/post/' + encodeURIComponent(item.parentId);
+        parent.dataset.replyAction = 'parent:' + item.id;
+        parent.textContent = ctReplyText('返信先のツイートを見る', 'View the original tweet');
+        content.append(parent);
+      }
+      row.append(content);
       list.append(row);
     }
-    body.append(list);
-    details.append(body);
-    panel.append(details);
-    if (focused) panel.querySelector(`[data-reply-action="${focused}"]`)?.focus();
+    host.append(list);
+    if (focused) {
+      const previous = [...panel.querySelectorAll('[data-reply-action]')].find(element => element.dataset.replyAction === focused);
+      const target = previous && !previous.disabled ? previous : controls.querySelector('[data-reply-action="refresh"]') || tab;
+      target?.focus({ preventScroll: true });
+    }
   }
   function patchReplyBadge() {
     document.getElementById('ct-reply-badge')?.remove(); // Retire the old detached overlay badge.
@@ -2481,7 +3510,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         badge = document.createElement('span');
         badge.dataset.ctReplyCount = '1';
         badge.dataset.ctLocalUi = 'reply-count';
-        badge.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-inline-start:4px;padding:0 4px;border-radius:999px;background:#1d9bf0;color:white;font-size:11px;font-weight:700;vertical-align:middle;pointer-events:none';
+        badge.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-inline-start:4px;padding:0 4px;border-radius:999px;background:var(--ct-classic-blue,#0ea5e9);color:white;font-size:11px;font-weight:700;vertical-align:middle;pointer-events:none';
         control.append(badge);
       }
       const display = `↩${count}`;
@@ -2982,7 +4011,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         ![...toolbar.children].some(el => el.matches('input[type="file"][accept="video/mp4,video/quicktime"]'))) return null;
     const actions = [...toolbar.children].find(el => el.matches('div.flex.items-center'));
     const buttons = actions ? [...actions.children].filter(el => el.tagName === 'BUTTON') : [];
-    return buttons.length === 2 ? { root, toolbar, photoButton: buttons[0] } : null;
+    return buttons.length === 2 ? { root, toolbar, photoButton: buttons[0], videoButton: buttons[1] } : null;
   }
   function ctMediaPreviews(root) { return [...root.querySelectorAll('img[alt="Upload preview"]')]; }
   function ctMediaPreviewReady(image) {
@@ -3371,7 +4400,24 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     const inputs = [...root.querySelectorAll?.(`input[type="file"][accept="${ctMediaPhotoAccept}"]`) || []];
     if (root.matches?.(`input[type="file"][accept="${ctMediaPhotoAccept}"]`)) inputs.push(root);
-    inputs.forEach(ctMediaEnhanceInput);
+    for (const input of inputs) {
+      const media = ctMediaUploadRoot(input);
+      if (media) {
+        for (const [button, label] of [[media.photoButton, ctMediaJapanese() ? '写真を追加' : 'Add photos'],
+            [media.videoButton, ctMediaJapanese() ? '動画を追加' : 'Add video']]) {
+          // Current native toolbar icons have no accessible name. Preserve a
+          // future native label, but keep our own label through React updates.
+          const current = button.getAttribute('aria-label');
+          if (!current || /^(?:写真を追加|動画を追加|Add photos|Add video)$/.test(current)) {
+            if (current !== label) button.setAttribute('aria-label', label);
+            if (!button.title || /^(?:写真を追加|動画を追加|Add photos|Add video)$/.test(button.title)) {
+              if (button.title !== label) button.title = label;
+            }
+          }
+        }
+      }
+      ctMediaEnhanceInput(input);
+    }
     const grids = [...root.querySelectorAll?.('div.grid.rounded-2xl.overflow-hidden.border') || []];
     if (root.matches?.('div.grid.rounded-2xl.overflow-hidden.border')) grids.push(root);
     grids.forEach(ctMediaEnhanceCarousel);
@@ -4006,6 +5052,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ['interacted with you', 'あなたに反応しました'],
     ['Post options', 'ツイートのメニュー'],
     ['Open profile menu', 'プロフィールメニューを開く'],
+    ['Compose tweet', 'ツイートを作成'],
 
     ['For you', 'おすすめ'],
     ['Following', 'フォロー中'],
@@ -4150,6 +5197,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ['Edit post', 'ツイートを編集'],
     ['Edit your post...', 'ツイートを編集...'],
     ['Edited', '編集済み'],
+    ['Edit', '編集'],
+    ['Compose New', 'ツイートを作成'],
+    ['Compose New Tweet', 'ツイートを作成'],
+    ['Processing...', '処理中…'],
+    ['Discard changes?', '変更を破棄しますか？'],
+    ['Your edits will be lost.', '編集した内容は保存されません。'],
+    ['Discard', '破棄する'],
     ['Post updated.', 'ツイートを更新しました'],
     ['The edit window for this post has closed.', 'このツイートの編集可能時間は終了しました'],
     ['This edit could not be saved. Your post is unchanged.', '編集を保存できませんでした。ツイートは変更されていません'],
@@ -4359,7 +5413,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
     style.textContent = `
       [data-testid="tweet-like-action"].ct-favorite-button > svg { display:none!important; }
-      [data-testid="tweet-like-action"].ct-favorite-button::before { content:none!important; }
       [data-testid="tweet-like-action"] > .ct-star {
         display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
         transform-origin:center; pointer-events:none;
@@ -4398,25 +5451,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         height:28px!important;
         object-fit:contain!important;
         display:block!important;
-      }
-
-      .ct-notification-fav-icon {
-        position:relative!important;
-      }
-
-      .ct-notification-fav-icon > svg {
-        visibility:hidden!important;
-      }
-
-      .ct-notification-fav-icon::after {
-        content:"★";
-        position:absolute!important;
-        left:50%!important;
-        top:50%!important;
-        transform:translate(-50%,-50%)!important;
-        color:#ffac33!important;
-        font:700 27px/1 Arial,sans-serif!important;
-        pointer-events:none!important;
       }
 
       #ct-favorites-tab {
@@ -4873,6 +5907,36 @@ if (/^just\s+now$/i.test(t)) {
       Number.isFinite(Date.parse(title));
   }
 
+  function isNativeEditedIndicator(el) {
+    if (!el?.matches('span.text-tl-app-text-muted[title]') ||
+        !el.closest('article') || el.closest('button,a,[role="button"]') ||
+        !/^(?:edited|編集済み)$/i.test(clean(el.textContent))) return false;
+    const title = el.getAttribute('title');
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(title) ||
+        !Number.isFinite(Date.parse(title))) return false;
+    // Both native tweet and inline-reply headers place the indicator directly
+    // after a separator, alongside their author button and creation timestamp.
+    const header = el.parentElement;
+    return !!header?.matches('div.flex.items-center') &&
+      clean(el.previousElementSibling?.textContent) === '·' &&
+      !!header.querySelector('button.font-bold.truncate') &&
+      [...header.children].some(sibling => sibling !== el &&
+        sibling.matches('span.text-tl-app-text-muted') &&
+        (isNativeLocalizationTimestamp(sibling) || sibling.classList.contains('shrink-0')));
+  }
+
+  function isNativeTweetCount(el) {
+    if (!el?.matches('span.text-tl-app-text-muted') || el.closest('article,[data-user-content]')) return false;
+    const parent = el.parentElement;
+    const strong = el.firstElementChild;
+    if (/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname) &&
+        strong?.matches('strong.font-extrabold.text-tl-app-text') && /^[\d,]+$/.test(clean(strong.textContent)) &&
+        parent?.querySelector(':scope > button')) return true;
+    return !!el.closest('aside') && el.classList.contains('mt-0.5') && parent?.matches('button.group') &&
+      parent.children.length === 2 && parent.lastElementChild === el &&
+      parent.firstElementChild.matches('span.truncate[title^="#"]') && /^#[^\s]+$/.test(clean(parent.firstElementChild.textContent));
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
@@ -4883,7 +5947,7 @@ if (/^just\s+now$/i.test(t)) {
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
     // protection for profile names and account values everywhere else.
-    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications' }[location.pathname.replace(/\/$/, '')];
+    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')];
     const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
       el === [...document.querySelectorAll('main h2')].find(heading => {
         for (let parent = heading; parent; parent = parent.parentElement) {
@@ -4922,6 +5986,7 @@ if (/^just\s+now$/i.test(t)) {
     if (localizationNotificationAction(node) || isNativeNotificationTimestamp(el)) return true;
     if (localizationNotificationRow(el)) return false;
     if (isNativeSettingsValue(el) || isNativeLocalizationHelp(el)) return true;
+    if (isNativeTweetCount(el)) return true;
     const text = clean(node.nodeValue);
     const link = el.closest('a[href]');
     if (link) {
@@ -4940,10 +6005,10 @@ if (/^just\s+now$/i.test(t)) {
       // buttons are data, not labels. Real notification actions are handled above.
       const paragraph = el.closest('p');
       if ((paragraph && control.contains(paragraph)) || control.querySelector('p')) return false;
-      if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
+      if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
       return true;
     }
-    if (isNativeLocalizationTimestamp(el)) return true;
+    if (isNativeLocalizationTimestamp(el) || isNativeEditedIndicator(el)) return true;
     if (el.closest('[role="status"],[role="alert"]')) return true;
     if (el.closest('article')) return false;
     if (el.closest('label,legend')) return true;
@@ -4953,7 +6018,12 @@ if (/^just\s+now$/i.test(t)) {
     if (heading) {
       // Profile headings contain display names; all other static headings are
       // still restricted to exact dictionary entries by translateTextNode.
-      if (/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname) && heading.tagName !== 'H1') return false;
+      if (/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname) && heading.tagName !== 'H1' &&
+          !(location.pathname.replace(/\/$/, '') === '/profile' && heading.matches('h2.truncate') &&
+            heading.closest('.sticky') && /^(?:Feed|プロフィール)$/.test(text)) &&
+          !(heading.matches('h3.text-xs.font-bold.uppercase.tracking-wider') &&
+            /^(?:Compose New(?: Tweet)?|Edit post)$/.test(text) &&
+            heading.closest('div.bg-tl-app-card.border.rounded-3xl.max-w-lg')?.querySelector('textarea#public-modal-tweet-input'))) return false;
       return !heading.querySelector('img');
     }
     // Settings descriptions are static text, but account values in dd/input and
@@ -4998,9 +6068,21 @@ if (/^just\s+now$/i.test(t)) {
       if (isOwnedLocalizationElement(el) ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
           el.closest('.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
+      if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
+          el.querySelector(':scope > svg.lucide-x') &&
+          el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
+          el.parentElement.querySelector('textarea#public-modal-tweet-input')) el.setAttribute('aria-label', '閉じる');
       for (const attr of ['aria-label', 'title']) {
         const value = el.getAttribute(attr);
-        const out = JP.get(value);
+        const action = el.matches('[data-testid="tweet-open-comment-action"],[data-testid="tweet-comment-action"]') &&
+          value?.match(/^Comment, (\d+) comments?$/);
+        const repost = el.matches('[data-testid="tweet-repost-action"]') &&
+          value?.match(/^Retweet, (\d+) retweets?$/);
+        const likers = el.matches('[data-testid="tweet-like-action-count"]') &&
+          value?.match(/^View (\d+) likes?$/);
+        const out = action ? `返信、${action[1]}件の返信` :
+          repost ? `リツイート、${repost[1]}件のリツイート` :
+          likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value);
         if (out && value !== out) el.setAttribute(attr, out);
       }
     }
@@ -5017,7 +6099,12 @@ if (/^just\s+now$/i.test(t)) {
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const units = { s: '秒前', m: '分前', h: '時間前', d: '日前' };
     let out = relative ? relative[1] + units[relative[2]] :
-      remaining ? `${remaining[1]}個のコードが残っています` : JP.get(text);
+      remaining ? `${remaining[1]}個のコードが残っています` :
+      isNativeEditedIndicator(el) ? '編集済み' :
+      isNativeTweetCount(el) && /^([\d,]+) tweets?$/i.test(text) ? `${text.match(/^([\d,]+)/)[1]}件のツイート` :
+      isNativeTweetCount(el) && /^Tweets?$/i.test(text) ? 'ツイート' :
+      /^\/profile\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
+        el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text);
     // The native help list splits this sentence around a React-owned counter.
     // Keep its text nodes and the counter so later updates still work.
     if (isNativeLocalizationHelp(el) && el.matches('li')) {
@@ -5423,323 +6510,25 @@ if (/^just\s+now$/i.test(t)) {
   }
 
 
-  function loadFavorites() {
-    const items =
-      loadJSON(
-        KEY.favorites,
-        []
-      );
+  function loadFavorites() { return ctProfileLoadFavorites(); }
 
-    return Array.isArray(
-      items
-    )
-      ? items
-      : [];
-  }
+  function saveFavorite(item, uid) { return ctProfileSaveFavorite(item, uid); }
 
-  function saveFavorite(
-    item
-  ) {
-    if (
-      !item?.id
-    ) {
-      return;
-    }
+  function removeFavorite(id, uid) { return ctProfileRemoveFavorite(id, uid); }
 
-    saveJSON(
-      KEY.favorites,
-      [
-        item,
-        ...loadFavorites()
-          .filter(
-            x =>
-              x.id !==
-              item.id
-          )
-      ]
-        .slice(
-          0,
-          500
-        )
-    );
-  }
-
-  function removeFavorite(
-    id
-  ) {
-    saveJSON(
-      KEY.favorites,
-      loadFavorites()
-        .filter(
-          x =>
-            x.id !== id
-        )
-    );
-  }
-
-  document.addEventListener(
-    'click',
-    event => {
-      const button =
-        event.target
-          .closest?.(
-            '[data-testid="tweet-like-action"]'
-          );
-
-      if (!button) {
-        return;
-      }
-
-      const article =
-        button.closest(
-          'article'
-        );
-
-      if (!article) {
-        return;
-      }
-
-      const snapshot =
-        snapshotFavorite(
-          article
-        );
-
-      const wasLiked =
-        ctIsLiked(button);
-
-      setTimeout(
-        () => {
-          const nowLiked =
-            ctIsLiked(button);
-
-          if (
-            !wasLiked &&
-            nowLiked
-          ) {
-            saveFavorite(
-              snapshot
-            );
-          }
-
-          else if (
-            wasLiked &&
-            !nowLiked
-          ) {
-            removeFavorite(
-              snapshot?.id
-            );
-          }
-
-          if (
-            favoritesActive
-          ) {
-            renderFavoritesPanel();
-          }
-        },
-        450
-      );
-    },
-    true
-  );
+  document.addEventListener('click', ctCaptureFavoriteClick, true);
 
 
   let favoritesActive =
     false;
 
-  function findRepostTab() {
-    if (
-      location.pathname !==
-      '/profile'
-    ) {
-      return null;
-    }
 
-    return (
-      [
-        ...document.querySelectorAll(
-          'main a,main button,main [role="tab"]'
-        )
-      ]
-        .find(
-          el =>
-            /^(Reposts|Retweets|リツイート)$/i
-              .test(
-                clean(
-                  el.textContent
-                )
-              )
-        )
-      ||
-      null
-    );
-  }
 
-  function patchFavoriteProfileTab() {
-    let tab =
-      document.getElementById(
-        'ct-favorites-tab'
-      );
 
-    if (
-      location.pathname !==
-      '/profile'
-    ) {
-      tab?.remove();
 
-      favoritesActive =
-        false;
 
-      closeFavoritesPanel();
 
-      return;
-    }
 
-    const ref =
-      findRepostTab();
-
-    if (!ref) {
-      tab?.remove();
-      return;
-    }
-
-    if (!tab) {
-      tab =
-        document.createElement(
-          'button'
-        );
-
-      tab.id =
-        'ct-favorites-tab';
-
-      tab.type =
-        'button';
-
-      tab.textContent =
-        'お気に入り';
-
-      const parent =
-        ref.parentElement;
-
-      if (!parent) {
-        return;
-      }
-
-      parent.appendChild(
-        tab
-      );
-
-      tab.onclick =
-        event => {
-          event.preventDefault();
-          event.stopPropagation();
-
-          favoritesActive =
-            !favoritesActive;
-
-          tab.dataset.active =
-            favoritesActive
-              ? '1'
-              : '0';
-
-          renderFavoritesPanel();
-        };
-    }
-
-    tab.dataset.active =
-      favoritesActive
-        ? '1'
-        : '0';
-  }
-
-  function centerRect() {
-    const main =
-      document.querySelector(
-        'main'
-      );
-
-    if (!main) {
-      return null;
-    }
-
-    const r =
-      main.getBoundingClientRect();
-
-    return r.width > 280
-      ? r
-      : null;
-  }
-
-  function panelHead(
-    title,
-    note,
-    onClose
-  ) {
-    const head =
-      document.createElement(
-        'div'
-      );
-
-    head.className =
-      'ct-local-head';
-
-    const left =
-      document.createElement(
-        'div'
-      );
-
-    const titleEl =
-      document.createElement(
-        'div'
-      );
-
-    titleEl.className =
-      'ct-local-title';
-
-    titleEl.textContent =
-      title;
-
-    left.appendChild(
-      titleEl
-    );
-
-    if (note) {
-      const noteEl =
-        document.createElement(
-          'div'
-        );
-
-      noteEl.className =
-        'ct-local-note';
-
-      noteEl.textContent =
-        note;
-
-      left.appendChild(
-        noteEl
-      );
-    }
-
-    const close =
-      document.createElement(
-        'button'
-      );
-
-    close.className =
-      'ct-local-close';
-
-    close.textContent =
-      '×';
-
-    close.onclick =
-      onClose;
-
-    head.append(
-      left,
-      close
-    );
-
-    return head;
-  }
 
   function localCard(
     item,
@@ -5881,148 +6670,9 @@ if (/^just\s+now$/i.test(t)) {
     return row;
   }
 
-  function closeFavoritesPanel() {
-    document.getElementById(
-      'ct-favorites-panel'
-    )
-      ?.remove();
-  }
 
-  function renderFavoritesPanel() {
-    if (
-      !favoritesActive ||
-      location.pathname !==
-        '/profile'
-    ) {
-      closeFavoritesPanel();
-      return;
-    }
 
-    const r =
-      centerRect();
 
-    if (!r) {
-      return;
-    }
-
-    let panel =
-      document.getElementById(
-        'ct-favorites-panel'
-      );
-
-    if (!panel) {
-      panel =
-        document.createElement(
-          'section'
-        );
-
-      panel.id =
-        'ct-favorites-panel';
-
-      document.body.appendChild(
-        panel
-      );
-    }
-
-    panel.style.left =
-      `${Math.round(
-        r.left
-      )}px`;
-
-    panel.style.top =
-      `${
-        Math.max(
-          100,
-          Math.round(
-            r.top + 88
-          )
-        )
-      }px`;
-
-    panel.style.width =
-      `${Math.round(
-        r.width
-      )}px`;
-
-    panel.style.maxHeight =
-      `calc(100vh - ${
-        Math.max(
-          110,
-          Math.round(
-            r.top + 100
-          )
-        )
-      }px)`;
-
-    panel.innerHTML =
-      '';
-
-    panel.appendChild(
-      panelHead(
-        '★ お気に入り',
-        'このブラウザだけに保存されます',
-
-        () => {
-          favoritesActive =
-            false;
-
-          const tab =
-            document.getElementById(
-              'ct-favorites-tab'
-            );
-
-          if (tab) {
-            tab.dataset.active =
-              '0';
-          }
-
-          closeFavoritesPanel();
-        }
-      )
-    );
-
-    const data =
-      loadFavorites();
-
-    if (!data.length) {
-      const empty =
-        document.createElement(
-          'div'
-        );
-
-      empty.className =
-        'ct-local-empty';
-
-      empty.textContent =
-        'お気に入りはまだありません。';
-
-      panel.appendChild(
-        empty
-      );
-
-      return;
-    }
-
-    for (const item of data) {
-      const row =
-        localCard(
-          item,
-          false
-        );
-
-      row.onclick =
-        () => {
-          if (item.href) {
-            location.href =
-              item.href;
-          }
-        };
-
-      panel.appendChild(
-        row
-      );
-    }
-  }
 
   function notificationLeaves(root = document) {
     return [...new Set(notificationTextNodes(root).map(node => node.parentElement))];
@@ -6283,6 +6933,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.9.0 loaded'
+    '🐦 Classic Twitter JP v6.10.0 loaded'
   );
 })();

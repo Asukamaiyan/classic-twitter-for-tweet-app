@@ -31,7 +31,7 @@
         ![...toolbar.children].some(el => el.matches('input[type="file"][accept="video/mp4,video/quicktime"]'))) return null;
     const actions = [...toolbar.children].find(el => el.matches('div.flex.items-center'));
     const buttons = actions ? [...actions.children].filter(el => el.tagName === 'BUTTON') : [];
-    return buttons.length === 2 ? { root, toolbar, photoButton: buttons[0] } : null;
+    return buttons.length === 2 ? { root, toolbar, photoButton: buttons[0], videoButton: buttons[1] } : null;
   }
   function ctMediaPreviews(root) { return [...root.querySelectorAll('img[alt="Upload preview"]')]; }
   function ctMediaPreviewReady(image) {
@@ -420,7 +420,24 @@
     }
     const inputs = [...root.querySelectorAll?.(`input[type="file"][accept="${ctMediaPhotoAccept}"]`) || []];
     if (root.matches?.(`input[type="file"][accept="${ctMediaPhotoAccept}"]`)) inputs.push(root);
-    inputs.forEach(ctMediaEnhanceInput);
+    for (const input of inputs) {
+      const media = ctMediaUploadRoot(input);
+      if (media) {
+        for (const [button, label] of [[media.photoButton, ctMediaJapanese() ? '写真を追加' : 'Add photos'],
+            [media.videoButton, ctMediaJapanese() ? '動画を追加' : 'Add video']]) {
+          // Current native toolbar icons have no accessible name. Preserve a
+          // future native label, but keep our own label through React updates.
+          const current = button.getAttribute('aria-label');
+          if (!current || /^(?:写真を追加|動画を追加|Add photos|Add video)$/.test(current)) {
+            if (current !== label) button.setAttribute('aria-label', label);
+            if (!button.title || /^(?:写真を追加|動画を追加|Add photos|Add video)$/.test(button.title)) {
+              if (button.title !== label) button.title = label;
+            }
+          }
+        }
+      }
+      ctMediaEnhanceInput(input);
+    }
     const grids = [...root.querySelectorAll?.('div.grid.rounded-2xl.overflow-hidden.border') || []];
     if (root.matches?.('div.grid.rounded-2xl.overflow-hidden.border')) grids.push(root);
     grids.forEach(ctMediaEnhanceCarousel);

@@ -32,6 +32,8 @@ function fixture(language, html, route = '/feed') {
   ];
   const japanese = [
     'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
+    'isNativeEditedIndicator',
+    'isNativeTweetCount',
     'notificationTextNodes', 'patchNotificationGrammar', 'patchNotificationConnectors',
     'patchNotificationParticles', 'patchNotificationFollowGrammar', 'patchReplyingTo',
     'patchComposeJapanese', 'patchProfileJoinedDate', 'patchInviteJoinedLabels'
@@ -59,6 +61,50 @@ function fixture(language, html, route = '/feed') {
   }
   return { dom, document, qa, run, text: id => document.getElementById(id).textContent };
 }
+
+test('ja: native edited tweet/reply metadata translates without touching content or names', () => {
+  const f = fixture('ja', `<article>
+    <div class="flex items-center"><span><button class="font-bold truncate" id="author">Edited</button></span>
+    <span class="text-tl-app-text-muted hover:underline" title="2026-09-30T07:00:00.000Z">1m</span>
+    <span>·</span><span class="text-tl-app-text-muted" title="2026-09-30T07:01:00.000Z" id="edited">Edited</span></div>
+    <div class="flex items-center"><button class="font-bold truncate">Other</button>
+    <span class="text-tl-app-text-muted shrink-0">2m</span><span>·</span>
+    <span class="text-tl-app-text-muted shrink-0" title="2026-09-30T07:01:00.000Z" id="reply-edited">edited</span></div>
+    <p class="whitespace-pre-wrap break-words" id="post">Edited</p>
+    <span class="text-tl-app-text-muted" title="2026-09-30T07:01:00.000Z" id="unscoped">Edited</span>
+    <button data-testid="tweet-open-comment-action" aria-label="Comment, 3 comments" id="reply"></button>
+    <button data-testid="tweet-repost-action" aria-label="Retweet, 2 retweets" id="repost"></button>
+  </article>`);
+  f.run();
+  assert.equal(f.text('edited'), '編集済み');
+  assert.equal(f.text('reply-edited'), '編集済み');
+  for (const id of ['author', 'post', 'unscoped']) assert.equal(f.text(id), 'Edited');
+  assert.equal(f.document.getElementById('reply').getAttribute('aria-label'), '返信、3件の返信');
+  assert.equal(f.document.getElementById('repost').getAttribute('aria-label'), 'リツイート、2件のリツイート');
+  f.document.getElementById('edited').firstChild.nodeValue = 'Edited';
+  f.run(f.document.getElementById('edited'));
+  assert.equal(f.text('edited'), '編集済み');
+  f.dom.window.close();
+});
+
+for (const route of ['/profile', '/user/alice']) test(`ja: verified composer heading on ${route} translates while profile name stays unchanged`, () => {
+  const f = fixture('ja', `<main><div class="sticky"><h2 class="truncate" id="title">Feed</h2></div>
+    <h2 id="name">Compose New</h2></main>
+    <div class="bg-tl-app-card border rounded-3xl max-w-lg"><h3 class="text-xs font-bold uppercase tracking-wider" id="compose">Compose New Tweet</h3>
+    <textarea id="public-modal-tweet-input">Compose New</textarea></div>`, route);
+  f.run(); assert.equal(f.text('compose'), 'ツイートを作成'); assert.equal(f.text('name'), 'Compose New');
+  assert.equal(f.document.querySelector('textarea').value, 'Compose New');
+  if (route === '/profile') assert.equal(f.text('title'), 'プロフィール');
+  f.dom.window.close();
+});
+
+test('ja: native profile/trend tweet counts translate without changing hashtags or numbers', () => {
+  const f = fixture('ja', `<main><div><button>Followers</button><span class="text-tl-app-text-muted" id="count"><strong class="text-tl-app-text font-extrabold">191</strong> Tweets</span></div>
+    <article><span class="text-tl-app-text-muted" id="body">191 Tweets</span></article></main>
+    <aside><button class="group"><span class="truncate" title="#Tweets" id="tag">#Tweets</span><span class="text-tl-app-text-muted mt-0.5" id="trend">971 tweets</span></button></aside>`, '/profile');
+  f.run(); assert.equal(f.text('count'),'191 ツイート'); assert.equal(f.text('trend'),'971件のツイート');
+  assert.equal(f.text('tag'),'#Tweets');assert.equal(f.text('body'),'191 Tweets');f.dom.window.close();
+});
 
 for (const language of ['ja', 'en']) {
   test(`${language}: UI labels translate while post, quote, names and translations remain intact`, () => {

@@ -100,7 +100,8 @@ for (const file of ['classic-twitter-ja.user.js', 'classic-twitter-ja-safari.use
     assert.equal(document.querySelector('nav button').getAttribute('aria-label'), english ? 'Notifications' : '通知');
     assert.equal(document.querySelector('[data-native-count]').textContent, '3', 'the existing native counter must remain separate');
     const notice = document.querySelector('[data-ct-reply-id="new-reply"]');
-    assert.equal(notice.querySelector('a').textContent, 'Settings @bob');
+    assert.equal(notice.querySelector('.ct-reply-author').textContent, 'Settings');
+    assert.match(notice.textContent, /@bob/);
     assert.equal(notice.querySelector('a[href="/post/new-reply"]').textContent, 'Home Following reply');
     assert.ok(requests.every(request => request.method === 'GET'));
     assert.equal(requests.filter(request => request.path === '/api/users/by-username/alice').length, 1, 'the display name and badge lookup share one profile request');

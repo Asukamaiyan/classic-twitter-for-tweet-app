@@ -118,3 +118,17 @@ Two local lifecycle bugs were reproduced independently of a client deployment: a
 Re-fetched the current HTML, `index-DCFw2ga2.js` and public media configuration. The bundle remains 1,656,389 bytes with SHA-256 `8ec6038a2a88b5255e1bb8ad8df425c38cad8063bffe8aa7cc7f80bbdfdc500f`, and the advertised image/video settings remain unchanged. Live Chrome structure confirms the theme-bearing root, native 12-column grid, feed tabs, public composer, direct native avatar profile buttons, action bars and mobile navigation used for the scoped appearance markers. No new API is needed for this visual update.
 
 Favorite motion follows the client’s visible `hasLiked`/ARIA state. The official client updates that state optimistically before its request finishes; a later server failure can roll it back. The userscript does not intercept that request, send additional favorite calls or claim server-confirmed success. “A state change animates” describes the actual boundary.
+
+## 6.10.0 profile and native notification review (2026-09-30)
+
+Fresh first-party HTML, bundle and CSS still reference `index-DCFw2ga2.js` and `index-eD6wHGfB.css`. The JavaScript hash is unchanged. CSS is 130,331 bytes, SHA-256 `a4b28ca73444b28b2f5c468950d941438478ceb9918fb63b82fd6b5fe22c3928`. Public media configuration retains the bounds above.
+
+Current profile tabs are icon-only `button[role=tab]` controls labelled Tweets/Replies/Reposts. The former text-based Favorites insertion could not find this structure. Native feed cards also lack a DOM permalink, which prevented local Favorites capture. The new panel identifies a visible profile from its author header and verified current-account identity, retaining native controls and event handlers.
+
+Media reads verified `GET /api/users/{username}/posts?limit=24&cursor=…` and `GET /api/users/{username}/replies` (`post` wrappers; the latest 100 own replies). It accepts validated `media_assets.public_url` and `thumbnail_url` plus the established legacy image field. It does not invent a media-only, Favorites-history, reply cursor, original-file or HDR API. Photo URLs may be server-processed assets; gallery expansion does not imply original resolution.
+
+For local Favorites capture, the read-only posts route verifies exact author, ISO timestamp and original body, bounded to three pages of 50 posts with a short shared cache. Ambiguous matches are rejected. Account/route generations and native button state are rechecked after asynchronous resolution, with a 30-second observer for late optimistic rollback. No extra server engagement request is sent. Local records are scoped to UID; older unscoped records require the user's explicit ownership confirmation to import.
+
+Native notification tabs are All/Verified/Mentions/VERA. The supplemental Replies tab uses the same inline bar and border-separated notification rows. Standard rows are restored on native-tab selection or leaving the screen. The established reply-read endpoints and polling bounds remain unchanged.
+
+The permanent favorite CSS uses stable native `data-testid` selectors, including the adjacent count and the verified 28px notification heart structure, so React replacement does not reveal the native heart while waiting for an observer. Composer avatar rules cover the confirmed 40px feed, 48px modal and 32/40px reply structures. All changes preserve native favorite handlers, drafts and theme selection.
