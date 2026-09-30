@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.9.0
+// @version      6.10.0
 // @description  昔のTwitter風の青い表示と星のお気に入り。スマホ・デスクトップ対応、控えめな動き、日本語UI、返信通知・バッジ・複数写真・日本ニュース・翻訳・保存ツール。投稿本文や名前を保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -27,6 +27,8 @@
   /* @include motion */
   /* @include runtime */
   /* @include presentation */
+  /* @include profile */
+  /* @include favorite-capture */
   /* @include replies */
   /* @include navigation */
   /* @include badges */
@@ -110,6 +112,7 @@
     ['interacted with you', 'あなたに反応しました'],
     ['Post options', 'ツイートのメニュー'],
     ['Open profile menu', 'プロフィールメニューを開く'],
+    ['Compose tweet', 'ツイートを作成'],
 
     ['For you', 'おすすめ'],
     ['Following', 'フォロー中'],
@@ -254,6 +257,13 @@
     ['Edit post', 'ツイートを編集'],
     ['Edit your post...', 'ツイートを編集...'],
     ['Edited', '編集済み'],
+    ['Edit', '編集'],
+    ['Compose New', 'ツイートを作成'],
+    ['Compose New Tweet', 'ツイートを作成'],
+    ['Processing...', '処理中…'],
+    ['Discard changes?', '変更を破棄しますか？'],
+    ['Your edits will be lost.', '編集した内容は保存されません。'],
+    ['Discard', '破棄する'],
     ['Post updated.', 'ツイートを更新しました'],
     ['The edit window for this post has closed.', 'このツイートの編集可能時間は終了しました'],
     ['This edit could not be saved. Your post is unchanged.', '編集を保存できませんでした。ツイートは変更されていません'],
@@ -463,7 +473,6 @@
 
     style.textContent = `
       [data-testid="tweet-like-action"].ct-favorite-button > svg { display:none!important; }
-      [data-testid="tweet-like-action"].ct-favorite-button::before { content:none!important; }
       [data-testid="tweet-like-action"] > .ct-star {
         display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
         transform-origin:center; pointer-events:none;
@@ -502,25 +511,6 @@
         height:28px!important;
         object-fit:contain!important;
         display:block!important;
-      }
-
-      .ct-notification-fav-icon {
-        position:relative!important;
-      }
-
-      .ct-notification-fav-icon > svg {
-        visibility:hidden!important;
-      }
-
-      .ct-notification-fav-icon::after {
-        content:"★";
-        position:absolute!important;
-        left:50%!important;
-        top:50%!important;
-        transform:translate(-50%,-50%)!important;
-        color:#ffac33!important;
-        font:700 27px/1 Arial,sans-serif!important;
-        pointer-events:none!important;
       }
 
       #ct-favorites-tab {
@@ -977,6 +967,36 @@ if (/^just\s+now$/i.test(t)) {
       Number.isFinite(Date.parse(title));
   }
 
+  function isNativeEditedIndicator(el) {
+    if (!el?.matches('span.text-tl-app-text-muted[title]') ||
+        !el.closest('article') || el.closest('button,a,[role="button"]') ||
+        !/^(?:edited|編集済み)$/i.test(clean(el.textContent))) return false;
+    const title = el.getAttribute('title');
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(title) ||
+        !Number.isFinite(Date.parse(title))) return false;
+    // Both native tweet and inline-reply headers place the indicator directly
+    // after a separator, alongside their author button and creation timestamp.
+    const header = el.parentElement;
+    return !!header?.matches('div.flex.items-center') &&
+      clean(el.previousElementSibling?.textContent) === '·' &&
+      !!header.querySelector('button.font-bold.truncate') &&
+      [...header.children].some(sibling => sibling !== el &&
+        sibling.matches('span.text-tl-app-text-muted') &&
+        (isNativeLocalizationTimestamp(sibling) || sibling.classList.contains('shrink-0')));
+  }
+
+  function isNativeTweetCount(el) {
+    if (!el?.matches('span.text-tl-app-text-muted') || el.closest('article,[data-user-content]')) return false;
+    const parent = el.parentElement;
+    const strong = el.firstElementChild;
+    if (/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname) &&
+        strong?.matches('strong.font-extrabold.text-tl-app-text') && /^[\d,]+$/.test(clean(strong.textContent)) &&
+        parent?.querySelector(':scope > button')) return true;
+    return !!el.closest('aside') && el.classList.contains('mt-0.5') && parent?.matches('button.group') &&
+      parent.children.length === 2 && parent.lastElementChild === el &&
+      parent.firstElementChild.matches('span.truncate[title^="#"]') && /^#[^\s]+$/.test(clean(parent.firstElementChild.textContent));
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
@@ -987,7 +1007,7 @@ if (/^just\s+now$/i.test(t)) {
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
     // protection for profile names and account values everywhere else.
-    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications' }[location.pathname.replace(/\/$/, '')];
+    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')];
     const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
       el === [...document.querySelectorAll('main h2')].find(heading => {
         for (let parent = heading; parent; parent = parent.parentElement) {
@@ -1026,6 +1046,7 @@ if (/^just\s+now$/i.test(t)) {
     if (localizationNotificationAction(node) || isNativeNotificationTimestamp(el)) return true;
     if (localizationNotificationRow(el)) return false;
     if (isNativeSettingsValue(el) || isNativeLocalizationHelp(el)) return true;
+    if (isNativeTweetCount(el)) return true;
     const text = clean(node.nodeValue);
     const link = el.closest('a[href]');
     if (link) {
@@ -1044,10 +1065,10 @@ if (/^just\s+now$/i.test(t)) {
       // buttons are data, not labels. Real notification actions are handled above.
       const paragraph = el.closest('p');
       if ((paragraph && control.contains(paragraph)) || control.querySelector('p')) return false;
-      if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
+      if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
       return true;
     }
-    if (isNativeLocalizationTimestamp(el)) return true;
+    if (isNativeLocalizationTimestamp(el) || isNativeEditedIndicator(el)) return true;
     if (el.closest('[role="status"],[role="alert"]')) return true;
     if (el.closest('article')) return false;
     if (el.closest('label,legend')) return true;
@@ -1057,7 +1078,12 @@ if (/^just\s+now$/i.test(t)) {
     if (heading) {
       // Profile headings contain display names; all other static headings are
       // still restricted to exact dictionary entries by translateTextNode.
-      if (/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname) && heading.tagName !== 'H1') return false;
+      if (/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname) && heading.tagName !== 'H1' &&
+          !(location.pathname.replace(/\/$/, '') === '/profile' && heading.matches('h2.truncate') &&
+            heading.closest('.sticky') && /^(?:Feed|プロフィール)$/.test(text)) &&
+          !(heading.matches('h3.text-xs.font-bold.uppercase.tracking-wider') &&
+            /^(?:Compose New(?: Tweet)?|Edit post)$/.test(text) &&
+            heading.closest('div.bg-tl-app-card.border.rounded-3xl.max-w-lg')?.querySelector('textarea#public-modal-tweet-input'))) return false;
       return !heading.querySelector('img');
     }
     // Settings descriptions are static text, but account values in dd/input and
@@ -1102,9 +1128,21 @@ if (/^just\s+now$/i.test(t)) {
       if (isOwnedLocalizationElement(el) ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
           el.closest('.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
+      if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
+          el.querySelector(':scope > svg.lucide-x') &&
+          el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
+          el.parentElement.querySelector('textarea#public-modal-tweet-input')) el.setAttribute('aria-label', '閉じる');
       for (const attr of ['aria-label', 'title']) {
         const value = el.getAttribute(attr);
-        const out = JP.get(value);
+        const action = el.matches('[data-testid="tweet-open-comment-action"],[data-testid="tweet-comment-action"]') &&
+          value?.match(/^Comment, (\d+) comments?$/);
+        const repost = el.matches('[data-testid="tweet-repost-action"]') &&
+          value?.match(/^Retweet, (\d+) retweets?$/);
+        const likers = el.matches('[data-testid="tweet-like-action-count"]') &&
+          value?.match(/^View (\d+) likes?$/);
+        const out = action ? `返信、${action[1]}件の返信` :
+          repost ? `リツイート、${repost[1]}件のリツイート` :
+          likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value);
         if (out && value !== out) el.setAttribute(attr, out);
       }
     }
@@ -1121,7 +1159,12 @@ if (/^just\s+now$/i.test(t)) {
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const units = { s: '秒前', m: '分前', h: '時間前', d: '日前' };
     let out = relative ? relative[1] + units[relative[2]] :
-      remaining ? `${remaining[1]}個のコードが残っています` : JP.get(text);
+      remaining ? `${remaining[1]}個のコードが残っています` :
+      isNativeEditedIndicator(el) ? '編集済み' :
+      isNativeTweetCount(el) && /^([\d,]+) tweets?$/i.test(text) ? `${text.match(/^([\d,]+)/)[1]}件のツイート` :
+      isNativeTweetCount(el) && /^Tweets?$/i.test(text) ? 'ツイート' :
+      /^\/profile\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
+        el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text);
     // The native help list splits this sentence around a React-owned counter.
     // Keep its text nodes and the counter so later updates still work.
     if (isNativeLocalizationHelp(el) && el.matches('li')) {
@@ -1527,323 +1570,25 @@ if (/^just\s+now$/i.test(t)) {
   }
 
 
-  function loadFavorites() {
-    const items =
-      loadJSON(
-        KEY.favorites,
-        []
-      );
+  function loadFavorites() { return ctProfileLoadFavorites(); }
 
-    return Array.isArray(
-      items
-    )
-      ? items
-      : [];
-  }
+  function saveFavorite(item, uid) { return ctProfileSaveFavorite(item, uid); }
 
-  function saveFavorite(
-    item
-  ) {
-    if (
-      !item?.id
-    ) {
-      return;
-    }
+  function removeFavorite(id, uid) { return ctProfileRemoveFavorite(id, uid); }
 
-    saveJSON(
-      KEY.favorites,
-      [
-        item,
-        ...loadFavorites()
-          .filter(
-            x =>
-              x.id !==
-              item.id
-          )
-      ]
-        .slice(
-          0,
-          500
-        )
-    );
-  }
-
-  function removeFavorite(
-    id
-  ) {
-    saveJSON(
-      KEY.favorites,
-      loadFavorites()
-        .filter(
-          x =>
-            x.id !== id
-        )
-    );
-  }
-
-  document.addEventListener(
-    'click',
-    event => {
-      const button =
-        event.target
-          .closest?.(
-            '[data-testid="tweet-like-action"]'
-          );
-
-      if (!button) {
-        return;
-      }
-
-      const article =
-        button.closest(
-          'article'
-        );
-
-      if (!article) {
-        return;
-      }
-
-      const snapshot =
-        snapshotFavorite(
-          article
-        );
-
-      const wasLiked =
-        ctIsLiked(button);
-
-      setTimeout(
-        () => {
-          const nowLiked =
-            ctIsLiked(button);
-
-          if (
-            !wasLiked &&
-            nowLiked
-          ) {
-            saveFavorite(
-              snapshot
-            );
-          }
-
-          else if (
-            wasLiked &&
-            !nowLiked
-          ) {
-            removeFavorite(
-              snapshot?.id
-            );
-          }
-
-          if (
-            favoritesActive
-          ) {
-            renderFavoritesPanel();
-          }
-        },
-        450
-      );
-    },
-    true
-  );
+  document.addEventListener('click', ctCaptureFavoriteClick, true);
 
 
   let favoritesActive =
     false;
 
-  function findRepostTab() {
-    if (
-      location.pathname !==
-      '/profile'
-    ) {
-      return null;
-    }
 
-    return (
-      [
-        ...document.querySelectorAll(
-          'main a,main button,main [role="tab"]'
-        )
-      ]
-        .find(
-          el =>
-            /^(Reposts|Retweets|リツイート)$/i
-              .test(
-                clean(
-                  el.textContent
-                )
-              )
-        )
-      ||
-      null
-    );
-  }
 
-  function patchFavoriteProfileTab() {
-    let tab =
-      document.getElementById(
-        'ct-favorites-tab'
-      );
 
-    if (
-      location.pathname !==
-      '/profile'
-    ) {
-      tab?.remove();
 
-      favoritesActive =
-        false;
 
-      closeFavoritesPanel();
 
-      return;
-    }
 
-    const ref =
-      findRepostTab();
-
-    if (!ref) {
-      tab?.remove();
-      return;
-    }
-
-    if (!tab) {
-      tab =
-        document.createElement(
-          'button'
-        );
-
-      tab.id =
-        'ct-favorites-tab';
-
-      tab.type =
-        'button';
-
-      tab.textContent =
-        'お気に入り';
-
-      const parent =
-        ref.parentElement;
-
-      if (!parent) {
-        return;
-      }
-
-      parent.appendChild(
-        tab
-      );
-
-      tab.onclick =
-        event => {
-          event.preventDefault();
-          event.stopPropagation();
-
-          favoritesActive =
-            !favoritesActive;
-
-          tab.dataset.active =
-            favoritesActive
-              ? '1'
-              : '0';
-
-          renderFavoritesPanel();
-        };
-    }
-
-    tab.dataset.active =
-      favoritesActive
-        ? '1'
-        : '0';
-  }
-
-  function centerRect() {
-    const main =
-      document.querySelector(
-        'main'
-      );
-
-    if (!main) {
-      return null;
-    }
-
-    const r =
-      main.getBoundingClientRect();
-
-    return r.width > 280
-      ? r
-      : null;
-  }
-
-  function panelHead(
-    title,
-    note,
-    onClose
-  ) {
-    const head =
-      document.createElement(
-        'div'
-      );
-
-    head.className =
-      'ct-local-head';
-
-    const left =
-      document.createElement(
-        'div'
-      );
-
-    const titleEl =
-      document.createElement(
-        'div'
-      );
-
-    titleEl.className =
-      'ct-local-title';
-
-    titleEl.textContent =
-      title;
-
-    left.appendChild(
-      titleEl
-    );
-
-    if (note) {
-      const noteEl =
-        document.createElement(
-          'div'
-        );
-
-      noteEl.className =
-        'ct-local-note';
-
-      noteEl.textContent =
-        note;
-
-      left.appendChild(
-        noteEl
-      );
-    }
-
-    const close =
-      document.createElement(
-        'button'
-      );
-
-    close.className =
-      'ct-local-close';
-
-    close.textContent =
-      '×';
-
-    close.onclick =
-      onClose;
-
-    head.append(
-      left,
-      close
-    );
-
-    return head;
-  }
 
   function localCard(
     item,
@@ -1985,148 +1730,9 @@ if (/^just\s+now$/i.test(t)) {
     return row;
   }
 
-  function closeFavoritesPanel() {
-    document.getElementById(
-      'ct-favorites-panel'
-    )
-      ?.remove();
-  }
 
-  function renderFavoritesPanel() {
-    if (
-      !favoritesActive ||
-      location.pathname !==
-        '/profile'
-    ) {
-      closeFavoritesPanel();
-      return;
-    }
 
-    const r =
-      centerRect();
 
-    if (!r) {
-      return;
-    }
-
-    let panel =
-      document.getElementById(
-        'ct-favorites-panel'
-      );
-
-    if (!panel) {
-      panel =
-        document.createElement(
-          'section'
-        );
-
-      panel.id =
-        'ct-favorites-panel';
-
-      document.body.appendChild(
-        panel
-      );
-    }
-
-    panel.style.left =
-      `${Math.round(
-        r.left
-      )}px`;
-
-    panel.style.top =
-      `${
-        Math.max(
-          100,
-          Math.round(
-            r.top + 88
-          )
-        )
-      }px`;
-
-    panel.style.width =
-      `${Math.round(
-        r.width
-      )}px`;
-
-    panel.style.maxHeight =
-      `calc(100vh - ${
-        Math.max(
-          110,
-          Math.round(
-            r.top + 100
-          )
-        )
-      }px)`;
-
-    panel.innerHTML =
-      '';
-
-    panel.appendChild(
-      panelHead(
-        '★ お気に入り',
-        'このブラウザだけに保存されます',
-
-        () => {
-          favoritesActive =
-            false;
-
-          const tab =
-            document.getElementById(
-              'ct-favorites-tab'
-            );
-
-          if (tab) {
-            tab.dataset.active =
-              '0';
-          }
-
-          closeFavoritesPanel();
-        }
-      )
-    );
-
-    const data =
-      loadFavorites();
-
-    if (!data.length) {
-      const empty =
-        document.createElement(
-          'div'
-        );
-
-      empty.className =
-        'ct-local-empty';
-
-      empty.textContent =
-        'お気に入りはまだありません。';
-
-      panel.appendChild(
-        empty
-      );
-
-      return;
-    }
-
-    for (const item of data) {
-      const row =
-        localCard(
-          item,
-          false
-        );
-
-      row.onclick =
-        () => {
-          if (item.href) {
-            location.href =
-              item.href;
-          }
-        };
-
-      panel.appendChild(
-        row
-      );
-    }
-  }
 
   function notificationLeaves(root = document) {
     return [...new Set(notificationTextNodes(root).map(node => node.parentElement))];
@@ -2387,6 +1993,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.9.0 loaded'
+    '🐦 Classic Twitter JP v6.10.0 loaded'
   );
 })();

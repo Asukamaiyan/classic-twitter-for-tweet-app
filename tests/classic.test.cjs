@@ -23,7 +23,7 @@ const client = () => `<div id="root-container" data-app-theme="light" class="min
     <main class="min-w-0 lg:col-span-6 flex flex-col lg:border-x border-tl-app-border bg-tl-app-card">
       <div class="sticky top-app-header border-b border-dashed px-4"><div class="flex gap-1.5 overflow-x-auto min-h-10">
         <button class="rounded-full text-xs bg-sky-500">For you</button><button class="rounded-full text-xs">Following</button></div></div>
-      <div class="px-4 pt-5 pb-4 border-b"><div class="flex gap-3"><div class="flex-1"><textarea id="public-tweet-input" placeholder="What's happening?">English Like News draft</textarea>
+      <div class="px-4 pt-5 pb-4 border-b"><div class="flex gap-3"><img id="compose-avatar" class="rounded-full border object-cover shrink-0 mt-[0.3125rem]" alt="You avatar" src="/me.png" width="40" height="40"><div class="flex-1"><textarea id="public-tweet-input" placeholder="What's happening?">English Like News draft</textarea>
       <input type="file" accept="image/jpeg,image/png,image/webp"><button id="public-tweet-submit-btn" disabled>Tweet</button></div></div></div>
       ${post('tweet')}${post('reply', true)}
     </main>
@@ -56,6 +56,7 @@ test('only verified client sections receive classic markers, including desktop a
   assert.equal(document.querySelectorAll('.ct-classic-mobile-compose').length, 1);
   assert.equal(document.querySelectorAll('.ct-classic-tweet').length, 2);
   assert.equal(document.querySelectorAll('.ct-classic-avatar').length, 4);
+  assert.equal(document.querySelectorAll('.ct-classic-composer-avatar').length, 1);
   assert.equal(document.querySelectorAll('.ct-classic-side-panel').length, 1);
   assert.ok(document.querySelector('.ct-classic-header'));
   assert.equal(document.querySelector('img[alt="Post attachment"]').className, 'rounded-xl');
@@ -240,4 +241,51 @@ test('favorite count markers recognize only the native group and preserve numeri
   patch(document, false);
   assert.equal(groups[0].classList.contains('text-pink-500'), true);
   assert.equal(count.outerHTML, before);
+});
+
+test('feed, modal and inline or full reply composers use square avatars without touching drafts or media', t => {
+  const { document, patch, window } = setup(t);
+  const avatar = (id, size, fallback = false) => fallback
+    ? `<div id="${id}" role="img" aria-label="You avatar placeholder" class="flex items-center justify-center bg-tl-app-bg text-tl-app-text-muted rounded-full border object-cover shrink-0" style="width:${size}px;height:${size}px"><svg></svg></div>`
+    : `<img id="${id}" class="rounded-full border object-cover shrink-0" src="/me.png" alt="You avatar" width="${size}" height="${size}">`;
+  document.body.insertAdjacentHTML('beforeend', `<div class="bg-tl-app-card border rounded-3xl max-w-lg"><h3>Compose New Tweet</h3><div class="flex gap-4 mt-2">${avatar('modal-avatar',48)}<div class="flex-1"><textarea id="public-modal-tweet-input">Modal draft Like News</textarea><img id="modal-media" class="rounded-full" src="/attachment.jpg"></div></div></div>`);
+  const main = document.querySelector('main');
+  main.insertAdjacentHTML('beforeend', `<div role="form" class="px-4 py-3 border-b"><div class="flex items-start gap-3">${avatar('reply-avatar',40)}<div class="min-w-0 flex-1"><textarea maxlength="280" autocomplete="off">Reply draft Like News</textarea></div><button>Reply</button></div></div>
+    <div role="form" class="mt-3 flex flex-col gap-2"><div class="flex items-start gap-3">${avatar('inline-avatar',32,true)}<div class="min-w-0 flex-1"><textarea maxlength="280" autocomplete="off">Inline draft</textarea></div><button>Reply</button></div></div>
+    <div role="form" class="flex items-start gap-3">${avatar('stacked-avatar',40)}<div class="min-w-0 flex-1"><textarea maxlength="280" autocomplete="off">Stacked draft</textarea></div></div>
+    <div data-ct-owned="other"><div role="form" class="flex items-start gap-3">${avatar('owned-avatar',40)}<textarea maxlength="280" autocomplete="off"></textarea></div></div>
+    <blockquote><div role="form" class="flex items-start gap-3">${avatar('quote-avatar',40)}<textarea maxlength="280" autocomplete="off"></textarea></div></blockquote>
+    <div role="form" class="flex items-start gap-3">${avatar('unknown-avatar',24)}<textarea maxlength="280" autocomplete="off"></textarea></div>`);
+  const before = document.documentElement.outerHTML;
+  const inputs = [...document.querySelectorAll('textarea')].map(input => [input, input.value, input.outerHTML]);
+  const media = document.getElementById('modal-media').outerHTML;
+  patch();
+  for (const id of ['compose-avatar','modal-avatar','reply-avatar','inline-avatar','stacked-avatar']) {
+    const image = document.getElementById(id);
+    assert.equal(image.classList.contains('ct-classic-composer-avatar'), true, id);
+    assert.equal(window.getComputedStyle(image).borderRadius, '4px', id);
+  }
+  for (const id of ['owned-avatar','quote-avatar','unknown-avatar']) {
+    assert.equal(document.getElementById(id).classList.contains('ct-classic-composer-avatar'), false, id);
+  }
+  assert.deepEqual(inputs.map(([input]) => [input, input.value, input.outerHTML]), inputs);
+  assert.equal(document.getElementById('modal-media').outerHTML, media);
+  patch(document, false);
+  assert.equal(document.documentElement.outerHTML, before, 'all composer classes and CSS restore on appearance off');
+});
+
+test('replaced native composer avatars are reidentified while unsupported shapes fail open', t => {
+  const { document, patch } = setup(t);
+  patch();
+  const original = document.getElementById('compose-avatar');
+  const replacement = original.cloneNode(true);
+  replacement.classList.remove('ct-classic-composer-avatar');
+  original.replaceWith(replacement);
+  patch();
+  assert.equal(replacement.classList.contains('ct-classic-composer-avatar'), true);
+  assert.equal(document.querySelectorAll('#compose-avatar').length, 1);
+  replacement.setAttribute('width', '120');
+  replacement.setAttribute('height', '80');
+  patch();
+  assert.equal(replacement.classList.contains('ct-classic-composer-avatar'), false);
 });

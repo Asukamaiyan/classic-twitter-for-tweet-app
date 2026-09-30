@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.9.0
+// @version      6.10.0
 // @description  Classic blue Twitter layout and vector star Favorites, responsive desktop/mobile styling and reduced-motion-aware feedback. Preserves posts, replies, badges, photo slides, Japan/world news, safer translation and local tools.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -27,6 +27,8 @@
   /* @include motion */
   /* @include runtime */
   /* @include presentation */
+  /* @include profile */
+  /* @include favorite-capture */
   /* @include replies */
   /* @include navigation */
   /* @include badges */
@@ -115,7 +117,6 @@
     style.id = 'ct-en-style';
     style.textContent = `
       [data-testid="tweet-like-action"].ct-favorite-button > svg { display:none!important; }
-      [data-testid="tweet-like-action"].ct-favorite-button::before { content:none!important; }
       [data-testid="tweet-like-action"] > .ct-star {
         display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
         transform-origin:center; pointer-events:none;
@@ -163,18 +164,6 @@
         margin:0 0 2px;
         border-bottom:1px solid rgba(127,127,127,.20);
         white-space:nowrap;
-      }
-      .ct-notification-fav-icon { position:relative!important; }
-      .ct-notification-fav-icon > svg { visibility:hidden!important; }
-      .ct-notification-fav-icon::after {
-        content:"★";
-        position:absolute!important;
-        left:50%!important;
-        top:50%!important;
-        transform:translate(-50%,-50%)!important;
-        color:#ffac33!important;
-        font:700 27px/1 Arial,sans-serif!important;
-        pointer-events:none!important;
       }
       #ct-favorites-tab {
         position:relative;
@@ -465,6 +454,10 @@
       if (isOwnedLocalizationElement(el) ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
           el.closest('.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
+      if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
+          el.querySelector(':scope > svg.lucide-x') &&
+          el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
+          el.parentElement.querySelector('textarea#public-modal-tweet-input')) el.setAttribute('aria-label', 'Close');
       for (const attr of ['aria-label', 'title']) {
         const value = el.getAttribute(attr);
         const out = EN.get(value);
@@ -604,129 +597,24 @@
   }
 
 
-  function loadFavorites() {
-    const items = loadJSON(KEY.favorites, []);
-    return Array.isArray(items) ? items : [];
-  }
+  function loadFavorites() { return ctProfileLoadFavorites(); }
 
-  function saveFavorite(item) {
-    if (!item?.id) return;
-    saveJSON(
-      KEY.favorites,
-      [item, ...loadFavorites().filter(x => x.id !== item.id)].slice(0, 500)
-    );
-  }
+  function saveFavorite(item, uid) { return ctProfileSaveFavorite(item, uid); }
 
-  function removeFavorite(id) {
-    saveJSON(KEY.favorites, loadFavorites().filter(x => x.id !== id));
-  }
+  function removeFavorite(id, uid) { return ctProfileRemoveFavorite(id, uid); }
 
-  document.addEventListener(
-    'click',
-    event => {
-      const button = event.target.closest?.('[data-testid="tweet-like-action"]');
-      if (!button) return;
-
-      const article = button.closest('article');
-      if (!article) return;
-
-      const snapshot = snapshotFavorite(article);
-      const wasLiked = ctIsLiked(button);
-
-      setTimeout(() => {
-        const nowLiked = ctIsLiked(button);
-
-        if (!wasLiked && nowLiked) saveFavorite(snapshot);
-        else if (wasLiked && !nowLiked) removeFavorite(snapshot?.id);
-
-        if (favoritesActive) renderFavoritesPanel();
-      }, 450);
-    },
-    true
-  );
+  document.addEventListener('click', ctCaptureFavoriteClick, true);
 
 
   let favoritesActive = false;
 
-  function findRetweetTab() {
-    if (location.pathname !== '/profile') return null;
-    return (
-      [...document.querySelectorAll('main a,main button,main [role="tab"]')].find(el =>
-        /^(Reposts|Retweets)$/i.test(clean(el.textContent))
-      ) || null
-    );
-  }
 
-  function patchFavoriteProfileTab() {
-    let tab = document.getElementById('ct-favorites-tab');
 
-    if (location.pathname !== '/profile') {
-      tab?.remove();
-      favoritesActive = false;
-      closeFavoritesPanel();
-      return;
-    }
 
-    const ref = findRetweetTab();
-    if (!ref) {
-      tab?.remove();
-      return;
-    }
 
-    if (!tab) {
-      tab = document.createElement('button');
-      tab.id = 'ct-favorites-tab';
-      tab.type = 'button';
-      tab.textContent = 'Favorites';
 
-      const parent = ref.parentElement;
-      if (!parent) return;
-      parent.appendChild(tab);
 
-      tab.onclick = event => {
-        event.preventDefault();
-        event.stopPropagation();
-        favoritesActive = !favoritesActive;
-        tab.dataset.active = favoritesActive ? '1' : '0';
-        renderFavoritesPanel();
-      };
-    }
 
-    tab.dataset.active = favoritesActive ? '1' : '0';
-  }
-
-  function centerRect() {
-    const main = document.querySelector('main');
-    if (!main) return null;
-    const r = main.getBoundingClientRect();
-    return r.width > 280 ? r : null;
-  }
-
-  function panelHead(title, note, onClose) {
-    const head = document.createElement('div');
-    head.className = 'ct-local-head';
-
-    const left = document.createElement('div');
-    const titleEl = document.createElement('div');
-    titleEl.className = 'ct-local-title';
-    titleEl.textContent = title;
-    left.appendChild(titleEl);
-
-    if (note) {
-      const noteEl = document.createElement('div');
-      noteEl.className = 'ct-local-note';
-      noteEl.textContent = note;
-      left.appendChild(noteEl);
-    }
-
-    const close = document.createElement('button');
-    close.className = 'ct-local-close';
-    close.textContent = '×';
-    close.onclick = onClose;
-
-    head.append(left, close);
-    return head;
-  }
 
   function localCard(item, reply = false) {
     const row = document.createElement('div');
@@ -779,58 +667,9 @@
     return row;
   }
 
-  function closeFavoritesPanel() {
-    document.getElementById('ct-favorites-panel')?.remove();
-  }
 
-  function renderFavoritesPanel() {
-    if (!favoritesActive || location.pathname !== '/profile') {
-      closeFavoritesPanel();
-      return;
-    }
 
-    const r = centerRect();
-    if (!r) return;
 
-    let panel = document.getElementById('ct-favorites-panel');
-    if (!panel) {
-      panel = document.createElement('section');
-      panel.id = 'ct-favorites-panel';
-      document.body.appendChild(panel);
-    }
-
-    panel.style.left = `${Math.round(r.left)}px`;
-    panel.style.top = `${Math.max(100, Math.round(r.top + 88))}px`;
-    panel.style.width = `${Math.round(r.width)}px`;
-    panel.style.maxHeight = `calc(100vh - ${Math.max(110, Math.round(r.top + 100))}px)`;
-    panel.innerHTML = '';
-
-    panel.appendChild(
-      panelHead('★ Favorites', 'Stored only in this browser', () => {
-        favoritesActive = false;
-        const tab = document.getElementById('ct-favorites-tab');
-        if (tab) tab.dataset.active = '0';
-        closeFavoritesPanel();
-      })
-    );
-
-    const data = loadFavorites();
-    if (!data.length) {
-      const empty = document.createElement('div');
-      empty.className = 'ct-local-empty';
-      empty.textContent = 'No Favorites yet.';
-      panel.appendChild(empty);
-      return;
-    }
-
-    for (const item of data) {
-      const row = localCard(item, false);
-      row.onclick = () => {
-        if (item.href) location.href = item.href;
-      };
-      panel.appendChild(row);
-    }
-  }
 
   function notificationLeaves(root = document) {
     return [...new Set(localizationScopeNodes(root)
@@ -978,5 +817,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.9.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.10.0 loaded');
 })();

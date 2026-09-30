@@ -1,5 +1,13 @@
 # 6.7.0: safe localization and browser tools
 
+## 6.10.0: current profile, notification and redraw corrections
+
+The current client uses icon-only profile tabs. Add Photos & videos on own and public profiles using only verified read-only post data, and Favorites on the current account's profile using browser-local saved snapshots. Show all validated image assets and playable video assets, bounded cursor-based loading, explicit empty/error states and original-post links. Keep native profile tabs and their React-owned content; restore them immediately on native-tab selection or route changes. Favorites do not imply server history or cross-device synchronization. Preserve unscoped old saves with an explicit import into one account rather than assigning their owner silently.
+
+Hide the native heart through selectors that survive native class/child replacement, so the delayed observer is not part of visual correctness. Keep native favorite state, event handlers and short star motion. Translate only the verified Edited metadata and additional static controls; never change identical text in names, posts, quotes or drafts. Give native photo/video attachment icons accessible labels. Square-round the verified feed, modal and reply composer avatars without changing textarea geometry. Fit reply notifications to the native notification tabs and border-separated rows, retain the native inbox and browser-local polling/read boundaries, and restore focus after asynchronous updates.
+
+Acceptance: all three generated editions pass regression checks; current authenticated Chromium desktop/mobile views verify profile tab selection/restoration, reply tab placement, localization, composer avatar, content/draft preservation and native media controls. Immediate pre-observer heart replacement is checked in a browser fixture. Installed Tampermonkey, physical Safari/Stay, real upload acceptance and server media limits remain separate from browser injection checks.
+
 ## Problem and scope
 
 The 6.6.2 scripts translate arbitrary short text nodes, including user content, and automatically click and hide native translation controls. Mutation scans can trigger themselves indefinitely. Chrome, Stay and English copies have diverged.

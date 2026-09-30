@@ -18,6 +18,14 @@ function harness(options = {}) {
     url: 'https://app.tweet.app/notifications', runScripts: 'outside-only', pretendToBeVisual: true
   });
   const { window } = dom;
+  if (options.nativeTabs) {
+    const list = window.document.getElementById('native-notices');
+    const wrapper = window.document.createElement('div');
+    wrapper.id = 'native-inbox';
+    list.before(wrapper);
+    wrapper.innerHTML = '<div class="flex items-stretch sticky top-app-header bg-tl-app-card/95 backdrop-blur-md z-30 border-b border-tl-app-border"><button type="button" class="flex-1"><span>All</span><span class="absolute bottom-0"></span></button><button type="button" class="flex-1"><span>Mentions</span></button></div>';
+    wrapper.append(list);
+  }
   const calls = [];
   let now = start;
   let auth = { uid: 'uid-viewer', token: 'test-token' };
@@ -45,7 +53,7 @@ function harness(options = {}) {
     if (id) return pages.get(id) || { replies: [] };
     throw new Error('Unexpected endpoint: ' + url);
   };
-  window.eval(`const CT_LOCALE = '${options.locale || 'en'}'; const API_ORIGIN = 'https://api.tweet.app'; let ctPageActive = true; ${source}\nwindow.replies = { tick: replyWatchTick, render: renderReplyPanel, badge: patchReplyBadge, read: markReplyRead, notices: loadReplyNotices, state: ctReplyState, readStore: ctReplyRead, write: ctReplyWrite, parents: ctReplySelectParents, setActive: value => {ctPageActive=value;} };`);
+  window.eval(`const CT_LOCALE = '${options.locale || 'en'}'; const API_ORIGIN = 'https://api.tweet.app'; let ctPageActive = true; ${options.badges ? fs.readFileSync(path.join(__dirname, '../src/badges.js'), 'utf8') : ''} ${source}\nwindow.replies = { tick: replyWatchTick, render: renderReplyPanel, badge: patchReplyBadge, read: markReplyRead, notices: loadReplyNotices, state: ctReplyState, readStore: ctReplyRead, write: ctReplyWrite, parents: ctReplySelectParents, setActive: value => {ctPageActive=value;} };`);
   return {
     window, calls, api: window.replies, pages,
     setPosts: value => { posts = value; }, setReplies: value => { userReplies = value; },
@@ -64,7 +72,7 @@ test('first check uses the verified uid profile GET and shows past replies as re
   assert.equal(h.api.notices().length, 1);
   assert.equal(h.api.notices()[0].read, true);
   assert.equal(h.window.document.querySelector('[data-ct-reply-id] a').getAttribute('href'), '/user/alice');
-  assert.equal(h.window.document.querySelector('[data-ct-reply-id] a + a').getAttribute('href'), '/post/reply');
+  assert.equal(h.window.document.querySelector('[data-ct-reply-id] .ct-reply-body').getAttribute('href'), '/post/reply');
   assert.equal(h.window.document.querySelector('[data-ct-reply-id] script'), null);
 });
 
@@ -223,10 +231,10 @@ test('closing the panel never acknowledges replies; author and reply navigation 
   const panel = h.window.document.getElementById('ct-reply-panel');
   panel.querySelector('details').open = true; panel.querySelector('details').open = false;
   assert.equal(h.api.notices().find(item => item.id === 'fresh').read, false);
-  const actor = panel.querySelector('[data-ct-reply-id="fresh"] a');
+  const actor = panel.querySelector('[data-ct-reply-id="fresh"] .ct-reply-author');
   actor.addEventListener('click', event => event.preventDefault()); actor.click();
   assert.equal(h.api.notices().find(item => item.id === 'fresh').read, false);
-  const body = actor.nextElementSibling.nextElementSibling;
+  const body = panel.querySelector('[data-ct-reply-id="fresh"] .ct-reply-body');
   assert.equal(body.getAttribute('href'), '/post/fresh');
   body.addEventListener('click', event => event.preventDefault()); body.click();
   assert.equal(h.api.notices().find(item => item.id === 'fresh').read, true);
@@ -237,7 +245,8 @@ test('Japanese UI is localized without changing reply bodies or authors', async 
   await h.api.tick();
   const panel = h.window.document.getElementById('ct-reply-panel');
   assert.match(panel.textContent, /リプライ通知/);
-  assert.match(panel.textContent, /Alice @alice/);
+  assert.equal(panel.querySelector('.ct-reply-author').textContent, 'Alice');
+  assert.equal(panel.querySelector('.ct-reply-handle').textContent, '@alice');
   assert.match(panel.textContent, /Hello <script>/);
 });
 
@@ -302,7 +311,7 @@ test('reply activation saves read state while keeping its real anchor intact thr
   assert.equal(h.api.notices().find(item => item.id === 'fresh').read, true);
   assert.equal(link.isConnected, true);
   await new Promise(resolve => h.window.setTimeout(resolve, 5));
-  assert.equal(h.window.document.querySelector('[data-ct-reply-id="fresh"] span'), null);
+  assert.equal(h.window.document.querySelector('[data-ct-reply-id="fresh"] .ct-reply-unread'), null);
 });
 
 test('the retained 100 replies are the newest by date rather than the last parent traversed', async t => {
@@ -333,7 +342,9 @@ test('verified authorAvatar artwork shares the author profile link and failed im
   assert.equal(h.api.notices()[0].authorAvatar, 'https://cdn.example.test/alice.png');
   avatar.dispatchEvent(new h.window.Event('error'));
   assert.equal(actor.querySelector('img'), null);
-  assert.equal(actor.textContent, 'Alice @alice');
+  assert.equal(actor.textContent, 'A');
+  assert.equal(h.window.document.querySelector('.ct-reply-author').textContent, 'Alice');
+  assert.equal(h.window.document.querySelector('.ct-reply-handle').textContent, '@alice');
   assert.equal(actor.getAttribute('href'), '/user/alice');
 });
 
@@ -384,4 +395,181 @@ test('known network identity changes immediately hide the old inbox before anoth
   const before = h.window.localStorage.getItem('ct-replies-v2:uid-viewer');
   h.api.read('reply');
   assert.equal(h.window.localStorage.getItem('ct-replies-v2:uid-viewer'), before);
+});
+
+test('the verified native notifications row gets a Replies tab without moving or opening native content', t => {
+  const h = harness({ nativeTabs: true }); t.after(h.close);
+  const doc = h.window.document;
+  const original = doc.getElementById('native-notices');
+  const nativeParent = original.parentElement;
+  h.api.render();
+  const tab = doc.getElementById('ct-reply-tab');
+  const panel = doc.getElementById('ct-reply-panel');
+  assert.equal(tab.textContent, 'Replies');
+  assert.equal(tab.getAttribute('aria-pressed'), 'false');
+  assert.equal(tab.parentElement.parentElement, nativeParent);
+  assert.equal(panel.previousElementSibling, tab.parentElement);
+  assert.equal(panel.nextElementSibling, original);
+  assert.equal(original.parentElement, nativeParent);
+  assert.equal(original.style.display, '');
+  assert.equal(original.hasAttribute('aria-hidden'), false);
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.style.margin, '0px');
+  assert.equal(panel.style.borderRadius, '0');
+  assert.equal(panel.querySelector('details'), null);
+  h.api.render();
+  assert.equal(doc.querySelectorAll('#ct-reply-tab').length, 1);
+  assert.equal(doc.querySelectorAll('#ct-reply-panel').length, 1);
+  assert.equal(h.calls.length, 0);
+});
+
+test('reply tab selection is reversible and original native controls still dispatch exactly once', async t => {
+  const h = harness({ nativeTabs: true }); t.after(h.close);
+  await h.api.tick();
+  const doc = h.window.document;
+  const native = doc.getElementById('native-notices');
+  native.style.setProperty('display', 'flex');
+  native.setAttribute('aria-hidden', 'false');
+  const tab = doc.getElementById('ct-reply-tab');
+  const nativeTab = tab.parentElement.firstElementChild;
+  const originalClass = nativeTab.className;
+  let clicks = 0;
+  nativeTab.addEventListener('click', () => clicks++);
+  const before = h.calls.length;
+  tab.click();
+  assert.equal(native.style.getPropertyValue('display'), 'none');
+  assert.equal(native.style.getPropertyPriority('display'), 'important');
+  assert.equal(native.getAttribute('aria-hidden'), 'true');
+  assert.equal(doc.getElementById('ct-reply-panel').hidden, false);
+  assert.equal(tab.getAttribute('aria-pressed'), 'true');
+  assert.equal(tab.parentElement.getAttribute('data-ct-reply-tabs-active'), '1');
+  assert.equal(nativeTab.className, originalClass);
+  nativeTab.querySelector('span').click();
+  assert.equal(clicks, 1);
+  assert.equal(native.style.getPropertyValue('display'), 'flex');
+  assert.equal(native.style.getPropertyPriority('display'), '');
+  assert.equal(native.getAttribute('aria-hidden'), 'false');
+  assert.equal(doc.getElementById('ct-reply-panel').hidden, true);
+  assert.equal(tab.getAttribute('aria-pressed'), 'false');
+  assert.equal(tab.parentElement.hasAttribute('data-ct-reply-tabs-active'), false);
+  assert.equal(h.calls.length, before);
+});
+
+test('route departure restores native visibility and removes the local tab without marking unread replies', async t => {
+  const h = harness({ nativeTabs: true }); t.after(h.close);
+  await h.api.tick();
+  h.api.state.data.notices[0].read = false;
+  h.api.render();
+  const doc = h.window.document;
+  const native = doc.getElementById('native-notices');
+  doc.getElementById('ct-reply-tab').click();
+  h.window.history.pushState({}, '', '/profile');
+  h.api.render();
+  assert.equal(native.style.display, '');
+  assert.equal(native.hasAttribute('aria-hidden'), false);
+  assert.equal(doc.getElementById('ct-reply-tab'), null);
+  assert.equal(doc.getElementById('ct-reply-panel'), null);
+  assert.equal(h.api.notices()[0].read, false);
+  h.window.history.pushState({}, '', '/notifications');
+  h.api.render();
+  assert.equal(doc.getElementById('ct-reply-tab').getAttribute('aria-pressed'), 'false');
+  assert.equal(doc.getElementById('ct-reply-panel').hidden, true);
+});
+
+test('React tab and notification replacements are reattached without duplicate handlers or losing reply selection', t => {
+  const h = harness({ nativeTabs: true }); t.after(h.close);
+  h.api.render();
+  const doc = h.window.document;
+  const tab = doc.getElementById('ct-reply-tab');
+  tab.click();
+  tab.remove();
+  const oldList = doc.getElementById('native-notices');
+  const newList = doc.createElement('div');
+  newList.textContent = 'New native content';
+  oldList.replaceWith(newList);
+  h.api.render();
+  assert.equal(doc.getElementById('ct-reply-tab'), tab);
+  assert.equal(newList.style.display, 'none');
+  const oldBar = tab.parentElement;
+  const newBar = oldBar.cloneNode(true);
+  newBar.querySelector('#ct-reply-tab').remove();
+  oldBar.replaceWith(newBar);
+  h.api.render();
+  assert.equal(doc.querySelectorAll('#ct-reply-tab').length, 1);
+  assert.notEqual(doc.getElementById('ct-reply-tab'), tab);
+  assert.equal(doc.getElementById('ct-reply-tab').getAttribute('aria-pressed'), 'true');
+  let clicks = 0;
+  newBar.firstElementChild.addEventListener('click', () => clicks++);
+  newBar.firstElementChild.click();
+  assert.equal(clicks, 1);
+  assert.equal(newList.style.display, '');
+});
+
+test('polling and read changes preserve focus on author, reply and source links', async t => {
+  const h = harness({ nativeTabs: true }); t.after(h.close);
+  await h.api.tick();
+  const doc = h.window.document;
+  doc.getElementById('ct-reply-tab').click();
+  for (const action of ['profile:reply', 'open:reply', 'parent:reply']) {
+    [...doc.querySelectorAll('[data-reply-action]')].find(el => el.dataset.replyAction === action).focus();
+    h.api.state.data.checkedAt++;
+    h.api.render();
+    assert.equal(doc.activeElement.dataset.replyAction, action);
+  }
+  h.api.state.data.notices[0].read = false;
+  h.api.render();
+  doc.querySelector('[data-reply-action="read"]').focus();
+  h.api.read();
+  assert.equal(doc.activeElement.dataset.replyAction, 'refresh');
+});
+
+test('unknown sticky structures fall back to an inline section and never hide native content', t => {
+  const h = harness({ nativeTabs: true }); t.after(h.close);
+  const doc = h.window.document;
+  doc.querySelector('#native-inbox .sticky').classList.remove('items-stretch');
+  h.api.render();
+  assert.equal(doc.getElementById('ct-reply-tab'), null);
+  assert.equal(doc.getElementById('ct-reply-panel').dataset.ctReplyMode, 'inline');
+  assert.equal(doc.getElementById('native-notices').style.display, '');
+  assert.equal(doc.getElementById('ct-reply-panel').style.borderRadius, '0');
+});
+
+test('native reply badge metadata displays official 96 px artwork and parent navigation leaves unread untouched', async t => {
+  const h = harness({ nativeTabs: true, badges: true }); t.after(h.close);
+  h.pages.set('parent', { replies: [reply('badged', {
+    authorBadges: ['founding_special', 'press', 'invented'], authorFoundingMemberNumber: 123
+  })] });
+  await h.api.tick();
+  h.api.state.data.notices[0].read = false;
+  h.api.render();
+  const doc = h.window.document;
+  const row = doc.querySelector('[data-ct-reply-id="badged"]');
+  assert.deepEqual([...row.querySelectorAll('.ct-official-badges img')].map(img => img.getAttribute('src')), [
+    'https://app.tweet.app/assets/founder-badge-96.png',
+    'https://app.tweet.app/assets/fighter-badge-96.png',
+    'https://app.tweet.app/assets/press-badge-96.png'
+  ]);
+  assert.deepEqual(plain(h.api.notices()[0].authorBadges), ['founding_special', 'press']);
+  const parent = row.querySelector('.ct-reply-parent');
+  assert.equal(parent.getAttribute('href'), '/post/parent');
+  parent.addEventListener('click', event => event.preventDefault());
+  parent.click();
+  assert.equal(h.api.notices()[0].read, false);
+  assert.equal(row.querySelector('.ct-reply-author').getAttribute('href'), 'https://app.tweet.app/user/alice');
+});
+
+test('damaged stored display fields do not crash the inbox or turn invalid parent ids into links', async t => {
+  const h = harness(); t.after(h.close);
+  h.window.localStorage.setItem('ct-replies-v2:uid-viewer', JSON.stringify({
+    notices: [{ id: 'cached', authorUsername: 'alice', authorName: { bad: true }, text: { bad: true },
+      authorAvatar: 'javascript:alert(1)', parentId: '../bad', authorBadges: 'founding', createdAt: 123 }],
+    threads: {}, seen: []
+  }));
+  h.setPosts([]);
+  await h.api.tick();
+  const row = h.window.document.querySelector('[data-ct-reply-id="cached"]');
+  assert.equal(row.querySelector('.ct-reply-author').textContent, 'alice');
+  assert.equal(row.querySelector('.ct-reply-body').textContent, 'Open reply');
+  assert.equal(row.querySelector('.ct-reply-parent'), null);
+  assert.equal(row.querySelector('img'), null);
 });

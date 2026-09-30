@@ -18,6 +18,8 @@
     const style = doc.createElement('style');
     style.id = 'ct-classic-appearance-style';
     style.dataset.ctOwned = 'classic-appearance';
+    const composerAvatar = sizes => `:is(${sizes.map(size =>
+      `img[width="${size}"][height="${size}"],[role="img"][style*="width: ${size}px"][style*="height: ${size}px"]`).join(',')}).border.object-cover.shrink-0:first-child:not([data-ct-owned] *,[data-user-content] *,blockquote *,[aria-label^="Quoted post"] *,[data-testid="quote-tweet"] *)`;
     style.textContent = `
       .ct-classic-shell {
         --ct-classic-blue:#55acee;
@@ -53,6 +55,18 @@
       }
       .ct-classic-shell .ct-classic-avatar {
         border-radius:4px!important;
+      }
+      .ct-classic-composer-avatar {
+        border-radius:4px!important;
+      }
+      @supports selector(:has(*)) {
+        /* These native rows keep replacement avatars square before a scan. */
+        #root-container[data-app-theme] div.flex.gap-3:has(textarea#public-tweet-input) > ${composerAvatar([40])},
+        div.bg-tl-app-card.border.rounded-3xl.max-w-lg > div.flex.gap-4.mt-2:has(textarea#public-modal-tweet-input) > ${composerAvatar([48])},
+        #root-container[data-app-theme] [role="form"].flex.items-start.gap-3:has(textarea[maxlength="280"]) > ${composerAvatar([32,40])},
+        #root-container[data-app-theme] [role="form"] > div.flex.items-start.gap-3:has(textarea[maxlength="280"]) > ${composerAvatar([32,40])} {
+          border-radius:4px!important;
+        }
       }
       .ct-classic-shell .ct-classic-top-tabs {
         padding-top:0!important;
@@ -187,6 +201,20 @@
       if (!wanted.has(element)) wanted.set(element, new Set());
       wanted.get(element).add(name);
     };
+    const markComposerAvatar = (input, scope, rowMatches, sizes) => {
+      if (!input || input.closest(ctClassicExcluded)) return;
+      for (let row = input.parentElement; row && row !== scope; row = row.parentElement) {
+        if (!rowMatches(row)) continue;
+        const avatar = row.firstElementChild;
+        if (!avatar?.matches('img.border.object-cover.shrink-0,[role="img"].border.object-cover.shrink-0') ||
+            !avatar.classList.contains('rounded-full')) continue;
+        const width = Number(avatar.getAttribute('width') || parseFloat(avatar.style.width));
+        const height = Number(avatar.getAttribute('height') || parseFloat(avatar.style.height));
+        if (width !== height || !sizes.includes(width)) continue;
+        mark(avatar, 'ct-classic-composer-avatar');
+        return;
+      }
+    };
     const main = [...shell.querySelectorAll('main')].find(element =>
       element.classList.contains('lg:col-span-6') &&
       element.classList.contains('bg-tl-app-card') &&
@@ -266,7 +294,22 @@
       if (submit && !composer.closest('article,[data-ct-owned]')) {
         mark(composer, 'ct-classic-composer');
         mark(submit, 'ct-classic-submit');
+        markComposerAvatar(input, composer, row => row.classList.contains('flex') && row.classList.contains('gap-3'), [40]);
       }
+    }
+
+    const modalInput = shell.ownerDocument.querySelector('textarea#public-modal-tweet-input');
+    markComposerAvatar(modalInput, shell.ownerDocument.body, row =>
+      ['flex', 'gap-4', 'mt-2'].every(name => row.classList.contains(name)) &&
+      row.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg'), [48]);
+    for (const form of shell.querySelectorAll('[role="form"]')) {
+      if (form.closest(ctClassicExcluded)) continue;
+      const replyInput = form.querySelector('textarea[maxlength="280"]');
+      if (!replyInput || replyInput.closest('[role="form"]') !== form ||
+          replyInput.getAttribute('autocomplete') !== 'off') continue;
+      markComposerAvatar(replyInput, form.parentElement, row =>
+        ['flex', 'items-start', 'gap-3'].every(name => row.classList.contains(name)) &&
+        (row === form || row.parentElement === form), [32, 40]);
     }
 
     for (const article of main.querySelectorAll('article')) {

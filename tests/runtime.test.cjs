@@ -410,6 +410,58 @@ test('favorite vector preserves the native icon, click handler and count on Reac
   assert.equal(button.classList.contains('ct-is-liked'), true);
 });
 
+test('native hearts stay hidden immediately through class, icon and complete button replacements', t => {
+  const f = harness(t, '<button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 14 likes"><svg class="lucide-heart"><path></path></svg></button><button id="other"><svg class="lucide-heart"></svg></button>');
+  const button = f.document.querySelector('[data-testid="tweet-like-action"]');
+  f.qa.patchFavoriteButtons();
+  assert.equal(f.document.querySelectorAll('#ct-favorite-presentation-style').length, 1);
+  button.className = 'text-pink-500';
+  assert.equal(f.window.getComputedStyle(button.querySelector('svg.lucide-heart')).display, 'none');
+  button.innerHTML = '<svg class="lucide-heart native-replacement"><path></path></svg>';
+  assert.equal(button.querySelector('.ct-star'), null, 'the CSS covers the gap before the delayed scan');
+  assert.equal(f.window.getComputedStyle(button.querySelector('svg')).display, 'none');
+  assert.equal(f.window.getComputedStyle(button).color, 'rgb(255, 172, 51)', 'native selected state colors the CSS fallback immediately');
+  const replacement = button.cloneNode(true);
+  replacement.className = 'text-tl-app-text-muted';
+  button.replaceWith(replacement);
+  assert.equal(f.window.getComputedStyle(replacement.querySelector('svg')).display, 'none');
+  assert.notEqual(f.window.getComputedStyle(f.document.querySelector('#other svg')).display, 'none', 'unrelated native heart controls stay untouched');
+  f.qa.patchFavoriteButtons();
+  assert.equal(replacement.querySelectorAll('.ct-star').length, 1);
+  assert.equal(f.document.querySelectorAll('#ct-favorite-presentation-style').length, 1);
+  const rules = f.document.getElementById('ct-favorite-presentation-style').textContent;
+  assert.match(rules, /:has\(> span\.ct-star\)::before \{ display:none!important;/);
+  assert.match(rules, /-webkit-mask:.*data:image\/svg\+xml/);
+});
+
+test('native pressed and muted states override stale favorite markers without waiting for another scan', t => {
+  const f = harness(t, '<button data-testid="tweet-like-action" class="text-pink-500" aria-label="Unlike"><svg></svg></button>');
+  const button = f.document.querySelector('button');
+  f.qa.patchFavoriteButtons();
+  assert.equal(button.classList.contains('ct-is-liked'), true);
+  button.className = 'text-tl-app-text-muted ct-favorite-button ct-is-liked';
+  assert.notEqual(f.window.getComputedStyle(button).color, 'rgb(255, 172, 51)');
+  assert.equal(f.window.getComputedStyle(button.querySelector('.ct-star svg')).fill, 'none');
+  button.className = 'text-pink-500 ct-favorite-button ct-is-liked';
+  button.setAttribute('aria-pressed', 'false');
+  assert.notEqual(f.window.getComputedStyle(button).color, 'rgb(255, 172, 51)');
+  assert.equal(f.window.getComputedStyle(button.querySelector('.ct-star svg')).fill, 'none');
+  button.setAttribute('aria-pressed', 'true');
+  assert.equal(f.window.getComputedStyle(button).color, 'rgb(255, 172, 51)');
+  assert.equal(f.window.getComputedStyle(button.querySelector('.ct-star svg')).fill, 'currentColor');
+});
+
+test('native notification heart replacements remain vector stars without affecting other icons', t => {
+  const f = harness(t, '<div id="root-container"><main><button class="w-full flex items-start border-b"><div class="mt-0.5 shrink-0 ct-notification-fav-icon"><svg class="lucide lucide-heart text-rose-500" width="28" height="28"><path id="notification-heart"></path></svg></div></button><button><svg class="lucide-heart text-rose-500" width="28" height="28"><path id="other-heart"></path></svg></button></main></div>');
+  f.qa.patchFavoriteButtons();
+  const row = f.document.querySelector('button.w-full');
+  row.firstElementChild.className = 'mt-0.5 shrink-0';
+  row.firstElementChild.innerHTML = '<svg class="lucide lucide-heart text-rose-500" width="28" height="28"><path id="notification-heart"></path></svg>';
+  assert.equal(f.window.getComputedStyle(f.document.getElementById('notification-heart')).visibility, 'hidden');
+  assert.notEqual(f.window.getComputedStyle(f.document.getElementById('other-heart')).visibility, 'hidden');
+  assert.equal(f.window.getComputedStyle(row.querySelector('svg')).backgroundColor, 'rgb(255, 172, 51)');
+});
+
 test('classic appearance defaults on and persists independently of existing settings', t => {
   const f = harness(t, '', { values: {'autoTranslate.optInV2': true, 'existing-favorite-key': [{id:'saved'}]} });
   f.qa.start();
@@ -419,6 +471,17 @@ test('classic appearance defaults on and persists independently of existing sett
   assert.equal(f.qa.autoTranslationEnabled(), true);
   f.settings.setClassicAppearance(true);
   assert.equal(f.settings.getClassicAppearance(), true);
+});
+
+test('native favorite count stays gold immediately when React replaces all group classes', t => {
+  const f = harness(t, '<article><div class="group flex items-center gap-0.5"><button data-testid="tweet-like-action" class="text-tl-app-text-muted"><svg></svg></button><span class="text-xs tabular-nums">1</span></div></article>');
+  const button = f.document.querySelector('button'), count = f.document.querySelector('span');
+  f.qa.patchFavoriteButtons();
+  button.className = 'text-pink-500'; button.parentElement.className = 'group flex items-center gap-0.5 text-pink-500';
+  count.className = 'text-xs tabular-nums text-pink-500';
+  assert.equal(f.window.getComputedStyle(count).color, 'rgb(255, 172, 51)');
+  button.className = 'text-tl-app-text-muted'; count.className = 'text-xs tabular-nums';
+  assert.notEqual(f.window.getComputedStyle(count).color, 'rgb(255, 172, 51)');
 });
 
 test('failed appearance save retains the previous option', t => {
