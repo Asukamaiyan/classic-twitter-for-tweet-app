@@ -14,6 +14,18 @@
 
 実Tampermonkey、物理Safari＋Stay、実メディアアップロード、Chrome実翻訳モデルは今回も未検証です。Safari版の画面確認はChromiumでのコード注入であり、実機Safariの試験ではありません。お気に入りの動きはネイティブの画面上の状態に従い、後からサーバーエラーで戻る楽観更新も対象になります。
 
+## 6.9.0 公開先照合
+
+[PR #7](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/7)をmainへマージ済み（`e6b04fd65e462674ec1f1f863916ff1ae53f0381`）。PRコミットとマージ後のGitHub Actionsが成功しました。
+
+Greasy Forkの3版すべてで6.9.0の掲載を確認。通常のインストールURLから取得したコードは、Greasy Fork追加のdownloadURL／updateURLメタデータと改行差を除き、検証済みファイルと一致しました。既存のUnlisted設定を維持しています。
+
+| Greasy Fork ID | 配布内容 SHA-256 |
+|---|---|
+| 594601 | `414fc6b9a43d5cc4925b032a1597ac4b2571f37b23d176925624c9d00995931f` |
+| 594602 | `e0e965e1fd7335a78eb0967c275701e7d98ee9b8c72e78551ed3db3b34eacbef` |
+| 594603 | `8b584522dd8e208d364d0d5bdddbc65b96ad03c7d1d24a903d61b10c60f0a8d2` |
+
 ---
 
 # 6.8.1 検証記録
