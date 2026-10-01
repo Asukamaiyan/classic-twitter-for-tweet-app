@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.11.0
-// @description  昔のTwitter風の青い表示と星のお気に入り。スマホ・デスクトップ対応、控えめな動き、日本語UI、返信通知・バッジ・複数写真・日本ニュース・翻訳・保存ツール。投稿本文や名前を保持。
+// @version      6.12.0
+// @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -2052,8 +2052,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.11.0';
+    document.documentElement.dataset.ctActiveVersion = '6.12.0';
     ctStarted = true;
+    document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
       isActive: () => ctPageActive && !document.hidden && ctTranslationEngine() === 'device',
@@ -6066,9 +6067,6 @@ if (/^just\s+now$/i.test(t)) {
 
   function removeFavorite(id, uid) { return ctProfileRemoveFavorite(id, uid); }
 
-  document.addEventListener('click', ctCaptureFavoriteClick, true);
-
-
   let favoritesActive =
     false;
 
@@ -6462,6 +6460,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.11.0 loaded'
+    '🐦 Classic Twitter JP v6.12.0 loaded'
   );
 })();

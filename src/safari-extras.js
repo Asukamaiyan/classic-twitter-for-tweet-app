@@ -1,6 +1,10 @@
+  function ctSafariText(ja, en) {
+    return typeof CT_LOCALE !== 'undefined' && CT_LOCALE === 'en' ? en : ja;
+  }
+
   function ctFormatBytes(bytes) {
     const n = Number(bytes);
-    if (!Number.isFinite(n) || n <= 0) return '取得できません';
+    if (!Number.isFinite(n) || n <= 0) return ctSafariText('取得できません', 'Unavailable');
     const units = ['B','KB','MB','GB'];
     let value = n, i = 0;
     while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
@@ -15,7 +19,7 @@
       const m = path.match(/\.([a-z0-9]{2,5})$/);
       if (m) return m[1].toUpperCase();
     } catch {}
-    return '不明';
+    return ctSafariText('不明', 'Unknown');
   }
 
   function ctHeadMedia(src) {
@@ -67,7 +71,8 @@
     overlay.id = 'ct-media-info-panel';
     overlay.setAttribute('data-ct-local-ui', '');
     overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-label', isVideo ? '動画情報' : '写真情報');
+    const mediaTitle = isVideo ? ctSafariText('動画情報', 'Video information') : ctSafariText('写真情報', 'Photo information');
+    overlay.setAttribute('aria-label', mediaTitle);
     const dark = matchMedia?.('(prefers-color-scheme: dark)')?.matches;
     overlay.style.setProperty('--ct-media-bg', `var(--color-tl-app-card, ${dark ? '#15202b' : '#fff'})`);
     overlay.style.setProperty('--ct-media-fg', `var(--color-tl-app-text, ${dark ? '#f1f5f9' : '#17202a'})`);
@@ -78,25 +83,25 @@
     headRow.className = 'ct-media-info-head';
     const title = document.createElement('div');
     title.className = 'ct-media-info-title';
-    title.textContent = isVideo ? '🎬 動画情報' : '📸 写真情報';
+    title.textContent = `${isVideo ? '🎬' : '📸'} ${mediaTitle}`;
     const close = document.createElement('button');
     close.className = 'ct-media-info-close';
     close.type = 'button';
     close.textContent = '×';
-    close.setAttribute('aria-label', '閉じる');
+    close.setAttribute('aria-label', ctSafariText('閉じる', 'Close'));
     headRow.append(title, close);
 
     const grid = document.createElement('div');
     grid.className = 'ct-media-info-grid';
     const rows = [
-      ['実解像度', width && height ? `${width} × ${height} px` : '読み込み待ち'],
-      ['形式', ctMediaFormat(src)],
-      ['配信ファイル容量', src ? '取得中…' : '取得できません']
+      ['resolution', ctSafariText('実解像度', 'Resolution'), width && height ? `${width} × ${height} px` : ctSafariText('読み込み待ち', 'Waiting for media to load')],
+      ['format', ctSafariText('形式', 'Format'), ctMediaFormat(src)],
+      ['size', ctSafariText('配信ファイル容量', 'Delivered file size'), src ? ctSafariText('取得中…', 'Loading…') : ctSafariText('取得できません', 'Unavailable')]
     ];
-    if (isVideo) rows.push(['長さ', duration != null ? `${duration.toFixed(2)} 秒` : '読み込み待ち']);
+    if (isVideo) rows.push(['duration', ctSafariText('長さ', 'Duration'), duration != null ? `${duration.toFixed(2)} ${ctSafariText('秒', 'seconds')}` : ctSafariText('読み込み待ち', 'Waiting for media to load')]);
     const values = new Map();
-    for (const [key, value] of rows) {
-      const k = document.createElement('div'); k.className = 'ct-media-info-key'; k.textContent = key;
+    for (const [key, label, value] of rows) {
+      const k = document.createElement('div'); k.className = 'ct-media-info-key'; k.textContent = label;
       const v = document.createElement('div'); v.className = 'ct-media-info-value'; v.textContent = value;
       values.set(key, v);
       grid.append(k, v);
@@ -104,7 +109,7 @@
 
     const url = document.createElement('div');
     url.className = 'ct-media-info-url';
-    url.textContent = src || 'URLを取得できません';
+    url.textContent = src || ctSafariText('URLを取得できません', 'URL unavailable');
 
     sheet.append(headRow, grid, url);
     overlay.append(sheet);
@@ -132,8 +137,8 @@
     // Closing it or opening another media item cannot be undone by a late HEAD.
     const head = src ? await ctHeadMedia(src) : { bytes: null, contentType: '' };
     if (request !== ctMediaInfoRequest || !overlay.isConnected) return;
-    values.get('形式').textContent = ctMediaFormat(src, head.contentType);
-    values.get('配信ファイル容量').textContent = ctFormatBytes(head.bytes);
+    values.get('format').textContent = ctMediaFormat(src, head.contentType);
+    values.get('size').textContent = ctFormatBytes(head.bytes);
   }
 
   function patchMediaInfo(root = document) {

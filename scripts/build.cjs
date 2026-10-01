@@ -2,13 +2,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
-const variants = [
-  ['ja', 'classic-twitter-ja.user.js', false],
-  ['ja', 'classic-twitter-ja-safari.user.js', true],
-  ['en', 'classic-twitter-en.user.js', false]
-];
-for (const [locale, file, safari] of variants) {
+const distributions = require('./distributions.cjs');
+for (const { locale, file, platform, name } of distributions) {
+  const safari = platform === 'safari';
   let source = read(`src/${locale}.js`);
+  if (name) source = source.replace(/^\/\/ @name\s+.*$/m, `// @name         ${name}`);
   source = source.replace('/* @safari-grants */', safari ? '// @connect      firebasestorage.googleapis.com\n// @connect      storage.googleapis.com' : '');
   for (const part of ['network', 'enhancements', 'translation', 'classic', 'motion', 'runtime', 'presentation', 'profile', 'favorite-capture', 'navigation', 'notification-filters', 'badges', 'media', 'news']) {
     source = source.replace(`/* @include ${part} */`, read(`src/${part}.js`));

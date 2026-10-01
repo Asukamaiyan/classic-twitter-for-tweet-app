@@ -78,3 +78,7 @@ User now explicitly requests a site-wide appearance closer to old Twitter, prior
 - Motion: short purposeful feedback, no continuous feed entrance animations; reduced motion and hidden/page lifecycle cancel animations. Native event handlers, focus, draft text and IME layout remain intact.
 - Appearance is on by default for this requested update; a persistent browser-local toggle restores native layout and disables the additional motion. Other extension features and storage remain intact. Storage failure retains the previous option.
 - Unknown shell structures receive no classic styling. Repeated scans settle without self-triggering mutations. Test all three generated editions, plus desktop/mobile actual Chromium views; state unverified physical Safari/Stay paths separately.
+
+## 6.12.0 配布と導入案内
+
+日本語・英語それぞれPC Chrome＋Tampermonkey、Safari＋Stay、Android Firefox＋Tampermonkeyの計6版を提供する。旧3版の識別情報と保存データを維持し、Androidは共通コードを使用。通常のAndroid Chrome対応や未検証の実機動作は保証しない。SafariコードURLを直接コピーでき、各Greasy Forkページは導入と更新を短い手順で示す。英語Safariのメディア情報も英語にする。全6版の生成・構文・本文/入力保護・通知操作を確認する。
