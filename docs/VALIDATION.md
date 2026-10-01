@@ -1,3 +1,33 @@
+# 6.12.0 検証記録
+
+確認日: 2026-10-01（日本時間）。日本語・英語それぞれPC Chrome、Safari、Android Firefoxの計6版です。今回の実ホームのフッターは **v2.1.1** でした。
+
+## 自動検証と実画面
+
+- `npm run check`: **358件成功、失敗0件**。6版の生成・構文・共通機能、両Safariだけのメディア情報、英語のタイトル/項目/読み込み/失敗表示を含みます。
+- 既存3版の名前・namespace・対象URL・権限・実行時期を保持。Android版は同じ共通コードから生成します。6版を同時に読み込んでも、DOMContentLoadedの前後ともにお気に入りの保存処理とnativeクリックが二重登録されないことを統合検査で確認しました。
+- 最終日本語Android版・英語Android版を実ホームへ一時注入。投稿本文、空の下書き値、元テーマが注入前後で一致。日本語UI/「編集済み」/星のお気に入りと、英語UIをそれぞれ確認。アイコンのFollowボタンは非表示で、写真inputのmultipleが有効でした。390px幅で横はみ出しはありませんでした。
+- 最終英語Safari版も同じ実ホームへ注入。写真の長押しイベントを合成し、英語のPhoto information、Resolution、Format、Delivered file size、UnavailableとCloseの終了動作を確認。コンソールエラー0件です。直接注入ではGM APIがないため、通信失敗時の表示を確認したもので、StayのHEAD通信成功を保証しません。
+
+実画面の検証はChromiumへのコード注入です。実Tampermonkeyの導入、Android実機Firefox＋Tampermonkey、Safari実機＋Stayは未検証です。投稿・画像動画アップロード・投票・お気に入り・フォロー・ミュート変更は行っていません。サーバー制限の解除や4K HDR保持も保証しません。
+
+## Greasy Forkの公開先照合
+
+既存3版を6.12.0へ更新し、日本語Android（598236）・英語Safari（598237）・英語Android（598238）を追加。全6版の限定公開（Unlisted）を維持しています。Safariの導入を「コードURLをコピー → Stayのリンクから追加 → 有効化」に短縮し、Chrome/Androidも追加・更新の短い手順と6版の選択表を掲載しました。
+
+全6版の通常インストールURLから取得したコードが、Greasy Fork追加のdownloadURL/updateURL・改行差を除いて検証済みファイルと一致しました。実際の掲載画面で版表示と選択表のリンクを確認。配布先・コードURLは[DISTRIBUTIONS.json](DISTRIBUTIONS.json)、プラットフォームの根拠は[API調査](API_RESEARCH.md)に記録しています。
+
+| Greasy Fork ID | 配布内容 SHA-256（更新メタデータ・改行を正規化） |
+|---|---|
+| 594601 | `6bcdfd3609e64de4214e402f33dbe0b8634fc49d8977debae5de07477b6d7bc6` |
+| 594602 | `a79560d42b55b4820fa9c646c1ed761045e4c7a12012825892cffc1aa93d6a8c` |
+| 598236 | `05df6536fe3f60b87fd23885ef3c57a2646712e9a1ab8a1f11dd7b312ef40022` |
+| 594603 | `50582ee0f6f4997fe971c03c5bc03f9cd6a2758a6bcb5055c644da95ce848e9e` |
+| 598237 | `bc2816c9b03ca0fbffa17d9500fc93418b74500220162e9919e8349756685ad7` |
+| 598238 | `72c09ec1b15f76c865856bbea1da5f31255224827a762421a0b7a2f68f621f5e` |
+
+---
+
 # 6.11.0 検証記録
 
 確認日: 2026-10-01（日本時間）。対象は日本語Chrome・日本語Safari・英語の3配布版です。Tweet.appの新しい公式HTML・JS・CSSと公開メディア設定を再取得し、実画面のフッター **v2.1.0** を確認しました。前版の独自返信通知についての記録は以下の旧版記録であり、今回の動作を示しません。

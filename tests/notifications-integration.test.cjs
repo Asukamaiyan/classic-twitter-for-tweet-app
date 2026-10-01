@@ -5,6 +5,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const root = path.join(__dirname, '..');
+const distributions = require('../scripts/distributions.cjs');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function waitForQuietScans(readScans) {
   const deadline = Date.now() + 3000;
@@ -34,9 +35,9 @@ const notification = `<div class="border-b border-tl-app-border"><button type="b
   <span class="text-tl-app-text-muted" data-native-action>replied to your post</span></p>
   <p data-native-preview class="mt-1 text-tl-app-text-muted leading-snug line-clamp-2">Home Following reply</p></div></button></div>`;
 
-for (const file of ['classic-twitter-ja.user.js', 'classic-twitter-ja-safari.user.js', 'classic-twitter-en.user.js']) {
+for (const { file, locale } of distributions) {
   test(`${file}: native reply notifications keep their badge and handlers without a duplicate inbox or polling`, async t => {
-    const english = file.includes('-en.');
+    const english = locale === 'en';
     const dom = new JSDOM(`<!doctype html><html><head></head><body>
       <nav><button aria-label="Notifications"><svg></svg><span>Notifications</span><span data-native-count>3</span></button></nav>
       <main><header class="sticky"><h2 class="truncate">Notifications</h2></header>

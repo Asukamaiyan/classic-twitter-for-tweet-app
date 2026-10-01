@@ -335,8 +335,9 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.11.0';
+    document.documentElement.dataset.ctActiveVersion = '6.12.0';
     ctStarted = true;
+    document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
       isActive: () => ctPageActive && !document.hidden && ctTranslationEngine() === 'device',

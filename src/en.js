@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.11.0
-// @description  Classic blue Twitter layout and vector star Favorites, responsive desktop/mobile styling and reduced-motion-aware feedback. Preserves posts, replies, badges, photo slides, Japan/world news, safer translation and local tools.
+// @version      6.12.0
+// @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -654,9 +654,6 @@
 
   function removeFavorite(id, uid) { return ctProfileRemoveFavorite(id, uid); }
 
-  document.addEventListener('click', ctCaptureFavoriteClick, true);
-
-
   let favoritesActive = false;
 
 
@@ -861,5 +858,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.11.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.12.0 loaded');
 })();

@@ -6,11 +6,12 @@ const { JSDOM } = require('jsdom');
 
 const presentation = fs.readFileSync(path.join(__dirname, '../src/presentation.js'), 'utf8');
 const mediaSource = fs.readFileSync(path.join(__dirname, '../src/safari-extras.js'), 'utf8');
-function harness(t, fetchProfile = async () => null) {
+function harness(t, fetchProfile = async () => null, locale = 'ja') {
   const dom = new JSDOM(`<!doctype html><body><button id="previous">Open</button><main>
     <div id="profile-heading"><h1>Alice</h1></div><article>
     <img id="one" src="https://storage.googleapis.com/one.jpg">
-    <img id="two" src="https://storage.googleapis.com/two.png"></article></main></body>`, {
+    <img id="two" src="https://storage.googleapis.com/two.png">
+    <video id="video" src="https://storage.googleapis.com/video.mp4"></video></article></main></body>`, {
     url: 'https://app.tweet.app/user/alice', runScripts: 'outside-only', pretendToBeVisual: true
   });
   const { window } = dom;
@@ -22,7 +23,8 @@ function harness(t, fetchProfile = async () => null) {
   window.matchMedia = () => ({ matches: false });
   const requests = [];
   window.GM_xmlhttpRequest = options => { requests.push(options); };
-  window.eval(`${presentation}\n${mediaSource}\nwindow.qa = { patchProfileFounder, ctShowMediaInfo };`);
+  const localeDeclaration = locale == null ? '' : `const CT_LOCALE = ${JSON.stringify(locale)};`;
+  window.eval(`${localeDeclaration}\n${presentation}\n${mediaSource}\nwindow.qa = { patchProfileFounder, ctShowMediaInfo };`);
   t.after(() => dom.window.close());
   return {
     window, document: window.document, qa: window.qa, requests,
@@ -117,6 +119,87 @@ test('media information opens immediately and fills headers without delaying clo
   await pending;
   assert.equal(f.value('形式'), 'JPG');
   assert.equal(f.value('配信ファイル容量'), '2.00 KB');
+});
+
+test('English photo information localizes its labels while headers load asynchronously', async t => {
+  const f = harness(t, undefined, 'en');
+  const image = f.document.getElementById('one');
+  Object.defineProperties(image, {
+    naturalWidth: { value: 1920 }, naturalHeight: { value: 1080 }
+  });
+  const pending = f.show('one');
+  const overlay = f.document.getElementById('ct-media-info-panel');
+  assert.equal(overlay.getAttribute('aria-label'), 'Photo information');
+  assert.equal(overlay.querySelector('.ct-media-info-title').textContent, '📸 Photo information');
+  assert.equal(f.document.activeElement.getAttribute('aria-label'), 'Close');
+  assert.equal(f.value('Resolution'), '1920 × 1080 px');
+  assert.equal(f.value('Format'), 'JPG');
+  assert.equal(f.value('Delivered file size'), 'Loading…');
+  assert.equal(f.requests[0].method, 'HEAD');
+  assert.equal(f.requests[0].anonymous, true);
+  f.respond(0, 2048, 'image/png');
+  await pending;
+  assert.equal(f.value('Format'), 'PNG');
+  assert.equal(f.value('Delivered file size'), '2.00 KB');
+  assert.equal(overlay.querySelector('.ct-media-info-url').textContent, image.src);
+  assert.doesNotMatch(overlay.textContent, /[ぁ-んァ-ヶ一-龠]/);
+});
+
+test('English video information displays duration and updates format without changing the media', async t => {
+  const f = harness(t, undefined, 'en');
+  const video = f.document.getElementById('video');
+  Object.defineProperties(video, {
+    videoWidth: { value: 3840 }, videoHeight: { value: 2160 }, duration: { value: 12.345 }
+  });
+  const original = video.outerHTML;
+  const pending = f.show('video');
+  const overlay = f.document.getElementById('ct-media-info-panel');
+  assert.equal(overlay.getAttribute('aria-label'), 'Video information');
+  assert.equal(overlay.querySelector('.ct-media-info-title').textContent, '🎬 Video information');
+  assert.equal(f.value('Resolution'), '3840 × 2160 px');
+  assert.equal(f.value('Duration'), '12.35 seconds');
+  assert.equal(f.value('Delivered file size'), 'Loading…');
+  f.respond(0, 2097152, 'video/quicktime');
+  await pending;
+  assert.equal(f.value('Format'), 'MOV');
+  assert.equal(f.value('Delivered file size'), '2.00 MB');
+  assert.equal(video.outerHTML, original);
+  assert.doesNotMatch(overlay.textContent, /[ぁ-んァ-ヶ一-龠]/);
+});
+
+test('English missing media and failed headers show clear fallback text and retain dismissal behavior', async t => {
+  const f = harness(t, undefined, 'en');
+  const video = f.document.getElementById('video');
+  video.removeAttribute('src');
+  await f.show('video');
+  assert.equal(f.value('Resolution'), 'Waiting for media to load');
+  assert.equal(f.value('Duration'), 'Waiting for media to load');
+  assert.equal(f.value('Format'), 'Unknown');
+  assert.equal(f.value('Delivered file size'), 'Unavailable');
+  assert.equal(f.document.querySelector('.ct-media-info-url').textContent, 'URL unavailable');
+  assert.equal(f.requests.length, 0);
+  f.document.querySelector('.ct-media-info-close').click();
+  const previous = f.document.getElementById('previous');
+  previous.focus();
+  const pending = f.show('one');
+  assert.equal(f.value('Delivered file size'), 'Loading…');
+  f.requests[0].onerror();
+  await pending;
+  assert.equal(f.value('Delivered file size'), 'Unavailable');
+  f.document.activeElement.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(f.document.getElementById('ct-media-info-panel'), null);
+  assert.equal(f.document.activeElement, previous);
+});
+
+test('media information retains Japanese labels when an older harness omits the locale constant', async t => {
+  const f = harness(t, undefined, null);
+  const pending = f.show('one');
+  assert.equal(f.document.getElementById('ct-media-info-panel').getAttribute('aria-label'), '写真情報');
+  assert.equal(f.value('配信ファイル容量'), '取得中…');
+  f.respond(0, 1024);
+  await pending;
+  assert.equal(f.value('形式'), 'JPG');
+  assert.equal(f.value('配信ファイル容量'), '1.00 KB');
 });
 
 test('out-of-order media requests keep only the most recently opened item', async t => {

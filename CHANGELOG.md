@@ -1,5 +1,12 @@
 # Changelog
 
+## All distributions v6.12.0 — 2026-10-01
+
+- 日本語・英語それぞれChrome／Safari／Androidの6版へ整理。既存3版の名前・namespaceを保持し、新たに日本語Android、英語Safari、英語Androidを追加。
+- AndroidはFirefox＋Tampermonkey用の案内と配布名を追加し、共通実装を使用。通常のAndroid版Chromeで拡張が動くとは案内しません。
+- Safariの写真・動画情報のタイトル、項目、読み込み・失敗状態、閉じる操作を英語にも対応。
+- Greasy Forkの導入と更新方法を短くし、Safari用コードURLと各版へのリンクを先頭に配置。6版を同じmanifestから生成・構文検査・統合検証します。
+
 Classic Twitter for tweet.app の更新履歴です。
 
 ## All distributions v6.11.0 — 2026-10-01

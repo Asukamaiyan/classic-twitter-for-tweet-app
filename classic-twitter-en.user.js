@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.11.0
-// @description  Classic blue Twitter layout and vector star Favorites, responsive desktop/mobile styling and reduced-motion-aware feedback. Preserves posts, replies, badges, photo slides, Japan/world news, safer translation and local tools.
+// @version      6.12.0
+// @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
@@ -2052,8 +2052,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.11.0';
+    document.documentElement.dataset.ctActiveVersion = '6.12.0';
     ctStarted = true;
+    document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
       isActive: () => ctPageActive && !document.hidden && ctTranslationEngine() === 'device',
@@ -5016,9 +5017,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   function removeFavorite(id, uid) { return ctProfileRemoveFavorite(id, uid); }
 
-  document.addEventListener('click', ctCaptureFavoriteClick, true);
-
-
   let favoritesActive = false;
 
 
@@ -5223,5 +5221,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.11.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.12.0 loaded');
 })();

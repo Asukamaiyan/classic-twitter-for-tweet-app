@@ -1,0 +1,56 @@
+[
+  {
+    "key": "ja",
+    "locale": "ja",
+    "platform": "chrome",
+    "greasyForkId": 594601,
+    "file": "classic-twitter-ja.user.js",
+    "page": "https://greasyfork.org/ja/scripts/594601",
+    "codeUrl": "https://update.greasyfork.org/scripts/594601/Classic%20Twitter%20for%20tweetapp%20-%20Japanese.user.js"
+  },
+  {
+    "key": "ja-safari",
+    "locale": "ja",
+    "platform": "safari",
+    "greasyForkId": 594602,
+    "file": "classic-twitter-ja-safari.user.js",
+    "page": "https://greasyfork.org/ja/scripts/594602",
+    "codeUrl": "https://update.greasyfork.org/scripts/594602/Classic%20Twitter%20for%20tweetapp%20-%20Japanese.user.js"
+  },
+  {
+    "key": "ja-android",
+    "locale": "ja",
+    "platform": "android",
+    "greasyForkId": 598236,
+    "file": "classic-twitter-ja-android.user.js",
+    "page": "https://greasyfork.org/ja/scripts/598236",
+    "codeUrl": "https://update.greasyfork.org/scripts/598236/Classic%20Twitter%20for%20tweetapp%20-%20Japanese%20Android.user.js"
+  },
+  {
+    "key": "en",
+    "locale": "en",
+    "platform": "chrome",
+    "greasyForkId": 594603,
+    "file": "classic-twitter-en.user.js",
+    "page": "https://greasyfork.org/en/scripts/594603",
+    "codeUrl": "https://update.greasyfork.org/scripts/594603/Classic%20Twitter%20for%20tweetapp%20-%20English.user.js"
+  },
+  {
+    "key": "en-safari",
+    "locale": "en",
+    "platform": "safari",
+    "greasyForkId": 598237,
+    "file": "classic-twitter-en-safari.user.js",
+    "page": "https://greasyfork.org/en/scripts/598237",
+    "codeUrl": "https://update.greasyfork.org/scripts/598237/Classic%20Twitter%20for%20tweetapp%20-%20English%20Safari.user.js"
+  },
+  {
+    "key": "en-android",
+    "locale": "en",
+    "platform": "android",
+    "greasyForkId": 598238,
+    "file": "classic-twitter-en-android.user.js",
+    "page": "https://greasyfork.org/en/scripts/598238",
+    "codeUrl": "https://update.greasyfork.org/scripts/598238/Classic%20Twitter%20for%20tweetapp%20-%20English%20Android.user.js"
+  }
+]
