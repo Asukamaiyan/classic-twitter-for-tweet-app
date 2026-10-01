@@ -5,7 +5,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   const ja = locale.startsWith('ja');
   const copy = ja ? {
     tools: '便利ツール', title: '便利ツール', close: '閉じる',
-    appearance: '昔のTwitterの表示', classic: 'クラシック表示を使う', classicHelp: '青いナビゲーションと星のお気に入り。オフにするとTweet標準のレイアウトに戻ります。動きを減らす端末設定にも対応します。',
+    appearance: '昔のTwitterの表示', classic: 'クラシック表示を使う', classicHelp: '青いナビゲーションと星のお気に入り。オフにするとハート・いいね表記・Tweet標準の色や形に戻ります。日本語化と便利機能はそのまま使えます。動きを減らす端末設定にも対応します。',
     scope: 'このブラウザ内でのみ保存されます。同じブラウザの別アカウントにも適用されます。',
     filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
     words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
@@ -35,7 +35,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     post: '投稿',
   } : {
     tools: 'Tools', title: 'Tools', close: 'Close',
-    appearance: 'Classic Twitter appearance', classic: 'Use classic appearance', classicHelp: 'Blue navigation and star favorites. Turn off to restore Tweet’s native layout. Respects your reduced motion preference.',
+    appearance: 'Classic Twitter appearance', classic: 'Use classic appearance', classicHelp: 'Blue navigation and star favorites. Turn off to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available. Respects your reduced motion preference.',
     scope: 'Saved only in this browser. Applies to other accounts in the same browser, too.',
     filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
     words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',

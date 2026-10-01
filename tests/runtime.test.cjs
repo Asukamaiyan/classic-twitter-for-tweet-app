@@ -77,7 +77,7 @@ function harness(t, html = '', options = {}) {
     ${runtime}
     window.qa = { autoTranslationEnabled, patchAutoTranslation, ctOwnTranslationText,
       ctRememberTranslationChoice, patchFavoriteButtons, articleId, start, ctRunScan, ctScheduleScan,
-      pending: () => ctAutoPending.size };
+      ctPrepareFavoritePresentation, pending: () => ctAutoPending.size };
   `);
   async function flush() { await Promise.resolve(); await Promise.resolve(); }
   async function advance(duration = 0) {
@@ -495,9 +495,229 @@ test('native favorite count stays gold immediately when React replaces all group
   assert.notEqual(f.window.getComputedStyle(count).color, 'rgb(255, 172, 51)');
 });
 
+for (const locale of ['ja', 'en']) {
+  test(`${locale}: early favorite presentation repairs React commits before any timer or main scan`, async t => {
+    const f = harness(t, `<div data-app-theme="dark"><article>
+      <p class="whitespace-pre-wrap break-words" id="user-text">Like Liked by ❤</p>
+      <button class="font-bold truncate" id="name">Liked by</button>
+      <div class="group flex items-center gap-0.5"><button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 3 likes"><svg class="lucide-heart"></svg></button>
+      <button data-testid="tweet-like-action-count" aria-label="View 3 likes">3</button></div>
+      </article><textarea>Like ❤ draft</textarea><button id="unrelated" title="Like"><svg class="lucide-heart"></svg>Like</button></div>`, { locale });
+    Object.defineProperty(f.document, 'readyState', { get: () => 'loading' });
+    const button = f.document.querySelector('[data-testid="tweet-like-action"]');
+    const count = f.document.querySelector('[data-testid="tweet-like-action-count"]');
+    const native = button.querySelector('svg');
+    let clicks = 0, countClicks = 0;
+    button.addEventListener('click', () => clicks++); count.addEventListener('click', () => countClicks++);
+    f.qa.ctPrepareFavoritePresentation(); f.qa.ctPrepareFavoritePresentation();
+    assert.equal(f.window.getComputedStyle(native).display, 'none');
+    assert.equal(f.window.getComputedStyle(button.querySelector('.ct-star')).width, '20px', 'the early vector is sized before the main locale stylesheet');
+    assert.equal(f.document.querySelectorAll('#ct-favorite-presentation-style').length, 1);
+    assert.equal(button.title, locale === 'ja' ? 'お気に入り' : 'Favorite');
+    assert.equal(count.getAttribute('aria-label'), locale === 'ja' ? '3件のお気に入りを表示' : 'View 3 favorites');
+    button.className = 'text-pink-500'; button.title = 'Like'; button.setAttribute('aria-label', 'Like, 4 likes');
+    button.innerHTML = '<span class="native-icon-wrap"><svg class="lucide-heart"><path></path></svg></span><span class="native-label">Like</span>';
+    count.textContent = '4'; count.setAttribute('aria-label', 'View 4 likes');
+    const wrapped = button.querySelector('.native-icon-wrap svg');
+    assert.equal(f.window.getComputedStyle(wrapped).display, 'none', 'CSS covers a wrapped icon before even the observer callback');
+    await f.flush();
+    const selected = locale === 'ja' ? 'お気に入りを解除' : 'Unfavorite';
+    assert.equal(button.title, selected); assert.match(button.getAttribute('aria-label'), /4/);
+    assert.equal(button.querySelector('.native-label').textContent, selected);
+    assert.equal(button.querySelectorAll('.ct-star').length, 1);
+    assert.equal(button.querySelector('.native-icon-wrap svg'), wrapped, 'native icons are retained rather than removed');
+    assert.equal(count.title, locale === 'ja' ? '4件のお気に入りを表示' : 'View 4 favorites');
+    button.click(); count.click(); assert.equal(clicks, 1); assert.equal(countClicks, 1);
+    const replacement = f.document.createElement('button');
+    replacement.dataset.testid = 'tweet-like-action'; replacement.className = 'text-tl-app-text-muted';
+    replacement.setAttribute('aria-label', 'Like, 4 likes'); replacement.innerHTML = '<svg class="lucide-heart"></svg>Like';
+    button.replaceWith(replacement); await f.flush();
+    assert.equal(replacement.textContent, locale === 'ja' ? 'お気に入り' : 'Favorite');
+    assert.equal(replacement.querySelectorAll('.ct-star').length, 1);
+    assert.equal(f.stats.scans, 0, 'none of these repairs waits for the general full-page scan');
+    assert.equal(f.timers.size, 0, 'no 100ms debounce or repeating repair timer is used');
+    assert.equal(f.document.getElementById('user-text').textContent, 'Like Liked by ❤');
+    assert.equal(f.document.getElementById('name').textContent, 'Liked by');
+    assert.equal(f.document.querySelector('textarea').value, 'Like ❤ draft');
+    assert.equal(f.document.querySelector('[data-app-theme]').dataset.appTheme, 'dark');
+    assert.equal(f.document.getElementById('unrelated').textContent, 'Like');
+    assert.equal(f.document.getElementById('unrelated').title, 'Like');
+    assert.notEqual(f.window.getComputedStyle(f.document.querySelector('#unrelated svg')).display, 'none');
+  });
+
+  test(`${locale}: native Favorites dialog labels are repaired before the general scan while names and posts stay intact`, async t => {
+    const f = harness(t, `<main><p>Liked by</p></main><div role="dialog" aria-modal="true" class="bg-tl-app-card border" id="other-dialog"><h3>Liked by</h3></div>`, { locale });
+    f.qa.ctPrepareFavoritePresentation();
+    const dialog = f.document.createElement('div');
+    dialog.className = 'relative bg-tl-app-card border overflow-hidden flex flex-col';
+    dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', 'Liked by');
+    dialog.innerHTML = `<div class="flex items-center justify-between px-4 py-3 border-b"><h3 class="text-sm font-bold text-tl-app-text">Liked by</h3>
+      <button aria-label="Close liked by list"><svg class="lucide lucide-x"></svg></button></div>
+      <div class="flex-1 overflow-y-auto"><div class="px-4 py-10 text-center text-xs text-tl-app-text-muted font-medium">No likes yet.</div>
+      <div><button class="font-bold truncate" id="user-name">Liked by</button><p id="user-post">No likes yet. Like ❤</p></div></div>`;
+    let closes = 0; const close = dialog.querySelector('button'); const heading = dialog.querySelector('h3'); const headingText = heading.firstChild;
+    close.addEventListener('click', () => closes++); f.document.body.append(dialog); await f.flush();
+    const label = locale === 'ja' ? 'お気に入りしたユーザー' : 'Favorited by';
+    const closeLabel = locale === 'ja' ? 'お気に入りしたユーザー一覧を閉じる' : 'Close Favorites list';
+    assert.equal(heading.textContent, label); assert.equal(heading.firstChild, headingText);
+    assert.equal(dialog.getAttribute('aria-label'), label); assert.equal(close.getAttribute('aria-label'), closeLabel);
+    assert.equal(close.title, closeLabel); close.click(); assert.equal(closes, 1);
+    assert.equal(dialog.querySelector('.text-center').textContent, locale === 'ja' ? 'お気に入りはまだありません。' : 'No favorites yet.');
+    heading.firstChild.nodeValue = 'Liked by'; dialog.setAttribute('aria-label', 'Liked by'); close.setAttribute('aria-label', 'Close liked by list');
+    await f.flush(); assert.equal(heading.textContent, label); assert.equal(close.getAttribute('aria-label'), closeLabel);
+    assert.equal(dialog.querySelector('#user-name').textContent, 'Liked by'); assert.equal(dialog.querySelector('#user-post').textContent, 'No likes yet. Like ❤');
+    assert.equal(f.document.getElementById('other-dialog').textContent, 'Liked by'); assert.equal(f.document.querySelector('main p').textContent, 'Liked by');
+    assert.equal(f.stats.scans, 0); assert.equal(f.timers.size, 0);
+  });
+}
+
+test('early favorite observer resumes after a persisted page return and restores a removed stylesheet', async t => {
+  const f = harness(t, '<button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 1 like"><svg></svg></button>');
+  f.qa.ctPrepareFavoritePresentation();
+  const button = f.document.querySelector('button');
+  f.window.dispatchEvent(new f.window.Event('pagehide'));
+  button.setAttribute('aria-label', 'Like, 1 like'); await f.flush();
+  assert.equal(button.getAttribute('aria-label'), 'Like, 1 like');
+  f.window.dispatchEvent(new f.window.PageTransitionEvent('pageshow', { persisted: true })); await f.flush();
+  assert.equal(button.getAttribute('aria-label'), 'お気に入り, 1 件');
+  f.document.getElementById('ct-favorite-presentation-style').remove(); await f.flush();
+  assert.equal(f.document.querySelectorAll('#ct-favorite-presentation-style').length, 1);
+  button.title = 'Like'; await f.flush(); assert.equal(button.title, 'お気に入り');
+  assert.equal(f.stats.scans, 0); assert.equal(f.timers.size, 0);
+});
+
+test('document-start favorite repair waits for an HTML root and protects editable/user-owned controls', async t => {
+  const f = harness(t);
+  f.document.documentElement.remove(); f.qa.ctPrepareFavoritePresentation();
+  const html = f.document.createElement('html'); html.innerHTML = `<head></head><body>
+    <button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like"><svg></svg></button>
+    <div contenteditable="true"><button data-testid="tweet-like-action" aria-label="Like">Like</button></div>
+    <div data-ct-owned="fixture"><button data-testid="tweet-like-action" aria-label="Like">Like</button></div>
+    </body>`;
+  f.document.append(html); await f.flush();
+  assert.equal(f.document.querySelector('body > button').title, 'お気に入り');
+  for (const protectedButton of f.document.querySelectorAll('div > button')) {
+    assert.equal(protectedButton.textContent, 'Like'); assert.equal(protectedButton.getAttribute('aria-label'), 'Like');
+    assert.equal(protectedButton.querySelector('.ct-star'), null);
+  }
+  assert.equal(f.timers.size, 0);
+});
+
+test('early favorite repair ignores unrelated body mutations and visits only controls in newly added subtrees', async t => {
+  const f = harness(t, '<main><button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like"><svg></svg></button></main>');
+  f.qa.ctPrepareFavoritePresentation();
+  const repaired = []; const original = f.window.patchFavoriteButtons;
+  f.window.patchFavoriteButtons = root => { repaired.push(root); original(root); };
+  f.document.body.className = 'new-native-layout';
+  f.document.body.insertAdjacentHTML('beforeend', '<article><p>Like Liked by ❤ unrelated post</p></article>');
+  await f.flush(); assert.deepEqual(repaired, [], 'body-level updates must not trigger a page-wide favorite traversal');
+  f.document.body.insertAdjacentHTML('beforeend', '<article><div><button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 2 likes"><svg></svg></button><button data-testid="tweet-like-action-count" aria-label="View 2 likes">2</button></div></article>');
+  await f.flush();
+  assert.equal(repaired.length, 2); assert.ok(repaired.every(root => root.matches('button[data-testid^="tweet-like-action"]')));
+  assert.equal(f.document.querySelector('article button[data-testid="tweet-like-action"]').title, 'お気に入り');
+  await f.flush(); assert.equal(repaired.length, 2, 'its own presentation changes cannot schedule another repair');
+  assert.equal(f.timers.size, 0); assert.equal(f.stats.scans, 0);
+});
+
 test('failed appearance save retains the previous option', t => {
   const f = harness(t, '', { storageFailure: true });
   f.qa.start();
   assert.throws(() => f.settings.setClassicAppearance(false), /Storage unavailable/);
   assert.equal(f.settings.getClassicAppearance(), true);
 });
+
+for (const locale of ['ja', 'en']) {
+  test(`${locale}: the classic switch restores native hearts, colors and current labels synchronously, then enables once`, async t => {
+    const f = harness(t, `<style>.text-pink-500 { color:rgb(236, 72, 153); }</style>
+      <div id="root-container"><main><article><p class="tl-user-text">Favorite Like ❤ body</p><div class="group flex items-center gap-0.5">
+      <button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 1 like"><svg class="lucide-heart"><path></path></svg><span>Like</span></button>
+      <button data-testid="tweet-like-action-count" aria-label="View 1 like" title="View 1 like">1</button></div></article>
+      <button class="w-full flex items-start border-b"><div class="mt-0.5 shrink-0"><svg class="lucide-heart text-rose-500" width="28" height="28"><path id="notice-heart"></path></svg></div></button>
+      </main></div><textarea>Favorite Like ❤ draft</textarea>`, { locale });
+    const button = f.document.querySelector('[data-testid="tweet-like-action"]');
+    const count = f.document.querySelector('[data-testid="tweet-like-action-count"]');
+    const icon = button.querySelector('svg'), labelNode = button.querySelector('span').firstChild;
+    let clicks = 0; button.addEventListener('click', () => clicks++);
+    f.qa.ctPrepareFavoritePresentation(); f.qa.start();
+    assert.equal(f.window.getComputedStyle(icon).display, 'none');
+    assert.equal(f.window.getComputedStyle(f.document.getElementById('notice-heart')).visibility, 'hidden');
+    f.settings.setClassicAppearance(false);
+    assert.equal(f.document.documentElement.dataset.ctFavoriteClassic, 'off');
+    assert.equal(button.querySelector('.ct-star'), null);
+    assert.notEqual(f.window.getComputedStyle(icon).display, 'none');
+    assert.notEqual(f.window.getComputedStyle(f.document.getElementById('notice-heart')).visibility, 'hidden');
+    assert.equal(button.className, 'text-tl-app-text-muted');
+    assert.equal(button.getAttribute('title'), null, 'the native absence of an action tooltip is restored');
+    assert.equal(labelNode.nodeValue, locale === 'ja' ? 'いいね' : 'Like');
+    assert.equal(count.getAttribute('aria-label'), locale === 'ja' ? '1件のいいねを表示' : 'View 1 likes');
+    assert.equal(count.title, locale === 'ja' ? '1件のいいねを表示' : 'View 1 likes');
+    button.className = 'text-pink-500'; button.setAttribute('aria-label', 'Like, 4 likes'); button.title = 'Like'; labelNode.nodeValue = 'Like';
+    count.textContent = '4'; count.setAttribute('aria-label', 'View 4 likes'); count.title = 'Native new count tooltip';
+    await f.flush();
+    assert.equal(button.getAttribute('aria-label'), locale === 'ja' ? 'いいねを取り消す, 4 件' : 'Unlike, 4 likes');
+    assert.equal(labelNode.nodeValue, locale === 'ja' ? 'いいねを取り消す' : 'Unlike');
+    assert.equal(button.querySelector('.ct-star'), null);
+    assert.equal(f.window.getComputedStyle(button).color, 'rgb(236, 72, 153)', 'native selected pink is released after OFF');
+    assert.equal(count.title, 'Native new count tooltip', 'native title changes are never reverted to an older snapshot');
+    assert.equal(count.getAttribute('aria-label'), locale === 'ja' ? '4件のいいねを表示' : 'View 4 likes');
+    const watcher = new f.window.MutationObserver(() => {});
+    watcher.observe(button.parentElement, { subtree:true, childList:true, attributes:true, characterData:true });
+    f.qa.patchFavoriteButtons(); assert.deepEqual(watcher.takeRecords(), [], 'a stable OFF scan cannot keep rewriting native controls'); watcher.disconnect();
+    f.settings.setClassicAppearance(true);
+    assert.equal(button.querySelectorAll('.ct-star').length, 1);
+    assert.equal(f.window.getComputedStyle(icon).display, 'none');
+    assert.equal(button.getAttribute('aria-label'), locale === 'ja' ? 'お気に入りを解除, 4 件' : 'Unfavorite, 4 favorites');
+    f.settings.setClassicAppearance(false);
+    assert.equal(button.querySelector('.ct-star'), null);
+    assert.equal(count.title, 'Native new count tooltip');
+    assert.equal(button.querySelector('svg'), icon); assert.equal(button.querySelector('span').firstChild, labelNode);
+    assert.equal(f.document.querySelector('textarea').value, 'Favorite Like ❤ draft');
+    assert.equal(f.document.querySelector('.tl-user-text').textContent, 'Favorite Like ❤ body');
+    button.click(); assert.equal(clicks, 1);
+  });
+
+  test(`${locale}: a saved classic OFF preference respects native first paint and React replacements`, async t => {
+    const f = harness(t, '<button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 2 likes"><svg class="lucide-heart"></svg>Like</button>', {
+      locale, values: { 'ct-classic-appearance-v1': false }
+    });
+    Object.defineProperty(f.document, 'readyState', { get: () => 'loading' });
+    const original = f.document.querySelector('button'); const before = original.outerHTML;
+    f.qa.ctPrepareFavoritePresentation();
+    assert.equal(original.querySelector('.ct-star'), null);
+    assert.notEqual(f.window.getComputedStyle(original.querySelector('svg')).display, 'none');
+    if (locale === 'en') assert.equal(original.outerHTML, before, 'English native controls stay byte-for-byte unchanged when OFF at startup');
+    else assert.equal(original.textContent, 'いいね');
+    const replacement = original.cloneNode(true);
+    replacement.className = 'text-pink-500'; replacement.setAttribute('aria-label', 'Like, 5 likes'); replacement.lastChild.nodeValue = 'Like';
+    original.replaceWith(replacement); await f.flush();
+    assert.equal(replacement.querySelector('.ct-star'), null);
+    assert.equal(replacement.textContent, locale === 'ja' ? 'いいねを取り消す' : 'Unlike');
+    assert.match(replacement.getAttribute('aria-label'), /5/);
+    f.document.getElementById('ct-favorite-presentation-style').remove(); await f.flush();
+    assert.equal(f.document.querySelectorAll('#ct-favorite-presentation-style').length, 1);
+    assert.notEqual(f.window.getComputedStyle(replacement.querySelector('svg')).display, 'none', 'reinstalled early CSS remains disabled');
+    f.window.dispatchEvent(new f.window.Event('pagehide'));
+    f.window.dispatchEvent(new f.window.PageTransitionEvent('pageshow', { persisted:true })); await f.flush();
+    assert.equal(replacement.querySelector('.ct-star'), null); assert.equal(f.timers.size, 0);
+  });
+
+  test(`${locale}: a visible Favorites dialog returns to native Likes without recreating its header or handlers`, async t => {
+    const f = harness(t, `<div role="dialog" aria-modal="true" aria-label="Liked by" class="bg-tl-app-card border">
+      <div class="flex items-center justify-between border-b"><h3 class="text-sm font-bold text-tl-app-text">Liked by</h3><button aria-label="Close liked by list"><svg class="lucide-x"></svg></button></div>
+      <div class="flex-1 overflow-y-auto"><div class="px-4 py-10 text-center text-xs text-tl-app-text-muted font-medium">No likes yet.</div>
+      <p class="tl-user-text">No favorites yet. Liked by Like ❤</p></div></div>`, { locale });
+    const dialog = f.document.querySelector('[role="dialog"]'), heading = dialog.querySelector('h3'), text = heading.firstChild, close = dialog.querySelector('button');
+    let closes = 0; close.addEventListener('click', () => closes++);
+    f.qa.ctPrepareFavoritePresentation(); f.qa.start(); f.settings.setClassicAppearance(false);
+    const label = locale === 'ja' ? 'いいねしたユーザー' : 'Liked by';
+    const closeLabel = locale === 'ja' ? 'いいねしたユーザー一覧を閉じる' : 'Close liked by list';
+    assert.equal(heading.textContent, label); assert.equal(heading.firstChild, text);
+    assert.equal(dialog.getAttribute('aria-label'), label); assert.equal(close.getAttribute('aria-label'), closeLabel);
+    assert.equal(close.getAttribute('title'), null);
+    assert.equal(dialog.querySelector('.text-center').textContent, locale === 'ja' ? 'いいねはまだありません。' : 'No likes yet.');
+    f.settings.setClassicAppearance(true); f.settings.setClassicAppearance(false); await f.flush();
+    assert.equal(heading.textContent, label);
+    assert.equal(dialog.querySelector('.tl-user-text').textContent, 'No favorites yet. Liked by Like ❤');
+    close.click(); assert.equal(closes, 1);
+  });
+}

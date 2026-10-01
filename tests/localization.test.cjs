@@ -29,10 +29,13 @@ function fixture(language, html, route = '/feed') {
     'nativeLocalizationPoll', 'isNativeLocalizationPollUI',
     'nativeLocalizationAccountMenu', 'nativeLocalizationAccountDialog',
     'localizationNotificationRow', 'localizationNotificationAction', 'isLocalizationUI',
-    'replaceLocalizationText', 'patchUIAttributes', 'translateTextNode', 'patchUI', 'patchInputs',
+    'ctLocalizationClassicEnabled', 'ctLocalizationState', 'ctLocalizationNativeRecordException', 'ctLocalizationRecordAllowed',
+    'ctLocalizationRead', 'ctLocalizationWrite', 'ctLocalizationForget', 'ctRememberLocalization',
+    'ctSyncLocalizationAppearance', 'replaceLocalizationText', 'patchUIAttributes', 'translateTextNode', 'patchUI', 'patchInputs',
     'patchNotifications', 'patchRetweetRows'
   ];
   const japanese = [
+    'ctLocalizationRegularText', 'ctLocalizationClassicText',
     'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
     'isNativeEditedIndicator',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
@@ -43,6 +46,7 @@ function fixture(language, html, route = '/feed') {
   const names = [...common, ...(language === 'ja' ? japanese : [])];
   dom.window.eval(`
     const clean = value => String(value ?? '').replace(/\\s+/g, ' ').trim();
+    const ctFavoritePresentationEnabled = () => window.qaClassic !== false;
     ${source.slice(start, end)}
     ${names.map(name => functionSource(source, name)).join('\n')}
     window.qa = { ${names.join(', ')} };
@@ -638,5 +642,123 @@ for (const language of ['ja', 'en']) test(`${language}: native Follow back and u
   f.run(); assert.equal(f.text('followback-name'), 'Follow back');
   assert.equal(f.text('followback'), language === 'ja' ? 'フォローバック' : 'Follow back');
   assert.equal(f.text('empty211'), language === 'ja' ? '通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。' : 'Nothing to see here yet. Favorites, Retweets, replies, quotes, mentions, and follows will show up here.');
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) {
+  test(`${language}: classic toggle restores native labels and keeps localization, content and React nodes`, () => {
+    const f = fixture(language, `<nav><button id="toggle-posts">Posts</button></nav>
+      <article><button id="toggle-like" aria-label="Like" title="Like">Like</button>
+      <p class="tl-user-text" id="toggle-body">Like Favorite お気に入り</p></article>
+      <div role="status" id="toggle-toast">Post liked</div>
+      <input id="toggle-input" placeholder="Post your reply" value="Favorite お気に入り">
+      <main><button class="items-start border-b" data-testid="notification-row">
+        <div><svg><path d="M0 0"></path></svg></div><div><p><span class="font-extrabold" id="toggle-actor">Like</span> <span id="toggle-action">liked your post</span></p>
+        <p class="line-clamp-2" id="toggle-preview">Favorite</p></div></button></main>`, '/notifications');
+    const like = f.document.getElementById('toggle-like');
+    const text = like.firstChild;
+    let clicks = 0;
+    like.addEventListener('click', () => clicks++);
+    f.run();
+    const on = language === 'ja' ? 'お気に入り' : 'Favorite';
+    const off = language === 'ja' ? 'いいね' : 'Like';
+    assert.equal(text.nodeValue, on);
+    assert.equal(like.title, on);
+    assert.equal(f.document.getElementById('toggle-input').placeholder, language === 'ja' ? '返信をツイート' : 'Tweet your reply');
+    assert.ok(f.document.querySelector('.ct-notification-fav-icon'));
+    f.dom.window.qaClassic = false;
+    f.qa.ctSyncLocalizationAppearance();
+    f.run();
+    assert.equal(like.firstChild, text);
+    assert.equal(text.nodeValue, off);
+    assert.equal(like.title, off);
+    assert.equal(like.getAttribute('aria-label'), off);
+    assert.equal(f.text('toggle-posts'), language === 'ja' ? 'ツイート' : 'Posts');
+    assert.equal(f.text('toggle-toast'), language === 'ja' ? 'いいねしました' : 'Post liked');
+    assert.equal(f.text('toggle-action'), language === 'ja' ? 'さんがあなたのツイートにいいねしました' : 'liked your post');
+    assert.equal(f.document.getElementById('toggle-input').placeholder, language === 'ja' ? '返信をツイート' : 'Post your reply');
+    assert.equal(f.document.querySelector('.ct-notification-fav-icon'), null);
+    f.dom.window.qaClassic = true;
+    f.qa.ctSyncLocalizationAppearance();
+    f.run();
+    assert.equal(text.nodeValue, on);
+    assert.equal(like.title, on);
+    assert.equal(f.text('toggle-action'), language === 'ja' ? 'さんがあなたのツイートをお気に入りに登録しました' : 'favorited your Tweet');
+    assert.ok(f.document.querySelector('.ct-notification-fav-icon'));
+    like.click();
+    assert.equal(clicks, 1);
+    assert.equal(f.text('toggle-body'), 'Like Favorite お気に入り');
+    assert.equal(f.text('toggle-actor'), 'Like');
+    assert.equal(f.text('toggle-preview'), 'Favorite');
+    assert.equal(f.document.getElementById('toggle-input').value, 'Favorite お気に入り');
+    f.dom.window.close();
+  });
+
+  test(`${language}: saved classic OFF never applies classic wording and later ON still works`, () => {
+    const f = fixture(language, `<nav><button id="saved-posts">Posts</button></nav>
+      <article><button id="saved-like" aria-label="Like">Like</button></article>
+      <div role="status" id="saved-toast">Like removed</div>
+      <input id="saved-reply" placeholder="Post your reply" value="My draft">`);
+    f.dom.window.qaClassic = false;
+    f.run();
+    assert.equal(f.text('saved-like'), language === 'ja' ? 'いいね' : 'Like');
+    assert.equal(f.text('saved-posts'), language === 'ja' ? 'ツイート' : 'Posts');
+    assert.equal(f.text('saved-toast'), language === 'ja' ? 'いいねを取り消しました' : 'Like removed');
+    assert.equal(f.document.getElementById('saved-reply').placeholder, language === 'ja' ? '返信をツイート' : 'Post your reply');
+    f.dom.window.qaClassic = true;
+    f.run();
+    assert.equal(f.text('saved-like'), language === 'ja' ? 'お気に入り' : 'Favorite');
+    assert.equal(f.text('saved-posts'), language === 'ja' ? 'ツイート' : 'Tweets');
+    assert.equal(f.document.getElementById('saved-reply').value, 'My draft');
+    f.dom.window.close();
+  });
+
+  test(`${language}: restoring classic wording respects native rerenders and forgets detached nodes`, () => {
+    const f = fixture(language, `<nav><button id="changed" aria-label="Like">Like</button><button id="detached">Posts</button></nav>
+      <input id="changed-input" placeholder="Post your reply" value="unchanged draft">`);
+    f.run();
+    const changed = f.document.getElementById('changed');
+    changed.firstChild.nodeValue = 'Post';
+    changed.setAttribute('aria-label', 'Report post');
+    f.document.getElementById('changed-input').placeholder = 'Search';
+    f.document.getElementById('detached').remove();
+    f.dom.window.qaClassic = false;
+    f.qa.ctSyncLocalizationAppearance();
+    assert.equal(changed.textContent, 'Post');
+    assert.equal(changed.getAttribute('aria-label'), 'Report post');
+    assert.equal(f.document.getElementById('changed-input').placeholder, 'Search');
+    assert.equal([...f.qa.ctLocalizationState().records].some(record => !record.node.isConnected), false);
+    f.run();
+    assert.equal(changed.textContent, language === 'ja' ? 'ツイート' : 'Post');
+    assert.equal(f.document.getElementById('changed-input').value, 'unchanged draft');
+    f.dom.window.qaClassic = true;
+    f.run();
+    assert.equal(changed.textContent, language === 'ja' ? 'ツイート' : 'Tweet');
+    assert.equal(changed.getAttribute('aria-label'), language === 'ja' ? 'ツイートを報告' : 'Report Tweet');
+    f.dom.window.close();
+  });
+}
+
+test('en: truncated native settings navigation restores wording while truncated profile names remain intact', () => {
+  const f = fixture('en', `<main><nav><button><svg></svg><span class="truncate" id="truncated-nav">Feed</span></button></nav>
+    <div><button><img src="avatar.png"><span class="truncate" id="truncated-name">Feed</span></button></div>
+    <h2 class="truncate" id="truncated-route">Settings</h2></main>`, '/settings');
+  const nav = f.document.getElementById('truncated-nav');
+  const node = nav.firstChild;
+  f.run();
+  assert.equal(nav.textContent, 'Home');
+  // A second scan must retain ownership of the translated label.
+  f.run();
+  f.dom.window.qaClassic = false;
+  f.qa.ctSyncLocalizationAppearance();
+  assert.equal(nav.textContent, 'Feed');
+  assert.equal(nav.firstChild, node);
+  assert.equal(f.text('truncated-name'), 'Feed');
+  f.run();
+  f.dom.window.qaClassic = true;
+  f.run();
+  assert.equal(nav.textContent, 'Home');
+  assert.equal(f.text('truncated-name'), 'Feed');
+  assert.equal(f.text('truncated-route'), 'Settings');
   f.dom.window.close();
 });
