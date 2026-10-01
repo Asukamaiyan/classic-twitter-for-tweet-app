@@ -13,6 +13,8 @@
 
 ## Greasy Forkの公開先照合
 
+[PR #10](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/10)をmainへマージ済み（`f24df8526ede75abf81c4cd4781e999c61ef56a4`）。最終コードコミット`3ede6e6c78de78e6a05929ee4ccfc2f6f0e6caf5`の[push検証](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/actions/runs/36868382119)と[PR検証](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/actions/runs/36868416204)が成功しました。
+
 既存3版を6.12.0へ更新し、日本語Android（598236）・英語Safari（598237）・英語Android（598238）を追加。全6版の限定公開（Unlisted）を維持しています。Safariの導入を「コードURLをコピー → Stayのリンクから追加 → 有効化」に短縮し、Chrome/Androidも追加・更新の短い手順と6版の選択表を掲載しました。
 
 全6版の通常インストールURLから取得したコードが、Greasy Fork追加のdownloadURL/updateURL・改行差を除いて検証済みファイルと一致しました。実際の掲載画面で版表示と選択表のリンクを確認。配布先・コードURLは[DISTRIBUTIONS.json](DISTRIBUTIONS.json)、プラットフォームの根拠は[API調査](API_RESEARCH.md)に記録しています。
