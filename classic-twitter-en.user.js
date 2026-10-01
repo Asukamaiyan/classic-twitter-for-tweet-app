@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.10.0
+// @version      6.11.0
 // @description  Classic blue Twitter layout and vector star Favorites, responsive desktop/mobile styling and reduced-motion-aware feedback. Preserves posts, replies, badges, photo slides, Japan/world news, safer translation and local tools.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1908,7 +1908,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const mask = fill => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${ctFavoriteStarPath}" fill="${fill ? 'black' : 'none'}" stroke="black" stroke-width="1.8" stroke-linejoin="round"/></svg>`)}")`;
     const button = 'button[data-testid="tweet-like-action"][data-testid]';
     const selected = `${button}:is([aria-pressed="true"],:not([aria-pressed]).text-pink-500,:not([aria-pressed]):not(.text-tl-app-text-muted):not(.text-pink-500).ct-is-liked)`;
-    const notification = '#root-container main button.w-full.flex.items-start.border-b > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]';
+    const notificationRows = [
+      '#root-container main button.w-full.flex.items-start.border-b',
+      '#root-container main div.border-b > button.w-full.flex.items-start.gap-3'
+    ];
+    const notificationIcons = notificationRows.map(row => `${row} > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]`);
     // React may replace both className and the icon before the next scan.
     // Stable native test IDs hide the heart immediately; the CSS vector fills
     // the brief gap until our motion-capable star is restored.
@@ -1930,12 +1934,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
       ${selected} > .ct-star svg { fill:currentColor!important; }
       ${selected} + :is(span.text-xs.tabular-nums,button[data-testid="tweet-like-action-count"]) { color:#ffac33!important; }
-      ${notification} {
+      ${notificationIcons.join(',')} {
         background:#ffac33!important;
         -webkit-mask:${mask(true)} center/contain no-repeat;
         mask:${mask(true)} center/contain no-repeat;
       }
-      ${notification} * { visibility:hidden!important; }
+      ${notificationIcons.map(icon => `${icon} *`).join(',')} { visibility:hidden!important; }
       @supports selector(:has(*)) {
         ${button}:has(> span.ct-star)::before { display:none!important; }
       }
@@ -2010,7 +2014,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (ctScanning || !ctPageActive) return;
     if (!mutations.some(m => {
       const el = m.target.nodeType === Node.ELEMENT_NODE ? m.target : m.target.parentElement;
-      if (el?.closest('[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel,#ct-reply-panel')) return false;
+      if (el?.closest('[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel')) return false;
       if (m.type === 'attributes') return m.oldValue !== m.target.getAttribute(m.attributeName);
       if (m.type === 'characterData') return m.oldValue !== m.target.data;
       if (m.type === 'childList' && m.addedNodes.length && m.removedNodes.length &&
@@ -2044,18 +2048,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   let ctTools = null;
-  let ctReplyInterval = null;
-  function ctStartReplyInterval() {
-    if (ctReplyInterval !== null) return;
-    ctReplyInterval = setInterval(() => {
-      if (!document.hidden && ctPageActive) replyWatchTick();
-    }, 90000);
-  }
 
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.10.0';
+    document.documentElement.dataset.ctActiveVersion = '6.11.0';
     ctStarted = true;
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
@@ -2087,8 +2084,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     });
     document.addEventListener('click', ctRememberTranslationChoice, true);
     ctRunScan();
-    ctStartReplyInterval();
-    replyWatchTick();
     window.addEventListener('popstate', ctScheduleScan);
     for (const name of ['pushState', 'replaceState']) {
       const original = history[name];
@@ -2100,7 +2095,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) ctCancelTranslations();
-      else { ctScheduleScan(); replyWatchTick(); }
+      else ctScheduleScan();
     });
     window.addEventListener('pagehide', () => {
       ctPageActive = false;
@@ -2108,16 +2103,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       clearTimeout(ctScanTimer);
       ctScanTimer = null;
       ctCancelTranslations();
-      clearInterval(ctReplyInterval);
-      ctReplyInterval = null;
     });
     window.addEventListener('pageshow', event => {
       if (event.persisted && !ctPageActive) {
         ctPageActive = true;
         ctObserve();
         ctScheduleScan();
-        ctStartReplyInterval();
-        replyWatchTick();
       }
     });
   }
@@ -2211,7 +2202,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const ctProfileState = {
     path: '', user: '', uid: null, authSeen: undefined, accountUser: '', active: '', tablist: null,
     timeline: null, panel: null, sequence: 0, identityBusy: false, identityRetry: 0,
-    nativeSelection: new Map(), tabsBound: new WeakSet(), rendered: '', media: null,
+    nativeSelection: new Map(), tabsBound: new WeakSet(), rendered: '', media: null, favoriteMutes: null,
     storageBound: false, storageError: false, memory: new Map(), dirtyMemory: new Set(), viewer: null
   };
   function ctProfileText(ja, en) { return CT_LOCALE === 'ja' ? ja : en; }
@@ -2297,10 +2288,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       return ctProfileFavoriteItems(JSON.parse(localStorage.getItem(KEY.favorites) || '[]'));
     } catch { return []; }
   }
-  function ctProfileImportFavorites() {
-    const uid = ctProfileUID();
+  function ctProfileImportFavorites(expectedUid = ctProfileUID()) {
+    const uid = expectedUid;
     const legacy = ctProfileLegacyFavorites();
-    if (!uid || !legacy.length) return;
+    if (!uid || uid !== ctProfileUID() || !legacy.length) return;
     try {
       const merged = [...ctProfileLoadFavorites(), ...legacy];
       const items = ctProfileFavoriteItems(merged).slice(0, 500);
@@ -2452,6 +2443,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function closeFavoritesPanel() {
     ctProfileState.sequence++;
+    ctProfileState.favoriteMutes = null;
     ctProfileState.active = ''; favoritesActive = false;
     ctProfileRestoreNative();
     for (const tab of ctProfileState.tablist?.querySelectorAll('[data-ct-profile-tab]') || []) {
@@ -2513,8 +2505,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (ctProfileState.active === type) return;
       ctProfileCloseViewer(); ctProfileState.sequence++;
       ctProfileState.active = type; favoritesActive = type === 'favorites'; ctProfileState.rendered = '';
+      ctProfileState.favoriteMutes = null;
       ctProfileShow(context);
       if (type === 'media' && !ctProfileMediaState().started) ctProfileLoadMedia();
+      if (type === 'favorites') ctProfileLoadFavoriteMutes();
     };
     return tab;
   }
@@ -2652,6 +2646,70 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const link = document.createElement('a'); link.className = 'ct-profile-post-link'; link.href = item.href;
     link.textContent = ctProfileText('元のツイートを開く', 'Open original Tweet'); main.append(link); row.append(main); return row;
   }
+  function ctProfileFavoriteMuteState() {
+    const uid = ctProfileUID();
+    if (!ctProfileState.favoriteMutes || ctProfileState.favoriteMutes.uid !== uid ||
+        ctProfileState.favoriteMutes.path !== ctProfileState.path || ctProfileState.favoriteMutes.user !== ctProfileState.user) {
+      ctProfileState.favoriteMutes = { uid, path: ctProfileState.path, user: ctProfileState.user,
+        handles: new Set(), cursors: new Set(), cursor: null, pages: 0, busy: false, done: false, error: '' };
+    }
+    return ctProfileState.favoriteMutes;
+  }
+  function ctProfileFavoriteMuteCurrent(state, sequence) {
+    return favoritesActive && ctProfileState.active === 'favorites' && ctProfileState.favoriteMutes === state &&
+      sequence === ctProfileState.sequence && location.pathname === state.path && ctProfileState.path === state.path &&
+      ctProfileState.user === state.user && ctProfileUID() === state.uid && ctProfileState.uid === state.uid &&
+      ctProfileState.accountUser === state.user && ctProfileContext()?.user === state.user;
+  }
+  async function ctProfileLoadFavoriteMutes(refresh = false) {
+    if (!favoritesActive || ctProfileState.active !== 'favorites') return;
+    let state = ctProfileFavoriteMuteState();
+    if (state.busy || (!refresh && state.done)) return;
+    if (refresh) {
+      ctProfileCloseViewer(); ctProfileState.sequence++;
+      ctProfileState.favoriteMutes = null; state = ctProfileFavoriteMuteState();
+    }
+    const sequence = ctProfileState.sequence;
+    if (!state.uid || !ctProfileFavoriteMuteCurrent(state, sequence)) { renderFavoritesPanel(); return; }
+    const active = () => !document.hidden && (typeof ctPageActive === 'undefined' || ctPageActive);
+    const paused = () => ctProfileText('このタブを表示してから、ミュート一覧の確認を再開してください。', 'Show this tab, then continue checking muted accounts.');
+    if (!active()) { state.error = paused(); renderFavoritesPanel(); return; }
+    state.busy = true; state.error = ''; renderFavoritesPanel();
+    try {
+      const auth = await getAuth();
+      if (!ctProfileFavoriteMuteCurrent(state, sequence)) return;
+      if (!auth?.token || auth.uid !== state.uid) throw new Error('sign-in');
+      const headers = { Authorization: `Bearer ${auth.token}` };
+      // Tweet's native muted-accounts consumer uses opaque nextCursor values,
+      // with no limit override. Check at most ten pages per explicit action.
+      for (let page = 0; page < 10 && !state.done; page++) {
+        if (!ctProfileFavoriteMuteCurrent(state, sequence)) return;
+        if (!active()) { state.error = paused(); return; }
+        const cursor = state.cursor;
+        const query = new URLSearchParams(); if (cursor) query.set('cursor', cursor);
+        const json = await requestJSON(API_ORIGIN + '/api/users/muted' + (cursor ? '?' + query : ''), headers);
+        const current = await getAuth();
+        if (!ctProfileFavoriteMuteCurrent(state, sequence) || current?.uid !== state.uid) return;
+        if (!active()) { state.error = paused(); return; }
+        if (!json || json.success !== true || json.error || !Array.isArray(json.users) || json.users.length > 1000 ||
+            json.users.some(user => !ctProfileId(user?.userId) || !ctProfileHandle(user?.username))) throw new Error('muted-response');
+        const next = json.nextCursor ?? null;
+        if (next !== null && (typeof next !== 'string' || !next || next.length > 2000 || next === cursor || state.cursors.has(next))) {
+          throw new Error('muted-cursor');
+        }
+        for (const user of json.users) state.handles.add(ctProfileHandle(user.username));
+        if (cursor) state.cursors.add(cursor);
+        state.cursor = next; state.pages++; state.done = !next;
+      }
+    } catch {
+      if (ctProfileFavoriteMuteCurrent(state, sequence)) state.error = ctProfileText(
+        'ミュート一覧を確認できませんでした。保存した投稿を表示する前に、再試行してください。',
+        'Muted accounts could not be checked. Try again before showing saved posts.');
+    } finally {
+      state.busy = false;
+      if (ctProfileFavoriteMuteCurrent(state, sequence)) renderFavoritesPanel();
+    }
+  }
   function renderFavoritesPanel() {
     if (!favoritesActive || ctProfileState.active !== 'favorites') return;
     const context = ctProfileContext();
@@ -2661,18 +2719,40 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const panel = ctProfileState.panel;
     if (!panel?.isConnected) return;
     const items = ctProfileLoadFavorites(); const legacy = ctProfileLegacyFavorites();
-    const signature = JSON.stringify(['favorites', ctProfileUID(), items, legacy.length, ctProfileState.storageError]);
+    const uid = ctProfileUID(); const muted = ctProfileFavoriteMuteState();
+    const signature = JSON.stringify(['favorites', uid, items, legacy.length, ctProfileState.storageError,
+      muted.busy, muted.done, muted.error, muted.pages, [...muted.handles]]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
     const content = document.createDocumentFragment();
     content.append(ctProfileStatus(ctProfileText('このブラウザで保存したお気に入りです。過去の全履歴や他の人のお気に入りは取得できません。', 'Favorites saved in this browser. Complete older history and other users’ Favorites are unavailable.')));
+    const controls = ctProfileStatus('');
+    const update = ctProfileControl(ctProfileText('表示を更新', 'Refresh view'), () => ctProfileLoadFavoriteMutes(true));
+    update.disabled = muted.busy; controls.append(update); content.append(controls);
     if (legacy.length) {
       const migration = ctProfileStatus(ctProfileText('以前の保存データがあります。使用中のアカウントのものか確認して取り込めます。', 'Older saved data is available. Import it if it belongs to this account.'));
-      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), ctProfileImportFavorites)); content.append(migration);
+      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.append(migration);
     }
     if (ctProfileState.storageError) content.append(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。保存設定を確認してください。', 'Browser storage is unavailable. Check your storage settings.')));
-    if (!items.length) { const empty = document.createElement('p'); empty.className = 'ct-profile-empty'; empty.textContent = ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.'); content.append(empty); }
-    else for (const item of items) content.append(ctProfileRow(item));
+    if (!muted.done) {
+      const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート一覧を確認中…', 'Checking muted accounts…') :
+        muted.error || ctProfileText('ミュート一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted accounts have been checked.'));
+      waiting.setAttribute('role', 'status');
+      if (!muted.busy) waiting.append(document.createElement('br'), ctProfileControl(
+        muted.error ? ctProfileText('再試行', 'Try again') : ctProfileText('続きを確認', 'Continue checking'), () => ctProfileLoadFavoriteMutes()));
+      content.append(waiting);
+    } else {
+      const visible = items.filter(item => item.username && !muted.handles.has(item.username));
+      if (visible.length < items.length) content.append(ctProfileStatus(ctProfileText(
+        `ミュートした作者や作者を確認できない投稿${items.length - visible.length}件を非表示にしています。保存データは保持しています。`,
+        `${items.length - visible.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`)));
+      if (!visible.length) {
+        const empty = document.createElement('p'); empty.className = 'ct-profile-empty';
+        empty.textContent = items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
+          ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.');
+        content.append(empty);
+      } else for (const item of visible) content.append(ctProfileRow(item));
+    }
     panel.replaceChildren(content);
   }
   function ctProfileMediaState() {
@@ -2686,7 +2766,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return ctProfileState.media;
   }
   function ctProfilePostItem(post, user) {
-    if (!ctProfileId(post?.id) || ctProfileHandle(post.authorUsername) !== user || post.isDeleted ||
+    if (!ctProfileId(post?.id) || ctProfileHandle(post.authorUsername) !== user || post.isDeleted || post.status === 'MUTED' ||
         post.isRepost || post.originalPostId || post.repostedBy) return null;
     const media = ctProfileMediaAssets(post);
     if (!media.length) return null;
@@ -2921,603 +3001,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }, 450);
   }
 
-    // Browser-local reply inbox. All routes and response shapes come from Tweet's own client.
-  // No native notification is marked read and no posting/following API is called here.
-  const ctReplyState = {
-    uid: null, data: null, busy: false, lastAttempt: -Infinity, error: '', storageError: false,
-    rendered: '', storageBound: false, tabActive: false, mount: null
-  };
-  const CT_REPLY_PREFIX = 'ct-replies-v2:';
-  const CT_REPLY_INTERVAL = 90000;
-  const CT_REPLY_THREADS = 24;
-  const CT_REPLY_BATCH = 6;
-  const CT_REPLY_PAGES = 3;
-
-  function ctReplyText(ja, en) { return CT_LOCALE === 'ja' ? ja : en; }
-  function ctReplyId(value) {
-    return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : null;
-  }
-  function ctReplyHandle(value) {
-    return typeof value === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(value) ? value : null;
-  }
-  function ctReplyAvatar(value) {
-    if (typeof value !== 'string' || value.length > 4000) return '';
-    try {
-      const url = new URL(value);
-      return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
-    } catch { return ''; }
-  }
-  function ctReplyEmpty() {
-    return { startedAt: Date.now(), checkedAt: 0, notices: [], seen: [], threads: {} };
-  }
-  function ctReplyBadgeMetadata(item) {
-    return {
-      authorBadges: Array.isArray(item.authorBadges) ? item.authorBadges.filter(value =>
-        typeof value === 'string' && /^(team_member|centurion|founding_special|founding|wing|ambassador|press)$/.test(value)) : [],
-      authorFoundingMemberNumber: /^\d{1,20}$/.test(String(item.authorFoundingMemberNumber ?? ''))
-        ? String(item.authorFoundingMemberNumber) : null
-    };
-  }
-  function ctReplyRead(uid) {
-    try {
-      const raw = JSON.parse(localStorage.getItem(CT_REPLY_PREFIX + encodeURIComponent(uid)) || 'null');
-      if (!raw || !Array.isArray(raw.notices)) return ctReplyEmpty();
-      return {
-        startedAt: Number(raw.startedAt) || Date.now(), checkedAt: Number(raw.checkedAt) || 0,
-        notices: raw.notices.filter(item => ctReplyId(item?.id) && ctReplyHandle(item?.authorUsername))
-          .slice(0, 100).map(item => ({
-            id: item.id, parentId: ctReplyId(item.parentId), authorUsername: item.authorUsername,
-            authorName: typeof item.authorName === 'string' ? item.authorName.slice(0, 200) : item.authorUsername,
-            authorAvatar: ctReplyAvatar(item.authorAvatar), text: typeof item.text === 'string' ? item.text.slice(0, 4000) : '',
-            createdAt: typeof item.createdAt === 'string' ? item.createdAt : '', detectedAt: Number(item.detectedAt) || 0,
-            read: item.read === true, ...ctReplyBadgeMetadata(item)
-          })),
-        seen: Array.isArray(raw.seen) ? raw.seen.filter(ctReplyId).slice(-4000) : [],
-        threads: raw.threads && typeof raw.threads === 'object' && !Array.isArray(raw.threads) ? raw.threads : {}
-      };
-    } catch { return ctReplyEmpty(); }
-  }
-  function ctReplyWrite(uid, data) {
-    // Preserve acknowledgements made by another tab while network requests were running.
-    const latest = ctReplyRead(uid);
-    const read = new Set(latest.notices.filter(item => item.read).map(item => item.id));
-    const notices = new Map(latest.notices.map(item => [item.id, item]));
-    for (const item of data.notices) notices.set(item.id, { ...item, read: item.read || read.has(item.id) });
-    const merged = {
-      ...data, notices: [...notices.values()].sort((a, b) =>
-        (Date.parse(b.createdAt) || b.detectedAt || 0) - (Date.parse(a.createdAt) || a.detectedAt || 0)
-      ).slice(0, 100), seen: [...new Set([...latest.seen, ...data.seen])].slice(-4000)
-    };
-    try {
-      localStorage.setItem(CT_REPLY_PREFIX + encodeURIComponent(uid), JSON.stringify(merged));
-      ctReplyState.storageError = false;
-      return merged;
-    } catch {
-      ctReplyState.storageError = true;
-      return merged;
-    }
-  }
-  function ctReplyCheckKnownIdentity() {
-    if (ctReplyState.uid && typeof ctNetworkState !== 'undefined' && ctNetworkState.authUID !== ctReplyState.uid) {
-      ctReplyState.uid = null;
-      ctReplyState.data = null;
-      ctReplyState.error = '';
-      ctReplyState.storageError = false;
-    }
-  }
-  function loadReplyNotices() {
-    ctReplyCheckKnownIdentity();
-    return ctReplyState.uid ? (ctReplyState.data?.notices || []) : [];
-  }
-  function markReplyRead(id, deferRender = false) {
-    ctReplyCheckKnownIdentity();
-    if (!ctReplyState.uid || !ctReplyState.data) return;
-    const data = ctReplyRead(ctReplyState.uid);
-    // Retain this tab's in-memory replies if browser storage is unavailable.
-    data.notices = [...new Map([...data.notices, ...loadReplyNotices()].map(item => [item.id, item])).values()]
-      .map(item => !id || item.id === id ? { ...item, read: true } : item);
-    ctReplyState.data = ctReplyWrite(ctReplyState.uid, { ...ctReplyState.data, notices: data.notices });
-    const updateUI = () => { renderReplyPanel(); patchReplyBadge(); };
-    // Keep the activated anchor connected until its native click action has run.
-    // This also preserves normal browser modifier-key/new-tab navigation.
-    if (deferRender) setTimeout(updateUI, 0);
-    else updateUI();
-  }
-  async function ctReplyJSON(path, auth) {
-    const json = await requestJSON(API_ORIGIN + path, { Authorization: `Bearer ${auth.token}` });
-    if (!json || typeof json !== 'object' || json.success === false || json.error) return null;
-    return json;
-  }
-  function ctReplySelectParents(posts, replies, username) {
-    const candidates = [...posts, ...replies.map(item => item?.post)];
-    return [...new Map(candidates.filter(post => ctReplyId(post?.id) &&
-      ctReplyHandle(post?.authorUsername)?.toLowerCase() === username.toLowerCase() &&
-      !post.originalPostId && !post.isRepost && !post.repostedBy).map(post => [post.id, post])).values()]
-      .sort((a, b) => (Date.parse(b.createdAt ?? b.created_at) || 0) - (Date.parse(a.createdAt ?? a.created_at) || 0))
-      .slice(0, CT_REPLY_THREADS)
-      .filter(post => Number(post.replyCount ?? post.comments ?? 0) > 0);
-  }
-  function ctReplyRecord(reply, parentId, username, data) {
-    const id = ctReplyId(reply?.id);
-    const handle = ctReplyHandle(reply?.authorUsername);
-    if (!id || !handle || handle.toLowerCase() === username.toLowerCase() || reply.isDeleted ||
-        reply.originalPostId || (reply.parentId && reply.parentId !== parentId)) return;
-    const existing = data.notices.find(item => item.id === id);
-    const wasSeen = data.seen.includes(id);
-    if (!wasSeen) data.seen.push(id);
-    if (wasSeen && !existing) return;
-    const createdAt = typeof (reply.createdAt ?? reply.created_at) === 'string' ? (reply.createdAt ?? reply.created_at) : '';
-    const created = Date.parse(createdAt);
-    const record = {
-      id, parentId, authorUsername: handle,
-      authorName: typeof reply.authorName === 'string' ? reply.authorName.slice(0, 200) : handle,
-      authorAvatar: ctReplyAvatar(reply.authorAvatar),
-      ...ctReplyBadgeMetadata(reply),
-      text: typeof reply.text === 'string' ? reply.text.slice(0, 4000) : '',
-      createdAt, detectedAt: existing?.detectedAt || Date.now(),
-      // Historical replies are useful history, but never an initial unread flood.
-      read: existing ? existing.read : (!Number.isFinite(created) || created <= data.startedAt)
-    };
-    // Trim by creation date only when committing, not by API/parent traversal order.
-    data.notices = [record, ...data.notices.filter(item => item.id !== id)];
-  }
-  async function replyWatchTick(force = false) {
-    if (ctReplyState.busy || document.hidden || (typeof ctPageActive !== 'undefined' && !ctPageActive)) return;
-    const now = Date.now();
-    ctReplyState.busy = true;
-    try {
-      const auth = await getAuth();
-      if (!auth?.token || !ctReplyId(auth.uid)) {
-        ctReplyState.uid = null;
-        ctReplyState.data = null;
-        ctReplyState.error = '';
-        ctReplyState.storageError = false;
-        return;
-      }
-      const accountChanged = ctReplyState.uid !== auth.uid;
-      // Identity checks are never throttled; a newly selected account does not
-      // inherit the previous account's polling deadline or visible inbox.
-      if (!accountChanged && now - ctReplyState.lastAttempt < (force ? 10000 : CT_REPLY_INTERVAL)) return;
-      ctReplyState.lastAttempt = now;
-      ctReplyState.error = '';
-      if (accountChanged) {
-        ctReplyState.uid = auth.uid;
-        ctReplyState.data = ctReplyRead(auth.uid);
-        ctReplyState.storageError = false;
-      }
-      renderReplyPanel();
-      patchReplyBadge();
-      // GET /api/user-profile requires the Firebase uid; the bare route is PUT-only.
-      const profileJSON = await ctReplyJSON('/api/user-profile/' + encodeURIComponent(auth.uid), auth);
-      const username = ctReplyHandle(profileJSON?.profile?.username);
-      if (!username) throw new Error('profile');
-      const [postsJSON, repliesJSON] = await Promise.all([
-        ctReplyJSON('/api/users/' + encodeURIComponent(username) + '/posts?limit=24', auth),
-        ctReplyJSON('/api/users/' + encodeURIComponent(username) + '/replies', auth)
-      ]);
-      if (!Array.isArray(postsJSON?.posts) || !Array.isArray(repliesJSON?.replies)) throw new Error('threads');
-      const data = JSON.parse(JSON.stringify(ctReplyState.data || ctReplyRead(auth.uid)));
-      const parents = ctReplySelectParents(postsJSON.posts, repliesJSON.replies, username);
-      const parentIds = new Set(parents.map(post => post.id));
-      data.threads = Object.fromEntries(Object.entries(data.threads).filter(([id]) => parentIds.has(id)));
-      const pending = parents.filter(post => {
-        const previous = data.threads[post.id];
-        return force || !previous || previous.cursor || previous.count !== Number(post.replyCount ?? post.comments) ||
-          now - previous.checkedAt >= 600000;
-      }).sort((a, b) => (data.threads[a.id]?.checkedAt || 0) - (data.threads[b.id]?.checkedAt || 0))
-        .slice(0, CT_REPLY_BATCH);
-      let failures = 0;
-      for (const parent of pending) {
-        if (document.hidden || (typeof ctPageActive !== 'undefined' && !ctPageActive)) break;
-        let cursor = data.threads[parent.id]?.cursor || null;
-        let successful = true;
-        for (let page = 0; page < CT_REPLY_PAGES; page++) {
-          const query = new URLSearchParams({ limit: '50' });
-          if (cursor) query.set('cursor', cursor);
-          const json = await ctReplyJSON('/api/posts/' + encodeURIComponent(parent.id) + '/replies?' + query, auth);
-          if (!Array.isArray(json?.replies)) { successful = false; failures++; break; }
-          for (const reply of json.replies) ctReplyRecord(reply, parent.id, username, data);
-          const next = typeof json.nextCursor === 'string' && json.nextCursor.length <= 2000 ? json.nextCursor : null;
-          if (!next || next === cursor) { cursor = null; break; }
-          cursor = next;
-        }
-        if (successful) data.threads[parent.id] = {
-          count: Number(parent.replyCount ?? parent.comments), checkedAt: now, cursor
-        };
-        // A failed page must not be remembered as a successful count baseline.
-      }
-      const current = await getAuth();
-      if (current?.uid !== auth.uid) {
-        ctReplyState.uid = null;
-        ctReplyState.data = null;
-        return;
-      }
-      data.checkedAt = now;
-      ctReplyState.data = ctReplyWrite(auth.uid, data);
-      if (failures) ctReplyState.error = ctReplyText('一部の返信を取得できませんでした。次回に再確認します。', 'Some replies could not be checked. They will be retried.');
-    } catch {
-      ctReplyState.error = ctReplyText('返信を取得できませんでした。ログイン状態を確認して、再確認してください。', 'Replies could not be checked. Check your sign-in and try again.');
-    } finally {
-      const current = await getAuth();
-      if (current?.uid !== ctReplyState.uid) {
-        ctReplyState.uid = null;
-        ctReplyState.data = null;
-      }
-      ctReplyState.busy = false;
-      renderReplyPanel();
-      patchReplyBadge();
-    }
-  }
-  function ctReplyRestoreNative() {
-    const mount = ctReplyState.mount;
-    if (!mount) return;
-    for (const [element, original] of mount.hidden) {
-      if (element.style.getPropertyValue('display') === 'none' && element.style.getPropertyPriority('display') === 'important') {
-        if (original.display) element.style.setProperty('display', original.display, original.priority);
-        else element.style.removeProperty('display');
-      }
-      if (element.getAttribute('aria-hidden') === 'true') {
-        if (original.aria === null) element.removeAttribute('aria-hidden');
-        else element.setAttribute('aria-hidden', original.aria);
-      }
-    }
-    mount.hidden.clear();
-    mount.bar.removeAttribute('data-ct-reply-tabs-active');
-  }
-  function closeReplyPanel() {
-    ctReplyRestoreNative();
-    ctReplyState.mount?.button.remove();
-    document.getElementById('ct-reply-panel')?.remove();
-    ctReplyState.mount = null;
-    ctReplyState.tabActive = false;
-    ctReplyState.rendered = '';
-  }
-  function ctReplyBindStorage() {
-    if (ctReplyState.storageBound) return;
-    ctReplyState.storageBound = true;
-    window.addEventListener('storage', event => {
-      if (ctReplyState.uid && event.key === CT_REPLY_PREFIX + encodeURIComponent(ctReplyState.uid)) {
-        ctReplyState.data = ctReplyRead(ctReplyState.uid);
-        renderReplyPanel();
-        patchReplyBadge();
-      }
-    });
-  }
-  function ctReplyInstallStyle() {
-    if (document.getElementById('ct-reply-ui-style')) return;
-    const style = document.createElement('style');
-    style.id = 'ct-reply-ui-style';
-    style.textContent = `
-      #ct-reply-tab { position:relative; flex:1; display:flex; align-items:center; justify-content:center; gap:4px; min-height:48px; min-width:0; padding:8px 6px; border:0; background:transparent; color:var(--tl-app-text-muted,inherit); font:inherit; font-size:15px; font-weight:500; line-height:1.3; cursor:pointer; }
-      #ct-reply-tab[aria-pressed="true"] { color:var(--tl-app-text,inherit); font-weight:800; }
-      #ct-reply-tab[aria-pressed="true"]::after { content:""; position:absolute; bottom:0; height:4px; width:56px; max-width:70%; border-radius:999px; background:var(--ct-classic-blue,#0ea5e9); }
-      #ct-reply-tab > [data-ct-reply-unread] { color:var(--ct-classic-blue,#0ea5e9); font-size:12px; }
-      [data-ct-reply-tabs-active] > button:not(#ct-reply-tab) > span { color:var(--tl-app-text-muted,inherit)!important; font-weight:500!important; }
-      [data-ct-reply-tabs-active] > button:not(#ct-reply-tab) > span.absolute.bottom-0 { display:none!important; }
-      #ct-reply-panel { --ct-reply-border:var(--ct-classic-border,var(--tl-app-border,#8b98a544)); --ct-reply-muted:var(--tl-app-text-muted,#657786); --ct-reply-accent:var(--ct-classic-blue,#0ea5e9); }
-      #ct-reply-panel summary { display:flex; align-items:center; justify-content:space-between; min-height:48px; padding:12px 16px; border-bottom:1px solid var(--ct-reply-border); cursor:pointer; list-style:none; font-weight:800; }
-      #ct-reply-panel summary::-webkit-details-marker { display:none; }
-      #ct-reply-panel summary::after { content:"⌄"; font-size:18px; color:var(--ct-reply-muted); }
-      #ct-reply-panel details[open] > summary::after { transform:rotate(180deg); }
-      #ct-reply-panel .ct-reply-controls { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; padding:8px 16px; border-bottom:1px solid var(--ct-reply-border); }
-      #ct-reply-panel .ct-reply-status { flex:1 1 150px; font-size:12px; line-height:1.5; color:var(--ct-reply-muted); overflow-wrap:anywhere; margin:0; }
-      #ct-reply-panel .ct-reply-control { min-height:44px; padding:8px 10px; border:0; background:transparent; color:var(--ct-reply-accent); border-radius:4px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
-      #ct-reply-panel .ct-reply-control:disabled { cursor:default; opacity:.5; }
-      #ct-reply-panel .ct-reply-help { margin:0; padding:0 16px 10px; font-size:12px; line-height:1.5; color:var(--ct-reply-muted); }
-      #ct-reply-panel .ct-reply-empty { margin:0; padding:40px 20px; color:var(--ct-reply-muted); font-size:15px; line-height:1.5; text-align:center; }
-      #ct-reply-panel .ct-local-reply-row { display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border-bottom:1px solid var(--ct-reply-border); }
-      #ct-reply-panel .ct-local-reply-row[data-unread="true"] { background:color-mix(in srgb,var(--ct-reply-accent) 5%,transparent); }
-      #ct-reply-panel .ct-reply-avatar-link { display:flex; align-items:center; justify-content:center; flex:0 0 40px; width:40px; height:40px; border-radius:50%; overflow:hidden; color:var(--ct-reply-accent); background:var(--tl-app-bg,#f5f8fa); font-size:18px; font-weight:700; text-decoration:none; }
-      #ct-reply-panel .ct-reply-avatar-link img { width:40px; height:40px; object-fit:cover; }
-      .ct-classic-shell #ct-reply-panel .ct-reply-avatar-link { border-radius:4px; }
-      #ct-reply-panel .ct-reply-content { flex:1; min-width:0; overflow-wrap:anywhere; }
-      #ct-reply-panel .ct-reply-actor-line { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 5px; font-size:15px; line-height:1.4; }
-      #ct-reply-panel .ct-reply-author { display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:100%; color:inherit; font-weight:800; text-decoration:none; }
-      #ct-reply-panel .ct-reply-name { overflow-wrap:anywhere; }
-      #ct-reply-panel .ct-reply-handle,#ct-reply-panel time { color:var(--ct-reply-muted); font-size:13px; }
-      #ct-reply-panel .ct-reply-unread { color:var(--ct-reply-accent); font-size:11px; }
-      #ct-reply-panel .ct-reply-body { display:block; margin:4px 0; color:inherit; text-decoration:none; font-size:15px; line-height:1.5; white-space:pre-wrap; }
-      #ct-reply-panel .ct-reply-parent { display:inline-flex; align-items:center; min-height:44px; color:var(--ct-reply-muted); font-size:12px; text-decoration:none; }
-      #ct-reply-panel .ct-official-badges { display:inline-flex; align-items:center; gap:2px; }
-      #ct-reply-panel .ct-official-badges img { width:18px; height:18px; object-fit:contain; }
-      #ct-reply-panel a:focus-visible,#ct-reply-panel button:focus-visible,#ct-reply-panel summary:focus-visible,#ct-reply-tab:focus-visible { outline:2px solid var(--ct-classic-blue,#0ea5e9); outline-offset:-2px; }
-      @media(hover:hover) { #ct-reply-tab:hover,#ct-reply-panel .ct-reply-control:hover,#ct-reply-panel .ct-local-reply-row:hover { background:var(--ct-classic-hover,var(--tl-app-bg,#f5f8fa)); } #ct-reply-panel .ct-reply-author:hover,#ct-reply-panel .ct-reply-parent:hover { text-decoration:underline; } }
-    `;
-    (document.head || document.documentElement).append(style);
-  }
-  function ctReplyNativeTabbar(main) {
-    // Tweet's kie notification component owns this exact row. Do not treat
-    // arbitrary sticky navigation, profile tabs or a hidden shell as its inbox.
-    return [...main.querySelectorAll('div.sticky')].find(bar => {
-      if (bar.closest('[data-ct-local-ui],[hidden],[aria-hidden="true"]') ||
-          !['flex', 'items-stretch', 'top-app-header', 'border-b', 'border-tl-app-border'].every(name => bar.classList.contains(name))) return false;
-      const nativeButtons = [...bar.children].filter(child => child.matches('button[type="button"]') && child.id !== 'ct-reply-tab');
-      return nativeButtons.length >= 2 && nativeButtons.every(button => button.classList.contains('flex-1')) &&
-        nativeButtons.some(button => /^(All|すべて)$/.test(button.textContent.trim())) &&
-        nativeButtons.some(button => /^(Mentions|メンション|@ツイート)$/.test(button.textContent.trim()));
-    }) || null;
-  }
-  function ctReplyMountTab(bar, panel) {
-    let mount = ctReplyState.mount;
-    if (mount?.bar !== bar) {
-      ctReplyRestoreNative();
-      mount?.button.remove();
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.id = 'ct-reply-tab';
-      button.dataset.ctLocalUi = 'reply-tab';
-      button.setAttribute('aria-controls', 'ct-reply-panel');
-      button.title = ctReplyText('このブラウザのリプライ通知', 'Reply notifications saved in this browser');
-      button.addEventListener('click', () => {
-        ctReplyState.tabActive = true;
-        renderReplyPanel();
-      });
-      mount = { bar, button, hidden: new Map() };
-      ctReplyState.mount = mount;
-      bar.addEventListener('click', event => {
-        const button = event.target.closest?.('button');
-        if (ctReplyState.mount?.bar !== bar || !button || button.id === 'ct-reply-tab' || button.parentElement !== bar) return;
-        ctReplyState.tabActive = false;
-        ctReplyRestoreNative();
-        renderReplyPanel();
-      }, true);
-      ctReplyState.rendered = '';
-    }
-    if (mount.button.parentElement !== bar) bar.append(mount.button);
-    if (panel.previousElementSibling !== bar) bar.after(panel);
-    if (mount.button.getAttribute('aria-pressed') !== String(ctReplyState.tabActive)) mount.button.setAttribute('aria-pressed', String(ctReplyState.tabActive));
-    if (ctReplyState.tabActive) {
-      if (!bar.hasAttribute('data-ct-reply-tabs-active')) bar.dataset.ctReplyTabsActive = '1';
-      for (const element of [...bar.parentElement.children]) {
-        if (element === bar || element === panel || element.hasAttribute('data-ct-local-ui')) continue;
-        if (!mount.hidden.has(element)) mount.hidden.set(element, {
-          display: element.style.getPropertyValue('display'), priority: element.style.getPropertyPriority('display'),
-          aria: element.getAttribute('aria-hidden')
-        });
-        if (element.style.getPropertyValue('display') !== 'none' || element.style.getPropertyPriority('display') !== 'important') element.style.setProperty('display', 'none', 'important');
-        if (element.getAttribute('aria-hidden') !== 'true') element.setAttribute('aria-hidden', 'true');
-      }
-    } else ctReplyRestoreNative();
-    return mount.button;
-  }
-  function ctReplyAppendBadges(actor, item) {
-    if (typeof ctProfileBadgeKinds !== 'function' || typeof ctBadgeSource !== 'function') return;
-    const kinds = ctProfileBadgeKinds({ badges: item.authorBadges, foundingMemberNumber: item.authorFoundingMemberNumber });
-    if (!kinds.length) return;
-    const group = document.createElement('span');
-    group.className = 'ct-official-badges';
-    group.setAttribute('role', 'img');
-    group.setAttribute('aria-label', kinds.map(kind => ctOfficialBadgeKinds[kind]).join(' + '));
-    group.title = group.getAttribute('aria-label');
-    for (const kind of kinds) {
-      const image = document.createElement('img');
-      image.src = ctBadgeSource(kind);
-      image.alt = '';
-      image.width = 18;
-      image.height = 18;
-      image.loading = 'lazy';
-      image.addEventListener('error', () => { image.src = `https://app.tweet.app/assets/${kind}-badge-36.png`; }, { once: true });
-      group.append(image);
-    }
-    actor.append(group);
-  }
-  function renderReplyPanel() {
-    ctReplyCheckKnownIdentity();
-    ctReplyBindStorage();
-    if (!/^\/notifications\/?$/.test(location.pathname)) { closeReplyPanel(); return; }
-    const main = document.querySelector('main');
-    if (!main) { closeReplyPanel(); return; }
-    ctReplyInstallStyle();
-    let panel = document.getElementById('ct-reply-panel');
-    if (!panel) {
-      panel = document.createElement('section');
-      panel.id = 'ct-reply-panel';
-      panel.dataset.ctLocalUi = 'replies';
-      panel.setAttribute('aria-label', ctReplyText('リプライ通知', 'Reply notifications'));
-      // Retire legacy floating-card rules while keeping the native document flow.
-      panel.style.cssText = 'position:relative!important;inset:auto!important;width:100%!important;max-width:100%!important;max-height:none!important;margin:0!important;padding:0!important;z-index:auto!important;box-shadow:none!important;border:0!important;border-radius:0!important;color:inherit!important;background:var(--tl-app-card,inherit)!important;overflow:visible!important';
-      ctReplyState.rendered = '';
-    }
-    const bar = ctReplyNativeTabbar(main);
-    let tab = null;
-    if (bar) {
-      tab = ctReplyMountTab(bar, panel);
-      panel.dataset.ctReplyMode = 'tab';
-      panel.hidden = !ctReplyState.tabActive;
-      panel.style.setProperty('display', ctReplyState.tabActive ? 'block' : 'none', 'important');
-    } else {
-      ctReplyRestoreNative();
-      ctReplyState.mount?.button.remove();
-      ctReplyState.mount = null;
-      if (panel.dataset.ctReplyMode !== 'inline') ctReplyState.rendered = '';
-      panel.dataset.ctReplyMode = 'inline';
-      panel.hidden = false;
-      panel.style.setProperty('display', 'block', 'important');
-      const heading = [...main.querySelectorAll('h1,h2')].find(el =>
-        !el.closest('[data-ct-local-ui],[hidden],[aria-hidden="true"]') && /^(Notifications|通知)$/.test(el.textContent.trim()));
-      const header = heading?.closest('.sticky') || heading?.parentElement;
-      if (header && header !== main) { if (panel.previousElementSibling !== header) header.after(panel); }
-      else if (panel.parentElement !== main) main.prepend(panel);
-    }
-    const notices = loadReplyNotices();
-    const unread = notices.filter(item => !item.read).length;
-    if (tab) {
-      const label = ctReplyText('リプライ', 'Replies');
-      const text = label + (unread ? ` ${unread}` : '');
-      if (tab.textContent !== text) {
-        tab.textContent = label;
-        if (unread) {
-          const count = document.createElement('span');
-          count.dataset.ctReplyUnread = '1';
-          count.textContent = ' ' + unread;
-          tab.append(count);
-        }
-      }
-    }
-    const signature = JSON.stringify([ctReplyState.uid, notices, ctReplyState.busy, ctReplyState.error, ctReplyState.storageError, ctReplyState.data?.checkedAt, panel.dataset.ctReplyMode, ctReplyState.tabActive]);
-    if (signature === ctReplyState.rendered) return;
-    ctReplyState.rendered = signature;
-    const open = panel.querySelector('details')?.open ?? false;
-    const focused = panel.contains(document.activeElement) ? document.activeElement?.dataset?.replyAction : null;
-    panel.replaceChildren();
-    let host = panel;
-    if (!tab) {
-      const details = document.createElement('details');
-      details.open = open;
-      const summary = document.createElement('summary');
-      summary.textContent = ctReplyText('リプライ通知', 'Reply notifications') + (unread ? ` (${unread})` : '');
-      summary.dataset.replyAction = 'summary';
-      details.append(summary);
-      panel.append(details);
-      host = details;
-    }
-    const controls = document.createElement('div');
-    controls.className = 'ct-reply-controls';
-    const status = document.createElement('p');
-    status.className = 'ct-reply-status';
-    status.setAttribute('role', 'status');
-    status.textContent = ctReplyState.storageError
-      ? ctReplyText('保存できません。このページを閉じると通知履歴が消えます。', 'Storage is unavailable. History will disappear when this page closes.')
-      : ctReplyState.busy ? ctReplyText('返信を確認中…', 'Checking replies…')
-      : ctReplyState.error || (!ctReplyState.uid ? ctReplyText('ログイン後に返信を確認します。', 'Sign in to check replies.')
-        : ctReplyState.data?.checkedAt ? ctReplyText('最終確認 ', 'Last checked ') + new Date(ctReplyState.data.checkedAt).toLocaleTimeString(CT_LOCALE, { hour: '2-digit', minute: '2-digit' })
-          : ctReplyText('返信の確認を待っています。', 'Waiting to check replies.'));
-    controls.append(status);
-    function control(label, action, callback) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'ct-reply-control';
-      button.textContent = label;
-      button.dataset.replyAction = action;
-      button.addEventListener('click', callback);
-      controls.append(button);
-      return button;
-    }
-    const refresh = control(ctReplyText('再確認', 'Check now'), 'refresh', () => replyWatchTick(true));
-    refresh.disabled = ctReplyState.busy;
-    const read = control(ctReplyText('すべて既読', 'Mark all read'), 'read', () => markReplyRead());
-    read.disabled = !unread;
-    host.append(controls);
-    const help = document.createElement('p');
-    help.className = 'ct-reply-help';
-    help.textContent = ctReplyText('通知履歴・既読はこのブラウザに保存されます。', 'Notification history and read status are saved in this browser.');
-    host.append(help);
-    if (!notices.length) {
-      const empty = document.createElement('p');
-      empty.className = 'ct-reply-empty';
-      empty.textContent = ctReplyText('確認した返信はまだありません。', 'No replies have been found yet.');
-      host.append(empty);
-    }
-    const list = document.createElement('div');
-    list.dataset.ctReplyList = '1';
-    for (const item of notices) {
-      const row = document.createElement('article');
-      row.className = 'ct-local-reply-row';
-      row.dataset.ctReplyId = item.id;
-      row.dataset.unread = String(!item.read);
-      const avatarLink = document.createElement('a');
-      avatarLink.className = 'ct-reply-avatar-link';
-      avatarLink.href = '/user/' + encodeURIComponent(item.authorUsername);
-      avatarLink.setAttribute('aria-label', ctReplyText(`${item.authorName || item.authorUsername}のプロフィール`, `${item.authorName || item.authorUsername}'s profile`));
-      avatarLink.dataset.replyAction = 'avatar:' + item.id;
-      avatarLink.textContent = Array.from(item.authorName || item.authorUsername)[0] || '';
-      const avatarURL = ctReplyAvatar(item.authorAvatar);
-      if (avatarURL) {
-        const avatar = document.createElement('img');
-        avatar.src = avatarURL;
-        avatar.alt = '';
-        avatar.width = 40;
-        avatar.height = 40;
-        avatar.loading = 'lazy';
-        avatar.referrerPolicy = 'no-referrer';
-        avatar.addEventListener('error', () => { avatarLink.textContent = Array.from(item.authorName || item.authorUsername)[0] || ''; }, { once: true });
-        avatarLink.replaceChildren(avatar);
-      }
-      row.append(avatarLink);
-      const content = document.createElement('div');
-      content.className = 'ct-reply-content';
-      const actorLine = document.createElement('div');
-      actorLine.className = 'ct-reply-actor-line';
-      const actor = document.createElement('a');
-      actor.className = 'ct-reply-author';
-      actor.href = avatarLink.href;
-      actor.dataset.replyAction = 'profile:' + item.id;
-      const name = document.createElement('span');
-      name.className = 'ct-reply-name';
-      name.textContent = item.authorName || item.authorUsername;
-      actor.append(name);
-      ctReplyAppendBadges(actor, item);
-      actorLine.append(actor);
-      const handle = document.createElement('span');
-      handle.className = 'ct-reply-handle';
-      handle.textContent = '@' + item.authorUsername;
-      actorLine.append(handle);
-      const date = new Date(item.createdAt);
-      if (Number.isFinite(date.getTime())) {
-        const time = document.createElement('time');
-        time.dateTime = date.toISOString();
-        time.title = date.toLocaleString(CT_LOCALE);
-        time.textContent = '· ' + date.toLocaleString(CT_LOCALE, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        actorLine.append(time);
-      }
-      if (!item.read) {
-        const marker = document.createElement('span');
-        marker.className = 'ct-reply-unread';
-        marker.textContent = ctReplyText('未読', 'Unread');
-        actorLine.append(marker);
-      }
-      content.append(actorLine);
-      const link = document.createElement('a');
-      link.className = 'ct-reply-body';
-      link.href = '/post/' + encodeURIComponent(item.id);
-      link.dataset.replyAction = 'open:' + item.id;
-      link.textContent = item.text || ctReplyText('返信を開く', 'Open reply');
-      link.addEventListener('click', () => markReplyRead(item.id, true));
-      content.append(link);
-      if (ctReplyId(item.parentId)) {
-        const parent = document.createElement('a');
-        parent.className = 'ct-reply-parent';
-        parent.href = '/post/' + encodeURIComponent(item.parentId);
-        parent.dataset.replyAction = 'parent:' + item.id;
-        parent.textContent = ctReplyText('返信先のツイートを見る', 'View the original tweet');
-        content.append(parent);
-      }
-      row.append(content);
-      list.append(row);
-    }
-    host.append(list);
-    if (focused) {
-      const previous = [...panel.querySelectorAll('[data-reply-action]')].find(element => element.dataset.replyAction === focused);
-      const target = previous && !previous.disabled ? previous : controls.querySelector('[data-reply-action="refresh"]') || tab;
-      target?.focus({ preventScroll: true });
-    }
-  }
-  function patchReplyBadge() {
-    document.getElementById('ct-reply-badge')?.remove(); // Retire the old detached overlay badge.
-    const count = loadReplyNotices().filter(item => !item.read).length;
-    for (const control of document.querySelectorAll('nav a,nav button,aside a,aside button')) {
-      const label = (control.getAttribute('aria-label') || '').trim();
-      const text = [...control.childNodes].filter(node => node.nodeType === Node.TEXT_NODE)
-        .map(node => node.textContent).join('').trim();
-      const nativeText = [...control.querySelectorAll('span')].filter(el => !el.closest('[data-ct-local-ui]'))
-        .map(el => el.textContent.trim());
-      const target = control.getAttribute('href') === '/notifications' ||
-        /^(Notifications|通知)$/.test(label) || /^(Notifications|通知)$/.test(text) || nativeText.some(value => /^(Notifications|通知)$/.test(value));
-      let badge = control.querySelector('[data-ct-reply-count]');
-      if (!target || !count) { badge?.remove(); continue; }
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.dataset.ctReplyCount = '1';
-        badge.dataset.ctLocalUi = 'reply-count';
-        badge.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-inline-start:4px;padding:0 4px;border-radius:999px;background:var(--ct-classic-blue,#0ea5e9);color:white;font-size:11px;font-weight:700;vertical-align:middle;pointer-events:none';
-        control.append(badge);
-      }
-      const display = `↩${count}`;
-      if (badge.textContent !== display) badge.textContent = display;
-      badge.setAttribute('aria-label', ctReplyText(`未読の返信 ${count} 件`, `${count} unread replies`));
-    }
-  }
-
     // The native notification row opens its representative event. Its avatars do
   // not have individual profile handlers, and their alt text is a display name,
   // never a username. Resolve identities only from native handles or API actors.
@@ -3572,9 +3055,17 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const url = avatar.tagName === 'IMG' ? ctAvatarURL(avatar.getAttribute('src')) : '';
     return name && name.length <= 512 && url !== null ? `${name}\n${url}` : null;
   }
+  function ctNativeNotificationRows() {
+    return [...document.querySelectorAll('main button.items-start')].filter(row =>
+      !row.closest('article,[data-ct-local-ui],[data-ct-owned]') &&
+      (row.matches('button.border-b') ||
+        (row.matches('button.w-full.flex.gap-3') && row.parentElement?.matches('div.border-b'))));
+  }
   function ctNotificationAvatarWrappers() {
     if (!/^\/notifications\/?$/.test(location.pathname)) return [];
-    return [...document.querySelectorAll(`main button.items-start.border-b ${ctAvatarWrapperSelector}`)]
+    // In 2.1 the border moves to a wrapper that also contains the Follow back
+    // list. Inspect the event button only; that list has working native links.
+    return ctNativeNotificationRows().flatMap(row => [...row.querySelectorAll(ctAvatarWrapperSelector)])
       .filter(el => ctNativeAvatar(el) && !el.closest('article,[data-ct-local-ui]'));
   }
   function ctNotificationAvatarHandle(wrapper) {
@@ -3703,7 +3194,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const link = event.target?.closest?.('a.ct-notification-profile-link');
     if (!link || !/^\/notifications\/?$/.test(location.pathname)) return;
     const wrapper = link.parentElement;
-    if (!wrapper?.matches(ctAvatarWrapperSelector) || !wrapper.closest('main button.items-start.border-b')) return;
+    const row = wrapper?.closest('main button.items-start');
+    if (!wrapper?.matches(ctAvatarWrapperSelector) || !ctNativeNotificationRows().includes(row)) return;
     // A React update may arrive between the last scan and this click. Never
     // navigate using the previous avatar's URL while the next scan is queued.
     const handle = ctNotificationAvatarHandle(wrapper);
@@ -3779,6 +3271,121 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ctNavigationState.uid = null;
     ctNavigationState.fetchedAt = ctNavigationState.retryAt = 0;
     ctNavigationState.loading = false;
+  }
+
+    // Filter only notifications already rendered by Tweet. Native fetching,
+  // unread counts, mute decisions, clicks and Follow back remain authoritative.
+  const ctNotificationFilters = { bar: null, panel: null, select: null, status: null,
+    type: '', uid: undefined, targets: new Set(), bound: new WeakSet() };
+  function ctNotificationFilterVisible(el) {
+    for (let node = el; node instanceof Element; node = node.parentElement) {
+      if (node.hidden || node.getAttribute('aria-hidden') === 'true' ||
+          node.style.display === 'none' || node.classList.contains('hidden')) return false;
+    }
+    return true;
+  }
+  function ctNotificationFilterBar() {
+    if (!/^\/notifications\/?$/.test(location.pathname)) return null;
+    return [...document.querySelectorAll('main div.flex.items-stretch.sticky')].find(bar => {
+      if (!ctNotificationFilterVisible(bar) || bar.closest('[data-ct-local-ui],[data-ct-owned]')) return false;
+      const buttons = [...bar.children].filter(el => el.matches('button'));
+      return buttons.length === 2 && /^(All|すべて)$/.test(buttons[0].textContent.trim()) &&
+        /^(Mentions|メンション|@ツイート)$/.test(buttons[1].textContent.trim());
+    }) || null;
+  }
+  function ctNotificationFilterType(row) {
+    // Only the event's direct leading 28px icon counts. A heart or reply icon
+    // inside the post preview, badge, quoted tweet or expanded list is content.
+    const icon = row.querySelector(':scope > div.shrink-0 > svg[width="28"][height="28"]');
+    if (icon?.classList.contains('lucide-message-circle')) return 'reply';
+    if (icon?.classList.contains('lucide-heart')) return 'like';
+    if (icon?.classList.contains('lucide-repeat-2')) return 'repost';
+    if (icon?.classList.contains('lucide-user-plus')) return 'follow';
+    // Unknown and system notifications stay visible in every filter.
+    return null;
+  }
+  function ctResetNotificationFilter(remove = false) {
+    for (const target of ctNotificationFilters.targets) target.removeAttribute('data-ct-notification-hidden');
+    ctNotificationFilters.targets.clear();
+    ctNotificationFilters.type = '';
+    if (ctNotificationFilters.select) ctNotificationFilters.select.value = '';
+    if (remove) {
+      ctNotificationFilters.panel?.remove();
+      ctNotificationFilters.bar = ctNotificationFilters.panel = ctNotificationFilters.select = ctNotificationFilters.status = null;
+    }
+  }
+  function ctApplyNotificationFilter() {
+    if (!ctNotificationFilters.bar?.isConnected || !ctNotificationFilters.panel?.isConnected ||
+        ctNotificationFilters.panel.previousElementSibling !== ctNotificationFilters.bar || !ctNotificationFilterBar()) {
+      ctResetNotificationFilter(true); return;
+    }
+    const rows = ctNativeNotificationRows().filter(row =>
+      row.closest('main') === ctNotificationFilters.bar.closest('main') &&
+      ctNotificationFilterVisible(row));
+    const targets = new Set(); let visible = 0; let retained = 0;
+    for (const row of rows) {
+      const target = row.parentElement.matches('div.border-b') ? row.parentElement : row;
+      targets.add(target);
+      const type = ctNotificationFilterType(row);
+      const hide = !!ctNotificationFilters.type && !!type && type !== ctNotificationFilters.type;
+      if (hide) target.setAttribute('data-ct-notification-hidden', 'true');
+      else { target.removeAttribute('data-ct-notification-hidden'); visible++; }
+      if (!type) retained++;
+    }
+    for (const target of ctNotificationFilters.targets) {
+      if (!targets.has(target)) target.removeAttribute('data-ct-notification-hidden');
+    }
+    ctNotificationFilters.targets = targets;
+    const ja = CT_LOCALE === 'ja';
+    const text = ja ? `読み込み済み${rows.length}件中${visible}件を表示${ctNotificationFilters.type && retained ? '（その他の通知も表示）' : ''}` :
+      `Showing ${visible} of ${rows.length} loaded notifications${ctNotificationFilters.type && retained ? ' (other notifications included)' : ''}`;
+    if (ctNotificationFilters.status.textContent !== text) ctNotificationFilters.status.textContent = text;
+  }
+  function ctPatchNotificationFilters() {
+    const bar = ctNotificationFilterBar();
+    const uid = typeof ctNetworkState !== 'undefined' ? ctNetworkState.authUID : null;
+    if (!bar) { ctResetNotificationFilter(true); ctNotificationFilters.uid = uid; return; }
+    if (bar !== ctNotificationFilters.bar || uid !== ctNotificationFilters.uid ||
+        (ctNotificationFilters.panel && (!ctNotificationFilters.panel.isConnected ||
+          ctNotificationFilters.panel.previousElementSibling !== bar))) {
+      ctResetNotificationFilter(true); ctNotificationFilters.uid = uid;
+    }
+    if (!ctNotificationFilters.panel) {
+      if (!document.getElementById('ct-notification-filter-style')) {
+        const style = document.createElement('style'); style.id = 'ct-notification-filter-style';
+        style.textContent = `[data-ct-notification-hidden="true"]{display:none!important}
+          .ct-notification-filters{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:8px 16px;border-bottom:1px solid var(--color-tl-app-border,#8b98a544);font-size:12px}
+          .ct-notification-filters label{display:flex;align-items:center;gap:8px;min-width:0}
+          .ct-notification-filters select{max-width:100%;min-height:44px;padding:4px 8px;border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;background:var(--color-tl-app-card,#fff);color:inherit;font:inherit;cursor:pointer}
+          .ct-notification-filters p{margin:0;color:var(--color-tl-app-text-muted,#657786)}
+          .ct-notification-filters select:focus-visible{outline:2px solid var(--color-tl-app-primary,#1da1f2);outline-offset:2px}`;
+        document.head.append(style);
+      }
+      const ja = CT_LOCALE === 'ja';
+      const panel = document.createElement('div'); panel.className = 'ct-notification-filters';
+      panel.dataset.ctLocalUi = 'notification-filters';
+      const label = document.createElement('label'); label.textContent = ja ? '通知の種類' : 'Notification type';
+      const select = document.createElement('select'); select.setAttribute('aria-label', label.textContent);
+      for (const [value, text] of [['',ja ? '全種類' : 'All types'],['reply',ja ? '返信' : 'Replies'],
+        ['like',ja ? 'お気に入り' : 'Favorites'],['repost',ja ? 'リツイート' : 'Retweets'],['follow',ja ? 'フォロー' : 'Follows']]) {
+        const option = document.createElement('option'); option.value = value; option.textContent = text; select.append(option);
+      }
+      label.append(select);
+      const status = document.createElement('p'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+      panel.append(label, status); bar.after(panel);
+      Object.assign(ctNotificationFilters, { bar, panel, select, status });
+      select.addEventListener('change', () => {
+        ctNotificationFilters.type = select.value; ctApplyNotificationFilter();
+      });
+      if (!ctNotificationFilters.bound.has(bar)) {
+        ctNotificationFilters.bound.add(bar);
+        bar.addEventListener('click', event => {
+          const button = event.target.closest('button');
+          if (button?.parentElement === bar) { ctResetNotificationFilter(); ctApplyNotificationFilter(); }
+        }, true);
+      }
+    }
+    ctApplyNotificationFilter();
   }
 
     // Official badge artwork and membership precedence from Tweet's web client.
@@ -4010,7 +3617,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         ![...toolbar.children].some(el => el.matches('input[type="file"][accept="video/mp4,video/quicktime"]'))) return null;
     const actions = [...toolbar.children].find(el => el.matches('div.flex.items-center'));
     const buttons = actions ? [...actions.children].filter(el => el.tagName === 'BUTTON') : [];
-    return buttons.length === 2 ? { root, toolbar, photoButton: buttons[0], videoButton: buttons[1] } : null;
+    // Tweet 2.1 adds a poll toggle beside the two media controls. Identify the
+    // verified native icons rather than counting buttons or treating poll as video.
+    const photos = buttons.filter(el => el.querySelector(':scope > svg.lucide-image'));
+    const videos = buttons.filter(el => el.querySelector(':scope > svg.lucide-video'));
+    return photos.length === 1 && videos.length === 1
+      ? { root, toolbar, photoButton: photos[0], videoButton: videos[0] } : null;
   }
   function ctMediaPreviews(root) { return [...root.querySelectorAll('img[alt="Upload preview"]')]; }
   function ctMediaPreviewReady(image) {
@@ -4792,10 +4404,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   const KEY = {
     favorites: 'classicTwitterEN.favorites',
-    replyNotices: 'classicTwitterEN.replyNotifications',
-    replySeen: 'classicTwitterEN.replySeenIds',
-    replyCounts: 'classicTwitterEN.replyCounts',
-    replyInit: 'classicTwitterEN.replyWatcherInitialized',
     autoTranslate: 'classicTwitterEN.autoTranslate'
   };
 
@@ -4824,6 +4432,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   const EN = new Map([
     ['Feed', 'Home'],
+    ['Nothing to see here yet. Likes, reposts, replies, quotes, mentions, and follows will show up here.', 'Nothing to see here yet. Favorites, Retweets, replies, quotes, mentions, and follows will show up here.'],
+    ['quoted your post', 'quoted your Tweet'],
+    ['quoted your tweet', 'quoted your Tweet'],
     ['Posts', 'Tweets'],
     ['No posts yet.', 'No Tweets yet.'],
     ['No reposts yet.', 'No Retweets yet.'],
@@ -4933,8 +4544,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         color:#1d9bf0;
         border-bottom-color:#1d9bf0!important;
       }
-      #ct-favorites-panel,
-      #ct-reply-panel {
+      #ct-favorites-panel {
         position:fixed;
         z-index:2147482000;
         overflow:auto;
@@ -4945,7 +4555,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         box-shadow:0 10px 35px rgba(0,0,0,.25);
       }
       #ct-favorites-panel { border-radius:0 0 12px 12px; }
-      #ct-reply-panel { border-radius:14px; max-height:min(48vh,460px); }
       .ct-local-head {
         position:sticky;
         top:0;
@@ -5006,20 +4615,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         line-height:20px;
       }
       .ct-local-empty { padding:28px 18px; text-align:center; opacity:.65; }
-      .ct-reply-kicker { font-size:12px; color:#1d9bf0; margin-bottom:3px; }
-      #ct-reply-badge {
-        position:fixed;
-        z-index:2147483000;
-        min-width:18px;
-        height:18px;
-        padding:0 5px;
-        border-radius:999px;
-        background:#1d9bf0;
-        color:#fff;
-        font:700 11px/18px Arial;
-        text-align:center;
-        pointer-events:none;
-      }
     `;
 
     (document.head || document.documentElement).appendChild(style);
@@ -5093,20 +4688,75 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       Number.isFinite(Date.parse(title));
   }
 
+  // Tweet v2.1.0 keeps user-written poll choices in tl-user-text. Recognize
+  // only the surrounding native poll chrome; never treat a whole fieldset as UI.
+  function nativeLocalizationPoll(el) {
+    if (!el || isOwnedLocalizationElement(el)) return null;
+    const compose = el.closest('fieldset.relative.w-full.mt-3.rounded-2xl.border');
+    if (compose && /^(?:Poll|投票)$/.test(clean(compose.querySelector(':scope > legend')?.textContent)) &&
+        compose.querySelector('input[type="text"][maxlength="25"][id*="-choice-"]') &&
+        [...compose.querySelectorAll('select option')].map(option => option.value).join(',') === '1,24,72,168') {
+      return { root: compose, compose: true };
+    }
+    if (!el.closest('article')) return null;
+    for (let candidate = el; candidate && candidate.tagName !== 'ARTICLE'; candidate = candidate.parentElement) {
+      if (!candidate.matches('div.mt-3')) continue;
+      const choices = candidate.querySelector(':scope > fieldset.flex.flex-col');
+      const results = candidate.querySelector(':scope > div > ul[aria-label="Poll results"],:scope > div > ul[aria-label="投票結果"]');
+      const labels = choices && [...choices.querySelectorAll(':scope > label')];
+      if (choices && /^(?:Poll choices|投票の選択肢)$/.test(clean(choices.querySelector(':scope > legend')?.textContent)) &&
+          labels.length >= 2 && labels.length <= 5 && labels.every(label =>
+            label.querySelector(':scope > input[type="radio"]') && label.querySelector(':scope > span.tl-user-text'))) {
+        return { root: candidate, compose: false };
+      }
+      if (results && results.children.length >= 2 && results.children.length <= 5 &&
+          [...results.children].every(row => row.matches('li.relative.overflow-hidden') && row.querySelector('span.tl-user-text'))) {
+        return { root: candidate, compose: false };
+      }
+    }
+    return null;
+  }
+
+  function isNativeLocalizationPollUI(el) {
+    const poll = nativeLocalizationPoll(el);
+    if (!poll) return false;
+    if (poll.compose) return el.matches('legend,label,button,button span,p[role="status"]');
+    return el.matches('legend.sr-only,span.sr-only,p[role="status"],p[role="alert"]') ||
+      (el.matches('button') && el.parentElement?.matches('div.mt-2.flex.items-center.justify-between')) ||
+      (el.matches('span.text-tl-app-text-muted,p.text-tl-app-text-muted') &&
+        (el.parentElement?.matches('div.mt-2.flex.items-center.justify-between') ||
+          el.parentElement?.matches('div.flex.flex-col.outline-none')));
+  }
+
+  function nativeLocalizationAccountMenu(el) {
+    if (!el?.matches('span.min-w-0.truncate') || !el.parentElement?.matches('button[role="menuitem"]') ||
+        !el.parentElement.querySelector(':scope > svg') || !el.parentElement.parentElement?.matches('[role="menu"]')) return null;
+    const host = el.parentElement.parentElement.parentElement;
+    const trigger = host?.querySelector(':scope > button[aria-haspopup="menu"]');
+    return trigger && /^(?:Profile options|プロフィールのメニュー)$/.test(trigger.getAttribute('aria-label') || '') ? el : null;
+  }
+
+  function nativeLocalizationAccountDialog(el) {
+    const dialog = el?.closest('[role="dialog"][aria-modal="true"].bg-tl-app-card.border');
+    if (!dialog || !/^(?:Report @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+を報告)$/.test(dialog.getAttribute('aria-label') || '') ||
+        !dialog.querySelector('h3.text-sm.font-bold.text-tl-app-text')) return null;
+    return dialog;
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
       'textarea,input,select,option,script,style,code,pre,kbd,samp,svg,' +
       '[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,' +
       '[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],' +
-      '.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
+      '.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
     // protection for profile names and account values everywhere else.
     const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications' }[location.pathname.replace(/\/$/, '')];
     const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
       el === document.querySelector('main h2') && !el.closest('article');
-    return !!el.closest('.truncate') && !isNativeSettingsNavigation(el) && !pageTitle;
+    return !!el.closest('.truncate') && !nativeLocalizationAccountMenu(el) && !isNativeSettingsNavigation(el) && !pageTitle;
   }
 
   function localizationNotificationRow(el) {
@@ -5115,7 +4765,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!row?.closest('main') || isOwnedLocalizationElement(row)) return null;
     // Current tweet.app notification rows are border-separated buttons. Do not
     // interpret tab buttons or arbitrary paragraphs as notification content.
-    return row.matches('.items-start.border-b,[data-testid="notification-row"]') ? row : null;
+    if (row.matches('.items-start.border-b,[data-testid="notification-row"]')) return row;
+    // v2.1.0 moved the separator to a wrapper so the native Follow list can
+    // expand below its action. Match its 28px leading icon and direct body.
+    const icon = row.firstElementChild;
+    const body = icon?.nextElementSibling;
+    return row.matches('button.w-full.flex.items-start.text-left') &&
+      row.parentElement?.matches('div.border-b.border-tl-app-border') &&
+      row.parentElement.firstElementChild === row && icon?.matches('div.mt-0\\.5.shrink-0') &&
+      icon.querySelector(':scope > svg[width="28"][height="28"]') &&
+      body?.matches('div.flex-1.min-w-0') && body.querySelector(':scope > p') ? row : null;
   }
 
   function localizationNotificationAction(node) {
@@ -5136,6 +4795,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (isProtectedLocalizationElement(el)) return false;
     if (localizationNotificationAction(node)) return true;
     if (localizationNotificationRow(el)) return false;
+    if (isNativeLocalizationPollUI(el)) return true;
+    if (nativeLocalizationAccountMenu(el)) return node === el.firstChild &&
+      /^(?:Report|Mute unavailable|(?:Mute|Unmute) @[A-Za-z0-9_.-]+)$/.test(clean(node.nodeValue));
+    if (nativeLocalizationAccountDialog(el) && !el.closest('textarea,input')) return true;
     const text = clean(node.nodeValue);
     const link = el.closest('a[href]');
     if (link) {
@@ -5202,8 +4865,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     host?.querySelectorAll?.('button,[role="tab"],[role="menuitem"],input,textarea').forEach(el => controls.push(el));
     for (const el of controls) {
       if (isOwnedLocalizationElement(el) ||
-          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
-          el.closest('.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
+          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
+          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
       if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
           el.querySelector(':scope > svg.lucide-x') &&
           el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
@@ -5241,7 +4904,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ]);
     for (const el of list) {
       if (isOwnedLocalizationElement(el) ||
-          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
+          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
       const value = el.getAttribute('placeholder');
       const out = placeholders.get(value);
       if (out && out !== value) el.setAttribute('placeholder', out);
@@ -5366,7 +5029,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
 
 
-  function localCard(item, reply = false) {
+  function localCard(item) {
     const row = document.createElement('div');
     row.className = 'ct-local-card';
 
@@ -5380,12 +5043,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const main = document.createElement('div');
     main.className = 'ct-local-main';
 
-    if (reply) {
-      const kicker = document.createElement('div');
-      kicker.className = 'ct-reply-kicker';
-      kicker.textContent = 'replied to your Tweet';
-      main.appendChild(kicker);
-    }
 
     const meta = document.createElement('div');
     meta.className = 'ct-local-meta';
@@ -5550,9 +5207,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       patchFavoriteProfileTab();
 
       if (favoritesActive) renderFavoritesPanel();
-      renderReplyPanel();
-      patchReplyBadge();
     patchNavigation(root);
+    ctPatchNotificationFilters();
     patchOfficialBadges(root);
     ctMediaEnhance(root);
     patchJapaneseNews(root);
@@ -5567,5 +5223,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.10.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.11.0 loaded');
 })();

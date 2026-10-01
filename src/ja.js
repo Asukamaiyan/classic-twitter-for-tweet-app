@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.10.0
+// @version      6.11.0
 // @description  昔のTwitter風の青い表示と星のお気に入り。スマホ・デスクトップ対応、控えめな動き、日本語UI、返信通知・バッジ・複数写真・日本ニュース・翻訳・保存ツール。投稿本文や名前を保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -29,8 +29,8 @@
   /* @include presentation */
   /* @include profile */
   /* @include favorite-capture */
-  /* @include replies */
   /* @include navigation */
+  /* @include notification-filters */
   /* @include badges */
   /* @include media */
   /* @include news */
@@ -42,10 +42,6 @@
 
   const KEY = {
     favorites: 'classicTwitterJP.favorites',
-    replyNotices: 'classicTwitterJP.replyNotifications',
-    replySeen: 'classicTwitterJP.replySeenIds',
-    replyCounts: 'classicTwitterJP.replyCounts',
-    replyInit: 'classicTwitterJP.replyWatcherInitialized',
     autoTranslate: 'classicTwitterJP.autoTranslate'
   };
 
@@ -87,6 +83,54 @@
   }
 
   const JP = new Map([
+    ['Follow back', 'フォローバック'],
+    ['Profile options', 'プロフィールのメニュー'],
+    ['Mute', 'ミュート'],
+    ['Mute unavailable', 'ミュートを利用できません'],
+    ['Muted', 'ミュート済み'],
+    ['Muting...', 'ミュート中…'],
+    ['Poll', '投票'],
+    ['Add poll', '投票を追加'],
+    ['Remove poll', '投票を削除'],
+    ['Add choice', '選択肢を追加'],
+    ['Poll length', '投票期間'],
+    ['Poll choices', '投票の選択肢'],
+    ['Poll results', '投票結果'],
+    ['Vote', '投票する'],
+    ['Final results', '最終結果'],
+    ['Closing…', '終了処理中…'],
+    ['(your vote)', '（あなたの投票）'],
+    ['Vote recorded.', '投票を記録しました。'],
+    ['Your vote could not be recorded. Try again.', '投票を記録できませんでした。もう一度お試しください。'],
+    ['A poll needs at least 2 choices.', '選択肢は2つ以上必要です。'],
+    ['A poll can have at most 5 choices.', '選択肢は5つまで追加できます。'],
+    ['Poll choices cannot be empty.', '選択肢を入力してください。'],
+    ['Poll choices must be 25 characters or fewer.', '選択肢は25文字以内で入力してください。'],
+    ['Poll choices must be different from each other.', '選択肢にはそれぞれ異なる内容を入力してください。'],
+    ['Poll length must be 1 hour, 1 day, 3 days, or 7 days.', '投票期間は1時間、1日、3日、7日から選択してください。'],
+    ['A poll post cannot include media. Remove the media or the poll.', '投票と写真・動画は同時に投稿できません。どちらかを削除してください。'],
+    ['Nothing to see here yet. Likes, reposts, replies, quotes, mentions, and follows will show up here.', '通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。'],
+    ['When someone quotes or mentions you, it will show up here.', 'あなたへの引用や@ツイートがここに表示されます。'],
+    ['Why are you reporting this account?', 'このアカウントを報告する理由は何ですか？'],
+    ['Why are you reporting this?', '報告する理由は何ですか？'],
+    ['Your report is private. We use it to review and improve safety.', '報告内容は公開されません。安全性の確認・改善に使用されます。'],
+    ['Additional details (optional)', '補足事項（任意）'],
+    ['Add context that helps our review team.', '確認に役立つ補足事項を入力してください。'],
+    ['Submit report', '報告を送信'],
+    ['Submitting...', '送信中…'],
+    ['Thanks for your report', '報告ありがとうございます'],
+    ['Our moderation team will review this account. You can also mute them so their posts no longer appear in your feed.', '運営がこのアカウントを確認します。ミュートすると、このアカウントのツイートがタイムラインに表示されなくなります。'],
+    ['Please sign in to report an account.', 'アカウントを報告するにはログインしてください。'],
+    ['Please choose a reason before submitting.', '送信する前に理由を選択してください。'],
+    ['Unable to submit your report right now. Please try again.', '現在、報告を送信できません。もう一度お試しください。'],
+    ['Unable to mute this account right now. Please try again.', '現在、このアカウントをミュートできません。もう一度お試しください。'],
+    ['Harassment or bullying', '嫌がらせ・いじめ'],
+    ['Impersonation', 'なりすまし'],
+    ['Spam or fake account', 'スパム・偽アカウント'],
+    ['Something else', 'その他'],
+    ['Reason', '理由'],
+    ['Done', '完了'],
+    ['Back', '戻る'],
     ['Home', 'ホーム'],
     ['Feed', 'ホーム'],
     ['Explore', '話題を検索'],
@@ -217,7 +261,6 @@
     ['Loading notification', '通知を読み込み中…'],
     ['No verified account notifications yet.', '認証済みアカウントからの通知はまだありません。'],
     ['No VERA notifications yet.', 'VERAからの通知はまだありません。'],
-    ['When someone quotes or mentions you, it will show up here.', 'あなたへの引用や@ツイートがここに表示されます。'],
     ['Nothing to see here yet. Likes, reposts, and follows will show up here.', '通知はまだありません。お気に入り、リツイート、フォローの通知がここに表示されます。'],
     ['quoted your post', 'あなたのツイートを引用しました'],
     ['quoted your tweet', 'あなたのツイートを引用しました'],
@@ -276,7 +319,6 @@
     ['View and unfollow hashtags you follow.', 'フォローしているハッシュタグを確認・解除できます'],
     ['Posts with these hashtags are boosted in your For You feed. Unfollow one here to stop boosting it.', 'フォローしたハッシュタグのツイートは「おすすめ」に表示されやすくなります。ここからフォローを解除できます。'],
     ['No hashtags found.', 'ハッシュタグが見つかりません'],
-    ['Loading followed hashtags...', 'フォロー中のハッシュタグを読み込んでいます…'],
     ['Something went wrong loading hashtags you follow.', 'フォロー中のハッシュタグを読み込めませんでした'],
 
     // Mute / reports
@@ -287,11 +329,7 @@
     ['View and unmute the accounts you have muted.', 'ミュートしているアカウントを確認・解除できます'],
     ['Muted accounts stay hidden from your For You feed. Unmute one here to see their posts again.', 'ミュートしたアカウントのツイートは「おすすめ」に表示されません。ここからミュートを解除できます。'],
     ['Report', '報告する'],
-    ['Submit report', '報告を送信'],
-    ['Thanks for your report', 'ご報告ありがとうございます'],
-    ['Why are you reporting this?', 'このツイートを報告する理由を選んでください'],
     ['Report submitted.', '報告を送信しました'],
-    ['Your report is private. We use it to review and improve safety.', '報告内容が他のユーザーに公開されることはありません。安全性向上のため確認を行います。'],
     ['Only you see this notice. Our team will review the report.', 'このお知らせはあなたにのみ表示されています。運営チームが報告内容を確認します。'],
     ['Manipulated media', '加工・改変されたメディア'],
     ['Likely false claim', '誤解を招く可能性のある情報'],
@@ -346,7 +384,6 @@
     ['Date of birth', '生年月日'],
     ['This information is not public. We use your age to customize your experience, including ads.', 'この情報は公開されません。年齢は、広告を含むTwitterでの表示内容をカスタマイズするために使用されます。'],
     ['Learn more', '詳細はこちら'],
-    ['Edit', '編集'],
     ['Bio', '自己紹介'],
     ['Location', '場所'],
     ['Website', 'ウェブサイト'],
@@ -381,8 +418,6 @@
     ['Autoplay videos', '動画を自動再生'],
 
     ['Muted accounts', 'ミュートしているアカウント'],
-    ['Muted', 'ミュート済み'],
-    ['Mute', 'ミュート'],
 
     ['Data', 'データ'],
     ['Data usage', 'データ利用'],
@@ -399,8 +434,6 @@
     ['Saved', '保存しました'],
     ['Cancel', 'キャンセル'],
     ['Close', '閉じる'],
-    ['Back', '戻る'],
-    ['Done', '完了'],
     ['Confirm', '確認'],
     ['Delete', '削除'],
 
@@ -536,8 +569,7 @@
         border-bottom-color:#1d9bf0!important;
       }
 
-      #ct-favorites-panel,
-      #ct-reply-panel {
+      #ct-favorites-panel {
         position:fixed;
         z-index:2147482000;
         overflow:auto;
@@ -552,10 +584,6 @@
         border-radius:0 0 12px 12px;
       }
 
-      #ct-reply-panel {
-        border-radius:14px;
-        max-height:min(48vh,460px);
-      }
 
       .ct-local-head {
         position:sticky;
@@ -652,11 +680,6 @@
         opacity:.65;
       }
 
-      .ct-reply-kicker {
-        font-size:12px;
-        color:#1d9bf0;
-        margin-bottom:3px;
-      }
 
       .ct-detail-post-time {
         font-size:13px;
@@ -668,19 +691,6 @@
         white-space:nowrap;
       }
 
-      #ct-reply-badge {
-        position:fixed;
-        z-index:2147483000;
-        min-width:18px;
-        height:18px;
-        padding:0 5px;
-        border-radius:999px;
-        background:#1d9bf0;
-        color:#fff;
-        font:700 11px/18px Arial;
-        text-align:center;
-        pointer-events:none;
-      }
     `;
 
     (
@@ -997,13 +1007,68 @@ if (/^just\s+now$/i.test(t)) {
       parent.firstElementChild.matches('span.truncate[title^="#"]') && /^#[^\s]+$/.test(clean(parent.firstElementChild.textContent));
   }
 
+  // Tweet v2.1.0 keeps user-written poll choices in tl-user-text. Recognize
+  // only the surrounding native poll chrome; never treat a whole fieldset as UI.
+  function nativeLocalizationPoll(el) {
+    if (!el || isOwnedLocalizationElement(el)) return null;
+    const compose = el.closest('fieldset.relative.w-full.mt-3.rounded-2xl.border');
+    if (compose && /^(?:Poll|投票)$/.test(clean(compose.querySelector(':scope > legend')?.textContent)) &&
+        compose.querySelector('input[type="text"][maxlength="25"][id*="-choice-"]') &&
+        [...compose.querySelectorAll('select option')].map(option => option.value).join(',') === '1,24,72,168') {
+      return { root: compose, compose: true };
+    }
+    if (!el.closest('article')) return null;
+    for (let candidate = el; candidate && candidate.tagName !== 'ARTICLE'; candidate = candidate.parentElement) {
+      if (!candidate.matches('div.mt-3')) continue;
+      const choices = candidate.querySelector(':scope > fieldset.flex.flex-col');
+      const results = candidate.querySelector(':scope > div > ul[aria-label="Poll results"],:scope > div > ul[aria-label="投票結果"]');
+      const labels = choices && [...choices.querySelectorAll(':scope > label')];
+      if (choices && /^(?:Poll choices|投票の選択肢)$/.test(clean(choices.querySelector(':scope > legend')?.textContent)) &&
+          labels.length >= 2 && labels.length <= 5 && labels.every(label =>
+            label.querySelector(':scope > input[type="radio"]') && label.querySelector(':scope > span.tl-user-text'))) {
+        return { root: candidate, compose: false };
+      }
+      if (results && results.children.length >= 2 && results.children.length <= 5 &&
+          [...results.children].every(row => row.matches('li.relative.overflow-hidden') && row.querySelector('span.tl-user-text'))) {
+        return { root: candidate, compose: false };
+      }
+    }
+    return null;
+  }
+
+  function isNativeLocalizationPollUI(el) {
+    const poll = nativeLocalizationPoll(el);
+    if (!poll) return false;
+    if (poll.compose) return el.matches('legend,label,button,button span,p[role="status"]');
+    return el.matches('legend.sr-only,span.sr-only,p[role="status"],p[role="alert"]') ||
+      (el.matches('button') && el.parentElement?.matches('div.mt-2.flex.items-center.justify-between')) ||
+      (el.matches('span.text-tl-app-text-muted,p.text-tl-app-text-muted') &&
+        (el.parentElement?.matches('div.mt-2.flex.items-center.justify-between') ||
+          el.parentElement?.matches('div.flex.flex-col.outline-none')));
+  }
+
+  function nativeLocalizationAccountMenu(el) {
+    if (!el?.matches('span.min-w-0.truncate') || !el.parentElement?.matches('button[role="menuitem"]') ||
+        !el.parentElement.querySelector(':scope > svg') || !el.parentElement.parentElement?.matches('[role="menu"]')) return null;
+    const host = el.parentElement.parentElement.parentElement;
+    const trigger = host?.querySelector(':scope > button[aria-haspopup="menu"]');
+    return trigger && /^(?:Profile options|プロフィールのメニュー)$/.test(trigger.getAttribute('aria-label') || '') ? el : null;
+  }
+
+  function nativeLocalizationAccountDialog(el) {
+    const dialog = el?.closest('[role="dialog"][aria-modal="true"].bg-tl-app-card.border');
+    if (!dialog || !/^(?:Report @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+を報告)$/.test(dialog.getAttribute('aria-label') || '') ||
+        !dialog.querySelector('h3.text-sm.font-bold.text-tl-app-text')) return null;
+    return dialog;
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
       'textarea,input,select,option,script,style,code,pre,kbd,samp,svg,' +
       '[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,' +
       '[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],' +
-      '.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
+      '.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
     // protection for profile names and account values everywhere else.
@@ -1015,7 +1080,7 @@ if (/^just\s+now$/i.test(t)) {
         }
         return !heading.closest('article');
       }) && !el.closest('article');
-    return !!el.closest('.truncate') && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle;
+    return !!el.closest('.truncate') && !nativeLocalizationAccountMenu(el) && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle;
   }
 
   function localizationNotificationRow(el) {
@@ -1024,7 +1089,16 @@ if (/^just\s+now$/i.test(t)) {
     if (!row?.closest('main') || isOwnedLocalizationElement(row)) return null;
     // Current tweet.app notification rows are border-separated buttons. Do not
     // interpret tab buttons or arbitrary paragraphs as notification content.
-    return row.matches('.items-start.border-b,[data-testid="notification-row"]') ? row : null;
+    if (row.matches('.items-start.border-b,[data-testid="notification-row"]')) return row;
+    // v2.1.0 moved the separator to a wrapper so the native Follow list can
+    // expand below its action. Match its 28px leading icon and direct body.
+    const icon = row.firstElementChild;
+    const body = icon?.nextElementSibling;
+    return row.matches('button.w-full.flex.items-start.text-left') &&
+      row.parentElement?.matches('div.border-b.border-tl-app-border') &&
+      row.parentElement.firstElementChild === row && icon?.matches('div.mt-0\\.5.shrink-0') &&
+      icon.querySelector(':scope > svg[width="28"][height="28"]') &&
+      body?.matches('div.flex-1.min-w-0') && body.querySelector(':scope > p') ? row : null;
   }
 
   function localizationNotificationAction(node) {
@@ -1045,6 +1119,10 @@ if (/^just\s+now$/i.test(t)) {
     if (isProtectedLocalizationElement(el)) return false;
     if (localizationNotificationAction(node) || isNativeNotificationTimestamp(el)) return true;
     if (localizationNotificationRow(el)) return false;
+    if (isNativeLocalizationPollUI(el)) return true;
+    if (nativeLocalizationAccountMenu(el)) return node === el.firstChild &&
+      /^(?:Report|Mute unavailable|(?:Mute|Unmute) @[A-Za-z0-9_.-]+)$/.test(clean(node.nodeValue));
+    if (nativeLocalizationAccountDialog(el) && !el.closest('textarea,input')) return true;
     if (isNativeSettingsValue(el) || isNativeLocalizationHelp(el)) return true;
     if (isNativeTweetCount(el)) return true;
     const text = clean(node.nodeValue);
@@ -1119,6 +1197,52 @@ if (/^just\s+now$/i.test(t)) {
     node.nodeValue = raw.replace(/\S[\s\S]*\S|\S/, () => text);
   }
 
+  function patchNativePollAndAccountUI(root = document) {
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const candidates = [];
+    if (host instanceof Element) candidates.push(host);
+    host?.querySelectorAll?.('fieldset,ul[aria-label],span.truncate,[role="dialog"]').forEach(el => candidates.push(el));
+    for (const el of candidates) {
+      if (isOwnedLocalizationElement(el) || el.closest('[translate="no"],.notranslate,[data-user-content],.tl-user-text')) continue;
+      const poll = nativeLocalizationPoll(el);
+      if (el.matches('fieldset') && poll?.compose && poll.root === el) {
+        const durations = new Map([['1', '1時間'], ['24', '1日'], ['72', '3日'], ['168', '7日']]);
+        for (const option of el.querySelectorAll('select option')) {
+          const out = durations.get(option.value);
+          // Preserve both option nodes and values, including the selection.
+          if (out && /^(?:1 hour|1 day|3 days|7 days|1時間|1日|3日|7日)$/.test(clean(option.textContent))) {
+            for (const node of localizationScopeNodes(option)) replaceLocalizationText(node, out);
+          }
+        }
+      }
+      if (el.matches('ul[aria-label="Poll results"]') && poll) el.setAttribute('aria-label', '投票結果');
+      if (nativeLocalizationAccountMenu(el)) {
+        const title = el.getAttribute('title');
+        const match = title?.match(/^(Report|Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
+        if (match) el.setAttribute('title', match[1] === 'Report' ? `${match[2]}を報告` : match[1] === 'Mute' ? `${match[2]}をミュート` : `${match[2]}のミュートを解除`);
+      }
+      if (el.matches('[role="dialog"]') && nativeLocalizationAccountDialog(el)) {
+        const match = el.getAttribute('aria-label')?.match(/^Report (@[A-Za-z0-9_.-]+)$/);
+        if (match) el.setAttribute('aria-label', `${match[1]}を報告`);
+      }
+    }
+  }
+
+  function nativePollJapaneseText(el, text) {
+    if (!isNativeLocalizationPollUI(el)) return null;
+    const footer = text.match(/^(?:(\d+) votes? · )?(Final results|Closing…|\d+ (?:min|h|d) left)$/);
+    if (footer) {
+      const remaining = footer[2].match(/^(\d+) (min|h|d) left$/);
+      const units = { min: '分', h: '時間', d: '日' };
+      const end = remaining ? `残り${remaining[1]}${units[remaining[2]]}` : JP.get(footer[2]);
+      return footer[1] ? `${footer[1]}票 · ${end}` : end;
+    }
+    if (nativeLocalizationPoll(el)?.compose && el.matches('label.sr-only')) {
+      return text === 'Choice' ? '選択肢' : /^Choice (\d+)$/.test(text) ? `選択肢 ${text.match(/\d+$/)[0]}` : null;
+    }
+    return JP.get(text);
+  }
+
   function patchUIAttributes(root = document) {
     const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
     const controls = [];
@@ -1126,8 +1250,8 @@ if (/^just\s+now$/i.test(t)) {
     host?.querySelectorAll?.('button,[role="tab"],[role="menuitem"],input,textarea').forEach(el => controls.push(el));
     for (const el of controls) {
       if (isOwnedLocalizationElement(el) ||
-          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
-          el.closest('.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
+          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
+          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
       if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
           el.querySelector(':scope > svg.lucide-x') &&
           el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
@@ -1140,7 +1264,8 @@ if (/^just\s+now$/i.test(t)) {
           value?.match(/^Retweet, (\d+) retweets?$/);
         const likers = el.matches('[data-testid="tweet-like-action-count"]') &&
           value?.match(/^View (\d+) likes?$/);
-        const out = action ? `返信、${action[1]}件の返信` :
+        const choice = nativeLocalizationPoll(el)?.compose && value?.match(/^Remove choice (\d+)$/);
+        const out = choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
           likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value);
         if (out && value !== out) el.setAttribute(attr, out);
@@ -1158,13 +1283,14 @@ if (/^just\s+now$/i.test(t)) {
     const relative = (isNativeLocalizationTimestamp(el) || isNativeNotificationTimestamp(el)) && text.match(/^(\d+)([smhd])$/);
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const units = { s: '秒前', m: '分前', h: '時間前', d: '日前' };
-    let out = relative ? relative[1] + units[relative[2]] :
+    const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
+    let out = nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || (relative ? relative[1] + units[relative[2]] :
       remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
       isNativeTweetCount(el) && /^([\d,]+) tweets?$/i.test(text) ? `${text.match(/^([\d,]+)/)[1]}件のツイート` :
       isNativeTweetCount(el) && /^Tweets?$/i.test(text) ? 'ツイート' :
       /^\/profile\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
-        el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text);
+        el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text));
     // The native help list splits this sentence around a React-owned counter.
     // Keep its text nodes and the counter so later updates still work.
     if (isNativeLocalizationHelp(el) && el.matches('li')) {
@@ -1175,6 +1301,7 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   function patchUI(root = document) {
+    patchNativePollAndAccountUI(root);
     localizationScopeNodes(root).forEach(translateTextNode);
     patchUIAttributes(root);
   }
@@ -1277,12 +1404,13 @@ if (/^just\s+now$/i.test(t)) {
     ]);
     for (const el of list) {
       if (isOwnedLocalizationElement(el) ||
-          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
+          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
       const value = el.getAttribute('placeholder');
       const composerPrompt = el.matches('textarea#public-tweet-input,textarea#public-modal-tweet-input') &&
         (/^What['’]s happening(?:, [\s\S]+)?[?!]+$/.test(value || '') ||
           /^(?:[\s\S]+、)?いまどうしてる？$/.test(value || ''));
-      const out = composerPrompt ? 'いまどうしてる？' : placeholders.get(value) || JP.get(value);
+      const choice = nativeLocalizationPoll(el)?.compose && value?.match(/^Choice (\d+)$/);
+      const out = choice ? `選択肢 ${choice[1]}` : composerPrompt ? 'いまどうしてる？' : placeholders.get(value) || JP.get(value);
       if (out && out !== value) el.setAttribute('placeholder', out);
     }
   }
@@ -1590,11 +1718,7 @@ if (/^just\s+now$/i.test(t)) {
 
 
 
-  function localCard(
-    item,
-    reply =
-      false
-  ) {
+  function localCard(item) {
     const row =
       document.createElement(
         'div'
@@ -1632,22 +1756,6 @@ if (/^just\s+now$/i.test(t)) {
     main.className =
       'ct-local-main';
 
-    if (reply) {
-      const kicker =
-        document.createElement(
-          'div'
-        );
-
-      kicker.className =
-        'ct-reply-kicker';
-
-      kicker.textContent =
-        'あなたのツイートに返信しました';
-
-      main.appendChild(
-        kicker
-      );
-    }
 
     const meta =
       document.createElement(
@@ -1960,10 +2068,9 @@ if (/^just\s+now$/i.test(t)) {
         renderFavoritesPanel();
       }
 
-      renderReplyPanel();
 
-      patchReplyBadge();
     patchNavigation(root);
+    ctPatchNotificationFilters();
     patchOfficialBadges(root);
     ctMediaEnhance(root);
     patchJapaneseNews(root);
@@ -1993,6 +2100,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.10.0 loaded'
+    '🐦 Classic Twitter JP v6.11.0 loaded'
   );
 })();

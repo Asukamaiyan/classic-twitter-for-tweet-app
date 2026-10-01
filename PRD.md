@@ -1,5 +1,13 @@
 # 6.7.0: safe localization and browser tools
 
+## 6.11.0: Tweet 2.1.0 compatibility and duplicate removal
+
+Use native reply notifications, unread counts, polls, account reports, Follow back and mute decisions. Remove the supplemental reply inbox and periodic reply reads while preserving older stored records. Retain only evidenced missing enhancements: Media/Favorites, photo batch selection and carousel, per-actor notification links, sharper badges, local search/bookmark/keyword tools and optional translation/news.
+
+Add an inline type selector for already rendered native notifications, without new notification requests or new unread counts. Restore rows on native-tab selection, route/account changes and remount; retain unknown/system events. Protect all native `tl-user-text`, especially poll option text. Preserve poll input values, votes, selected options and native event handlers. Media toolbar matching must recognize photo/video icons even with the new poll control. Local Favorites must respect the verified muted-account list without deleting saved records, with bounded read pages and explicit retry/continuation.
+
+Acceptance: generated editions build and pass regression checks; native reply, poll and Follow back controls remain authoritative; retired reply polling is absent; actual Chromium desktop/mobile UI verifies content/draft/option preservation, notification filter restoration, square composer avatars and stable stars. Installed managers, physical Safari and actual voting/upload acceptance remain separate.
+
 ## 6.10.0: current profile, notification and redraw corrections
 
 The current client uses icon-only profile tabs. Add Photos & videos on own and public profiles using only verified read-only post data, and Favorites on the current account's profile using browser-local saved snapshots. Show all validated image assets and playable video assets, bounded cursor-based loading, explicit empty/error states and original-post links. Keep native profile tabs and their React-owned content; restore them immediately on native-tab selection or route changes. Favorites do not imply server history or cross-device synchronization. Preserve unscoped old saves with an explicit import into one account rather than assigning their owner silently.

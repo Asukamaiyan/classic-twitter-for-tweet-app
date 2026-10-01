@@ -52,9 +52,17 @@
     const url = avatar.tagName === 'IMG' ? ctAvatarURL(avatar.getAttribute('src')) : '';
     return name && name.length <= 512 && url !== null ? `${name}\n${url}` : null;
   }
+  function ctNativeNotificationRows() {
+    return [...document.querySelectorAll('main button.items-start')].filter(row =>
+      !row.closest('article,[data-ct-local-ui],[data-ct-owned]') &&
+      (row.matches('button.border-b') ||
+        (row.matches('button.w-full.flex.gap-3') && row.parentElement?.matches('div.border-b'))));
+  }
   function ctNotificationAvatarWrappers() {
     if (!/^\/notifications\/?$/.test(location.pathname)) return [];
-    return [...document.querySelectorAll(`main button.items-start.border-b ${ctAvatarWrapperSelector}`)]
+    // In 2.1 the border moves to a wrapper that also contains the Follow back
+    // list. Inspect the event button only; that list has working native links.
+    return ctNativeNotificationRows().flatMap(row => [...row.querySelectorAll(ctAvatarWrapperSelector)])
       .filter(el => ctNativeAvatar(el) && !el.closest('article,[data-ct-local-ui]'));
   }
   function ctNotificationAvatarHandle(wrapper) {
@@ -183,7 +191,8 @@
     const link = event.target?.closest?.('a.ct-notification-profile-link');
     if (!link || !/^\/notifications\/?$/.test(location.pathname)) return;
     const wrapper = link.parentElement;
-    if (!wrapper?.matches(ctAvatarWrapperSelector) || !wrapper.closest('main button.items-start.border-b')) return;
+    const row = wrapper?.closest('main button.items-start');
+    if (!wrapper?.matches(ctAvatarWrapperSelector) || !ctNativeNotificationRows().includes(row)) return;
     // A React update may arrive between the last scan and this click. Never
     // navigate using the previous avatar's URL while the next scan is queued.
     const handle = ctNotificationAvatarHandle(wrapper);

@@ -191,7 +191,11 @@
     const mask = fill => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${ctFavoriteStarPath}" fill="${fill ? 'black' : 'none'}" stroke="black" stroke-width="1.8" stroke-linejoin="round"/></svg>`)}")`;
     const button = 'button[data-testid="tweet-like-action"][data-testid]';
     const selected = `${button}:is([aria-pressed="true"],:not([aria-pressed]).text-pink-500,:not([aria-pressed]):not(.text-tl-app-text-muted):not(.text-pink-500).ct-is-liked)`;
-    const notification = '#root-container main button.w-full.flex.items-start.border-b > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]';
+    const notificationRows = [
+      '#root-container main button.w-full.flex.items-start.border-b',
+      '#root-container main div.border-b > button.w-full.flex.items-start.gap-3'
+    ];
+    const notificationIcons = notificationRows.map(row => `${row} > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]`);
     // React may replace both className and the icon before the next scan.
     // Stable native test IDs hide the heart immediately; the CSS vector fills
     // the brief gap until our motion-capable star is restored.
@@ -213,12 +217,12 @@
       }
       ${selected} > .ct-star svg { fill:currentColor!important; }
       ${selected} + :is(span.text-xs.tabular-nums,button[data-testid="tweet-like-action-count"]) { color:#ffac33!important; }
-      ${notification} {
+      ${notificationIcons.join(',')} {
         background:#ffac33!important;
         -webkit-mask:${mask(true)} center/contain no-repeat;
         mask:${mask(true)} center/contain no-repeat;
       }
-      ${notification} * { visibility:hidden!important; }
+      ${notificationIcons.map(icon => `${icon} *`).join(',')} { visibility:hidden!important; }
       @supports selector(:has(*)) {
         ${button}:has(> span.ct-star)::before { display:none!important; }
       }
@@ -293,7 +297,7 @@
     if (ctScanning || !ctPageActive) return;
     if (!mutations.some(m => {
       const el = m.target.nodeType === Node.ELEMENT_NODE ? m.target : m.target.parentElement;
-      if (el?.closest('[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel,#ct-reply-panel')) return false;
+      if (el?.closest('[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel')) return false;
       if (m.type === 'attributes') return m.oldValue !== m.target.getAttribute(m.attributeName);
       if (m.type === 'characterData') return m.oldValue !== m.target.data;
       if (m.type === 'childList' && m.addedNodes.length && m.removedNodes.length &&
@@ -327,18 +331,11 @@
   }
 
   let ctTools = null;
-  let ctReplyInterval = null;
-  function ctStartReplyInterval() {
-    if (ctReplyInterval !== null) return;
-    ctReplyInterval = setInterval(() => {
-      if (!document.hidden && ctPageActive) replyWatchTick();
-    }, 90000);
-  }
 
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.10.0';
+    document.documentElement.dataset.ctActiveVersion = '6.11.0';
     ctStarted = true;
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
@@ -370,8 +367,6 @@
     });
     document.addEventListener('click', ctRememberTranslationChoice, true);
     ctRunScan();
-    ctStartReplyInterval();
-    replyWatchTick();
     window.addEventListener('popstate', ctScheduleScan);
     for (const name of ['pushState', 'replaceState']) {
       const original = history[name];
@@ -383,7 +378,7 @@
     }
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) ctCancelTranslations();
-      else { ctScheduleScan(); replyWatchTick(); }
+      else ctScheduleScan();
     });
     window.addEventListener('pagehide', () => {
       ctPageActive = false;
@@ -391,16 +386,12 @@
       clearTimeout(ctScanTimer);
       ctScanTimer = null;
       ctCancelTranslations();
-      clearInterval(ctReplyInterval);
-      ctReplyInterval = null;
     });
     window.addEventListener('pageshow', event => {
       if (event.persisted && !ctPageActive) {
         ctPageActive = true;
         ctObserve();
         ctScheduleScan();
-        ctStartReplyInterval();
-        replyWatchTick();
       }
     });
   }

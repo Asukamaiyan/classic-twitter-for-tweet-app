@@ -3,7 +3,7 @@
   const ctProfileState = {
     path: '', user: '', uid: null, authSeen: undefined, accountUser: '', active: '', tablist: null,
     timeline: null, panel: null, sequence: 0, identityBusy: false, identityRetry: 0,
-    nativeSelection: new Map(), tabsBound: new WeakSet(), rendered: '', media: null,
+    nativeSelection: new Map(), tabsBound: new WeakSet(), rendered: '', media: null, favoriteMutes: null,
     storageBound: false, storageError: false, memory: new Map(), dirtyMemory: new Set(), viewer: null
   };
   function ctProfileText(ja, en) { return CT_LOCALE === 'ja' ? ja : en; }
@@ -89,10 +89,10 @@
       return ctProfileFavoriteItems(JSON.parse(localStorage.getItem(KEY.favorites) || '[]'));
     } catch { return []; }
   }
-  function ctProfileImportFavorites() {
-    const uid = ctProfileUID();
+  function ctProfileImportFavorites(expectedUid = ctProfileUID()) {
+    const uid = expectedUid;
     const legacy = ctProfileLegacyFavorites();
-    if (!uid || !legacy.length) return;
+    if (!uid || uid !== ctProfileUID() || !legacy.length) return;
     try {
       const merged = [...ctProfileLoadFavorites(), ...legacy];
       const items = ctProfileFavoriteItems(merged).slice(0, 500);
@@ -244,6 +244,7 @@
   }
   function closeFavoritesPanel() {
     ctProfileState.sequence++;
+    ctProfileState.favoriteMutes = null;
     ctProfileState.active = ''; favoritesActive = false;
     ctProfileRestoreNative();
     for (const tab of ctProfileState.tablist?.querySelectorAll('[data-ct-profile-tab]') || []) {
@@ -305,8 +306,10 @@
       if (ctProfileState.active === type) return;
       ctProfileCloseViewer(); ctProfileState.sequence++;
       ctProfileState.active = type; favoritesActive = type === 'favorites'; ctProfileState.rendered = '';
+      ctProfileState.favoriteMutes = null;
       ctProfileShow(context);
       if (type === 'media' && !ctProfileMediaState().started) ctProfileLoadMedia();
+      if (type === 'favorites') ctProfileLoadFavoriteMutes();
     };
     return tab;
   }
@@ -444,6 +447,70 @@
     const link = document.createElement('a'); link.className = 'ct-profile-post-link'; link.href = item.href;
     link.textContent = ctProfileText('元のツイートを開く', 'Open original Tweet'); main.append(link); row.append(main); return row;
   }
+  function ctProfileFavoriteMuteState() {
+    const uid = ctProfileUID();
+    if (!ctProfileState.favoriteMutes || ctProfileState.favoriteMutes.uid !== uid ||
+        ctProfileState.favoriteMutes.path !== ctProfileState.path || ctProfileState.favoriteMutes.user !== ctProfileState.user) {
+      ctProfileState.favoriteMutes = { uid, path: ctProfileState.path, user: ctProfileState.user,
+        handles: new Set(), cursors: new Set(), cursor: null, pages: 0, busy: false, done: false, error: '' };
+    }
+    return ctProfileState.favoriteMutes;
+  }
+  function ctProfileFavoriteMuteCurrent(state, sequence) {
+    return favoritesActive && ctProfileState.active === 'favorites' && ctProfileState.favoriteMutes === state &&
+      sequence === ctProfileState.sequence && location.pathname === state.path && ctProfileState.path === state.path &&
+      ctProfileState.user === state.user && ctProfileUID() === state.uid && ctProfileState.uid === state.uid &&
+      ctProfileState.accountUser === state.user && ctProfileContext()?.user === state.user;
+  }
+  async function ctProfileLoadFavoriteMutes(refresh = false) {
+    if (!favoritesActive || ctProfileState.active !== 'favorites') return;
+    let state = ctProfileFavoriteMuteState();
+    if (state.busy || (!refresh && state.done)) return;
+    if (refresh) {
+      ctProfileCloseViewer(); ctProfileState.sequence++;
+      ctProfileState.favoriteMutes = null; state = ctProfileFavoriteMuteState();
+    }
+    const sequence = ctProfileState.sequence;
+    if (!state.uid || !ctProfileFavoriteMuteCurrent(state, sequence)) { renderFavoritesPanel(); return; }
+    const active = () => !document.hidden && (typeof ctPageActive === 'undefined' || ctPageActive);
+    const paused = () => ctProfileText('このタブを表示してから、ミュート一覧の確認を再開してください。', 'Show this tab, then continue checking muted accounts.');
+    if (!active()) { state.error = paused(); renderFavoritesPanel(); return; }
+    state.busy = true; state.error = ''; renderFavoritesPanel();
+    try {
+      const auth = await getAuth();
+      if (!ctProfileFavoriteMuteCurrent(state, sequence)) return;
+      if (!auth?.token || auth.uid !== state.uid) throw new Error('sign-in');
+      const headers = { Authorization: `Bearer ${auth.token}` };
+      // Tweet's native muted-accounts consumer uses opaque nextCursor values,
+      // with no limit override. Check at most ten pages per explicit action.
+      for (let page = 0; page < 10 && !state.done; page++) {
+        if (!ctProfileFavoriteMuteCurrent(state, sequence)) return;
+        if (!active()) { state.error = paused(); return; }
+        const cursor = state.cursor;
+        const query = new URLSearchParams(); if (cursor) query.set('cursor', cursor);
+        const json = await requestJSON(API_ORIGIN + '/api/users/muted' + (cursor ? '?' + query : ''), headers);
+        const current = await getAuth();
+        if (!ctProfileFavoriteMuteCurrent(state, sequence) || current?.uid !== state.uid) return;
+        if (!active()) { state.error = paused(); return; }
+        if (!json || json.success !== true || json.error || !Array.isArray(json.users) || json.users.length > 1000 ||
+            json.users.some(user => !ctProfileId(user?.userId) || !ctProfileHandle(user?.username))) throw new Error('muted-response');
+        const next = json.nextCursor ?? null;
+        if (next !== null && (typeof next !== 'string' || !next || next.length > 2000 || next === cursor || state.cursors.has(next))) {
+          throw new Error('muted-cursor');
+        }
+        for (const user of json.users) state.handles.add(ctProfileHandle(user.username));
+        if (cursor) state.cursors.add(cursor);
+        state.cursor = next; state.pages++; state.done = !next;
+      }
+    } catch {
+      if (ctProfileFavoriteMuteCurrent(state, sequence)) state.error = ctProfileText(
+        'ミュート一覧を確認できませんでした。保存した投稿を表示する前に、再試行してください。',
+        'Muted accounts could not be checked. Try again before showing saved posts.');
+    } finally {
+      state.busy = false;
+      if (ctProfileFavoriteMuteCurrent(state, sequence)) renderFavoritesPanel();
+    }
+  }
   function renderFavoritesPanel() {
     if (!favoritesActive || ctProfileState.active !== 'favorites') return;
     const context = ctProfileContext();
@@ -453,18 +520,40 @@
     const panel = ctProfileState.panel;
     if (!panel?.isConnected) return;
     const items = ctProfileLoadFavorites(); const legacy = ctProfileLegacyFavorites();
-    const signature = JSON.stringify(['favorites', ctProfileUID(), items, legacy.length, ctProfileState.storageError]);
+    const uid = ctProfileUID(); const muted = ctProfileFavoriteMuteState();
+    const signature = JSON.stringify(['favorites', uid, items, legacy.length, ctProfileState.storageError,
+      muted.busy, muted.done, muted.error, muted.pages, [...muted.handles]]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
     const content = document.createDocumentFragment();
     content.append(ctProfileStatus(ctProfileText('このブラウザで保存したお気に入りです。過去の全履歴や他の人のお気に入りは取得できません。', 'Favorites saved in this browser. Complete older history and other users’ Favorites are unavailable.')));
+    const controls = ctProfileStatus('');
+    const update = ctProfileControl(ctProfileText('表示を更新', 'Refresh view'), () => ctProfileLoadFavoriteMutes(true));
+    update.disabled = muted.busy; controls.append(update); content.append(controls);
     if (legacy.length) {
       const migration = ctProfileStatus(ctProfileText('以前の保存データがあります。使用中のアカウントのものか確認して取り込めます。', 'Older saved data is available. Import it if it belongs to this account.'));
-      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), ctProfileImportFavorites)); content.append(migration);
+      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.append(migration);
     }
     if (ctProfileState.storageError) content.append(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。保存設定を確認してください。', 'Browser storage is unavailable. Check your storage settings.')));
-    if (!items.length) { const empty = document.createElement('p'); empty.className = 'ct-profile-empty'; empty.textContent = ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.'); content.append(empty); }
-    else for (const item of items) content.append(ctProfileRow(item));
+    if (!muted.done) {
+      const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート一覧を確認中…', 'Checking muted accounts…') :
+        muted.error || ctProfileText('ミュート一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted accounts have been checked.'));
+      waiting.setAttribute('role', 'status');
+      if (!muted.busy) waiting.append(document.createElement('br'), ctProfileControl(
+        muted.error ? ctProfileText('再試行', 'Try again') : ctProfileText('続きを確認', 'Continue checking'), () => ctProfileLoadFavoriteMutes()));
+      content.append(waiting);
+    } else {
+      const visible = items.filter(item => item.username && !muted.handles.has(item.username));
+      if (visible.length < items.length) content.append(ctProfileStatus(ctProfileText(
+        `ミュートした作者や作者を確認できない投稿${items.length - visible.length}件を非表示にしています。保存データは保持しています。`,
+        `${items.length - visible.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`)));
+      if (!visible.length) {
+        const empty = document.createElement('p'); empty.className = 'ct-profile-empty';
+        empty.textContent = items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
+          ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.');
+        content.append(empty);
+      } else for (const item of visible) content.append(ctProfileRow(item));
+    }
     panel.replaceChildren(content);
   }
   function ctProfileMediaState() {
@@ -478,7 +567,7 @@
     return ctProfileState.media;
   }
   function ctProfilePostItem(post, user) {
-    if (!ctProfileId(post?.id) || ctProfileHandle(post.authorUsername) !== user || post.isDeleted ||
+    if (!ctProfileId(post?.id) || ctProfileHandle(post.authorUsername) !== user || post.isDeleted || post.status === 'MUTED' ||
         post.isRepost || post.originalPostId || post.repostedBy) return null;
     const media = ctProfileMediaAssets(post);
     if (!media.length) return null;
