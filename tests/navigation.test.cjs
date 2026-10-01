@@ -42,6 +42,24 @@ function harness(t, content, notifications = [], locale = 'ja') {
   };
 }
 
+test('2.1 wrapper keeps grouped avatar navigation independent without covering native Follow back rows', async t => {
+  const f=harness(t,avatar('alice',{handle:'alice'})+avatar('bob',{handle:'bob'}));
+  const row=f.document.getElementById('row');
+  row.className='w-full flex items-start gap-3';
+  const wrapper=f.document.createElement('div');wrapper.className='border-b border-tl-app-border';
+  row.before(wrapper);wrapper.append(row);
+  const expanded=f.document.createElement('div');expanded.className='native-follower-list';
+  expanded.innerHTML=avatar('carol',{handle:'carol'})+'<button id="back">Follow back</button>';
+  wrapper.append(expanded);
+  await f.patch();
+  assert.deepEqual(f.links().map(x=>x.getAttribute('href')),['/user/alice','/user/bob']);
+  assert.equal(expanded.querySelector('.ct-notification-profile-link'),null);
+  f.event(f.links()[1]);assert.equal(f.state.rowClicks,0);
+  f.event(f.document.getElementById('preview'));assert.equal(f.state.rowClicks,1);
+  let back=0;f.document.getElementById('back').addEventListener('click',()=>back++);
+  f.document.getElementById('back').click();assert.equal(back,1);
+});
+
 test('removes only native avatar follow overlays, preserving ordinary Follow controls', async t => {
   const f = harness(t, avatar('alice', { handle: 'alice' }));
   const overlay = f.document.querySelector('span[role="button"]');

@@ -36,7 +36,7 @@ function harness(t, html = '', options = {}) {
   let nextID = 0;
   const timers = new Map();
   const intervals = new Map();
-  const stats = { scans: 0, refreshes: 0, installs: 0, replyChecks: 0 };
+  const stats = { scans: 0, refreshes: 0, installs: 0 };
   let hidden = false;
   let settings;
   Object.defineProperty(document, 'hidden', { get: () => hidden });
@@ -63,7 +63,6 @@ function harness(t, html = '', options = {}) {
     settings = value; stats.installs += 1;
     return { refresh() { stats.refreshes += 1; } };
   };
-  window.replyWatchTick = () => { stats.replyChecks += 1; };
   window.scan = root => {
     stats.scans += 1;
     options.scan?.(root, window.qa, stats);
@@ -270,7 +269,7 @@ test('observer settles after own scan writes and batches dynamic navigation and 
   });
   f.qa.start(); f.qa.start();
   assert.equal(f.stats.scans, 1); assert.equal(f.stats.installs, 1);
-  assert.equal(f.intervals.size, 1);
+  assert.equal(f.intervals.size, 0, 'native notifications own their refresh interval');
   await f.advance(1000); assert.equal(f.stats.scans, 1, 'no idle observer cycle from script mutations');
   f.document.getElementById('nav').textContent = 'Notifications';
   f.document.getElementById('like').className = 'text-pink-500';
@@ -300,21 +299,20 @@ test('busy translation controls are reconsidered when native loading finishes', 
   await f.advance(100); assert.equal(count(), 1);
 });
 
-test('pagehide stops observer and interval, and persisted pageshow restores one of each', async t => {
+test('pagehide stops observation and persisted pageshow restores it without notification polling', async t => {
   const f = harness(t, '<button>Home</button>');
   f.qa.start();
-  assert.equal(f.stats.replyChecks, 1, 'reply history starts immediately');
+  assert.equal(f.intervals.size, 0, 'startup does not install a duplicate notification interval');
   f.window.dispatchEvent(new f.window.Event('pagehide'));
   assert.equal(f.intervals.size, 0);
   f.document.querySelector('button').textContent = 'Notifications';
   await f.advance(1000); assert.equal(f.stats.scans, 1);
   f.window.dispatchEvent(new f.window.PageTransitionEvent('pageshow', { persisted: true }));
   f.window.dispatchEvent(new f.window.PageTransitionEvent('pageshow', { persisted: true }));
-  await f.advance(100); assert.equal(f.stats.scans, 2); assert.equal(f.intervals.size, 1);
-  const interval = [...f.intervals.values()][0];
-  interval.callback(); assert.equal(f.stats.replyChecks, 3);
-  f.hidden(true); interval.callback(); assert.equal(f.stats.replyChecks, 3);
-  f.hidden(false); assert.equal(f.stats.replyChecks, 4, 'visible page requests a throttled refresh');
+  await f.advance(100); assert.equal(f.stats.scans, 2); assert.equal(f.intervals.size, 0);
+  f.hidden(true); await f.advance(1000); assert.equal(f.stats.scans, 2);
+  f.hidden(false); await f.advance(100); assert.equal(f.stats.scans, 3, 'visible pages rescan existing native UI');
+  assert.equal(f.intervals.size, 0, 'backgrounding and BFCache restores never restart retired reply polling');
 });
 
 test('native translation waits for completion before sending the next request', async t => {
@@ -460,6 +458,18 @@ test('native notification heart replacements remain vector stars without affecti
   assert.equal(f.window.getComputedStyle(f.document.getElementById('notification-heart')).visibility, 'hidden');
   assert.notEqual(f.window.getComputedStyle(f.document.getElementById('other-heart')).visibility, 'hidden');
   assert.equal(f.window.getComputedStyle(row.querySelector('svg')).backgroundColor, 'rgb(255, 172, 51)');
+});
+
+test('v2.1.0 wrapped notification hearts remain vector stars before the observer scan', t => {
+  const f = harness(t, '<div id="root-container"><main><div class="border-b border-tl-app-border"><button class="w-full flex items-start gap-3"><div class="mt-0.5 shrink-0"><svg class="lucide lucide-heart text-rose-500" width="28" height="28"><path id="wrapped-heart"></path></svg></div></button></div><div class="border-b"><button class="w-full flex items-start"><div class="mt-0.5 shrink-0"><svg class="lucide-heart text-rose-500" width="28" height="28"><path id="unrelated-heart"></path></svg></div></button></div></main></div>');
+  f.qa.patchFavoriteButtons();
+  const row = f.document.querySelector('button.gap-3');
+  row.firstElementChild.innerHTML = '<svg class="lucide lucide-heart text-rose-500" width="28" height="28"><path id="wrapped-heart"></path></svg>';
+  const icon = row.querySelector('svg');
+  assert.equal(f.window.getComputedStyle(f.document.getElementById('wrapped-heart')).visibility, 'hidden');
+  assert.equal(f.window.getComputedStyle(icon).backgroundColor, 'rgb(255, 172, 51)');
+  assert.match(f.window.getComputedStyle(icon).getPropertyValue('mask'), /data:image\/svg\+xml/);
+  assert.notEqual(f.window.getComputedStyle(f.document.getElementById('unrelated-heart')).visibility, 'hidden', 'a different button structure is not treated as a notification event');
 });
 
 test('classic appearance defaults on and persists independently of existing settings', t => {

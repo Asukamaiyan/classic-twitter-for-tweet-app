@@ -4,7 +4,7 @@
 
 ## インストール・更新
 
-バージョン **6.10.0** です。使う環境に合った **1本だけ** を有効にしてください。
+バージョン **6.11.0** です。使う環境に合った **1本だけ** を有効にしてください。
 
 | 環境 | Greasy Fork | ファイル |
 |---|---|---|
@@ -13,6 +13,18 @@
 | English | [English version](https://greasyfork.org/en/scripts/594603) | `classic-twitter-en.user.js` |
 
 Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込みしてください。既存のスクリプト名とnamespaceを維持しています。重複する旧版やテスト版は無効にしてください。日本ニュース機能は本体へ統合しました。旧ニュース試験版は無効にしてください。
+
+## 6.11.0 の変更（2026-10-01、Tweet.app 2.1.0対応）
+
+- **標準機能との重複を整理**：本体に返信通知が追加されたため、拡張の返信一覧・90秒ごとの返信取得・追加の未読件数を削除。通知と件数は本体を使います。以前のブラウザ内データは削除しません。
+- **通知を種類で絞り込む**：標準通知の下で「返信・お気に入り・リツイート・フォロー」を選択。読み込み済みの通知を表示する機能で、通知の取得・未読件数・本体のクリック操作を維持します。種類を特定できないお知らせも残します。
+- **新しい投票UIの日本語化**：投票の操作・期間・結果だけを翻訳し、選択肢や入力中の文章を保持。本体の投票機能を使います。投票ボタン追加で止まっていた写真の複数選択も修正。
+- **新しい通知の表示に対応**：お気に入りの星を維持し、各アイコンから本人のプロフィールへ移動。標準のフォローバック一覧は元の操作を保ちます。
+- **ミュートを補完表示にも反映**：写真・動画欄で本体のMUTED投稿を除外。ローカルのお気に入り欄は本体のミュート一覧を読み取り確認してから表示します。確認が失敗した場合は内容を隠し、再試行できます。保存データは保持します。
+
+投票、返信通知、アカウントミュート、アカウント通報、フォローバックなど、本体にある操作は重複して追加しません。写真の複数選択・スライド、プロフィールの写真・動画／ローカルお気に入り、通知アイコンの個別リンク、スマホのバッジなど、まだ本体と重複しない補完は維持します。[最新API調査](docs/API_RESEARCH.md)と[検証記録](docs/VALIDATION.md)を参照してください。
+
+以下の旧版の変更記録にある独自リプライ通知と定期取得は、6.11.0で終了しました。
 
 ## 6.10.0 の修正・追加（2026-09-30）
 
@@ -99,7 +111,7 @@ Greasy Forkで更新し、[tweet.app](https://app.tweet.app/) を再読み込み
 
 [API調査](docs/API_RESEARCH.md) に、実際の公式クライアントで確認できた機能と補完機能の境界を記載しています。外部開発者向けの公開API仕様は確認できていません。翻訳、アカウントミュート、検索、Following、テーマなどは既にサイト本体の機能です。
 
-保存検索・投稿保存・キーワード機能は現在表示されている画面とブラウザ保存領域だけを使います。日本ニュースはYahoo!ニュースの公開RSSを認証情報なしで取得します。自動翻訳は選択したエンジンを使います。表示名・バッジ・通知アイコン・返信通知の補完はtweet.appの既存APIへの読み取り通信を使います。ログイン用トークンを作者や第三者のサーバーへ送りません。サーバー側DM、予約投稿、端末間同期を追加するものではありません。
+保存検索・投稿保存・キーワード機能は現在表示されている画面とブラウザ保存領域だけを使います。日本ニュースはYahoo!ニュースの公開RSSを認証情報なしで取得します。自動翻訳は選択したエンジンを使います。表示名・バッジ・通知アイコン・プロフィール補完はtweet.appの既存APIへの読み取り通信を使います。通知の種類フィルターは追加の取得通信を行いません。ログイン用トークンを作者や第三者のサーバーへ送りません。サーバー側DM、予約投稿、端末間同期を追加するものではありません。
 
 ## 開発・検証
 
@@ -115,6 +127,8 @@ npm run check
 バグ報告にはブラウザ・スクリプト版・画面名・操作手順を記載してください。認証情報や非公開の投稿内容を含めないでください。
 
 ## English
+
+Version 6.11.0 adapts to Tweet.app 2.1.0. Native reply notifications replace the supplemental inbox and its polling/counts, while previous browser data is retained. A local type filter works on loaded native notifications without extra notification requests. Poll controls preserve user choices and drafts; multiple-photo selection now tolerates the native Poll button. Native follow-back lists keep their handlers. Profile media excludes MUTED posts, and local Favorites waits for a complete read-only mute-list check before showing saved snapshots. Failure offers retry without deleting saved data. Earlier reply-inbox notes below are historical and superseded by this release.
 
 Version 6.9.0 adds the 2014–2015 blue layout, crisp vector favorites, responsive desktop/mobile styling and reduced-motion-aware feedback. Tools can restore the native layout. It retains the prior resume and refresh fixes: version 6.8.1 resumes unfinished on-device translation after returning to the tab and refreshes Japanese news at the 15-minute cache deadline while visible. Background tabs, world news and unrelated routes do not trigger refresh requests.
 

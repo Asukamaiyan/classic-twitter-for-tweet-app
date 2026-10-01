@@ -31,7 +31,12 @@
         ![...toolbar.children].some(el => el.matches('input[type="file"][accept="video/mp4,video/quicktime"]'))) return null;
     const actions = [...toolbar.children].find(el => el.matches('div.flex.items-center'));
     const buttons = actions ? [...actions.children].filter(el => el.tagName === 'BUTTON') : [];
-    return buttons.length === 2 ? { root, toolbar, photoButton: buttons[0], videoButton: buttons[1] } : null;
+    // Tweet 2.1 adds a poll toggle beside the two media controls. Identify the
+    // verified native icons rather than counting buttons or treating poll as video.
+    const photos = buttons.filter(el => el.querySelector(':scope > svg.lucide-image'));
+    const videos = buttons.filter(el => el.querySelector(':scope > svg.lucide-video'));
+    return photos.length === 1 && videos.length === 1
+      ? { root, toolbar, photoButton: photos[0], videoButton: videos[0] } : null;
   }
   function ctMediaPreviews(root) { return [...root.querySelectorAll('img[alt="Upload preview"]')]; }
   function ctMediaPreviewReady(image) {

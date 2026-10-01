@@ -10,7 +10,7 @@ function uploadMarkup(kind = 'home') {
   return `<main><section id="composer" ${kind === 'reply' ? 'role="form"' : ''}>
     <textarea id="${kind === 'modal' ? 'public-modal-tweet-input' : 'public-tweet-input'}" name="compose-text">A draft</textarea>
     <div id="upload" class="w-full mt-3 space-y-3"><div id="toolbar" class="flex items-center justify-between pt-3">
-      <div class="flex items-center gap-0.5"><button id="photo" type="button">Photo</button><button id="video" type="button">Video</button></div>
+      <div class="flex items-center gap-0.5"><button id="photo" type="button"><svg class="lucide lucide-image"></svg></button><button id="video" type="button"><svg class="lucide lucide-video"></svg></button></div>
       ${kind === 'home' ? submit : ''}
       <input id="photos" type="file" accept="image/jpeg,image/png,image/webp" class="hidden">
       <input id="videos" type="file" accept="video/mp4,video/quicktime" class="hidden"></div></div>
@@ -20,6 +20,26 @@ function galleryMarkup(count = 3, id = 'gallery') {
   return `<div class="mt-3"><div id="${id}" class="grid gap-0.5 rounded-2xl overflow-hidden border border-tl-app-border grid-cols-${count === 1 ? 1 : 2}">
     ${Array.from({ length: count }, (_, i) => `<div class="relative bg-tl-app-bg overflow-hidden ${i === 0 && count === 3 ? 'row-span-2' : 'aspect-video'}"><img src="https://media.tweet.app/${id}-${i}.jpg" alt="Attached media" class="w-full h-full object-cover cursor-pointer"></div>`).join('')}</div></div>`;
 }
+
+test('2.1 poll toggle does not disable multi-photo recognition or replace native poll actions', async t => {
+  const f=harness(t);
+  const actions=f.document.getElementById('photo').parentElement;
+  const poll=f.document.createElement('button');poll.type='button';poll.setAttribute('aria-label','Add poll');poll.setAttribute('aria-pressed','false');
+  poll.innerHTML='<svg class="lucide lucide-chart-column rotate-90"></svg>';
+  actions.prepend(poll);
+  let nativePoll=0;poll.addEventListener('click',()=>nativePoll++);
+  f.enhance();
+  assert.equal(f.document.getElementById('photos').multiple,true);
+  assert.equal(f.document.getElementById('photo').getAttribute('aria-label'),'写真を追加');
+  assert.equal(f.document.getElementById('video').getAttribute('aria-label'),'動画を追加');
+  assert.equal(poll.getAttribute('aria-label'),'Add poll');
+  poll.click();assert.equal(nativePoll,1);
+  f.select([f.file('one.jpg'),f.file('two.jpg')]);
+  await settle(()=>f.uploads.length===1);f.complete(0);
+  await settle(()=>f.uploads.length===2);f.complete(1);
+  await settle(()=>f.document.querySelector('.ct-media-upload-status')?.textContent.includes('2枚を追加'));
+  assert.equal(f.document.querySelector('textarea').value,'A draft');
+});
 function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', reduced = false } = {}) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>${html}</body></html>`, {
     url: 'https://app.tweet.app/feed', runScripts: 'outside-only', pretendToBeVisual: true

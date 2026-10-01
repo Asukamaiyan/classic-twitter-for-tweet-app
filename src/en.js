@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.10.0
+// @version      6.11.0
 // @description  Classic blue Twitter layout and vector star Favorites, responsive desktop/mobile styling and reduced-motion-aware feedback. Preserves posts, replies, badges, photo slides, Japan/world news, safer translation and local tools.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -29,8 +29,8 @@
   /* @include presentation */
   /* @include profile */
   /* @include favorite-capture */
-  /* @include replies */
   /* @include navigation */
+  /* @include notification-filters */
   /* @include badges */
   /* @include media */
   /* @include news */
@@ -42,10 +42,6 @@
 
   const KEY = {
     favorites: 'classicTwitterEN.favorites',
-    replyNotices: 'classicTwitterEN.replyNotifications',
-    replySeen: 'classicTwitterEN.replySeenIds',
-    replyCounts: 'classicTwitterEN.replyCounts',
-    replyInit: 'classicTwitterEN.replyWatcherInitialized',
     autoTranslate: 'classicTwitterEN.autoTranslate'
   };
 
@@ -74,6 +70,9 @@
 
   const EN = new Map([
     ['Feed', 'Home'],
+    ['Nothing to see here yet. Likes, reposts, replies, quotes, mentions, and follows will show up here.', 'Nothing to see here yet. Favorites, Retweets, replies, quotes, mentions, and follows will show up here.'],
+    ['quoted your post', 'quoted your Tweet'],
+    ['quoted your tweet', 'quoted your Tweet'],
     ['Posts', 'Tweets'],
     ['No posts yet.', 'No Tweets yet.'],
     ['No reposts yet.', 'No Retweets yet.'],
@@ -183,8 +182,7 @@
         color:#1d9bf0;
         border-bottom-color:#1d9bf0!important;
       }
-      #ct-favorites-panel,
-      #ct-reply-panel {
+      #ct-favorites-panel {
         position:fixed;
         z-index:2147482000;
         overflow:auto;
@@ -195,7 +193,6 @@
         box-shadow:0 10px 35px rgba(0,0,0,.25);
       }
       #ct-favorites-panel { border-radius:0 0 12px 12px; }
-      #ct-reply-panel { border-radius:14px; max-height:min(48vh,460px); }
       .ct-local-head {
         position:sticky;
         top:0;
@@ -256,20 +253,6 @@
         line-height:20px;
       }
       .ct-local-empty { padding:28px 18px; text-align:center; opacity:.65; }
-      .ct-reply-kicker { font-size:12px; color:#1d9bf0; margin-bottom:3px; }
-      #ct-reply-badge {
-        position:fixed;
-        z-index:2147483000;
-        min-width:18px;
-        height:18px;
-        padding:0 5px;
-        border-radius:999px;
-        background:#1d9bf0;
-        color:#fff;
-        font:700 11px/18px Arial;
-        text-align:center;
-        pointer-events:none;
-      }
     `;
 
     (document.head || document.documentElement).appendChild(style);
@@ -343,20 +326,75 @@
       Number.isFinite(Date.parse(title));
   }
 
+  // Tweet v2.1.0 keeps user-written poll choices in tl-user-text. Recognize
+  // only the surrounding native poll chrome; never treat a whole fieldset as UI.
+  function nativeLocalizationPoll(el) {
+    if (!el || isOwnedLocalizationElement(el)) return null;
+    const compose = el.closest('fieldset.relative.w-full.mt-3.rounded-2xl.border');
+    if (compose && /^(?:Poll|投票)$/.test(clean(compose.querySelector(':scope > legend')?.textContent)) &&
+        compose.querySelector('input[type="text"][maxlength="25"][id*="-choice-"]') &&
+        [...compose.querySelectorAll('select option')].map(option => option.value).join(',') === '1,24,72,168') {
+      return { root: compose, compose: true };
+    }
+    if (!el.closest('article')) return null;
+    for (let candidate = el; candidate && candidate.tagName !== 'ARTICLE'; candidate = candidate.parentElement) {
+      if (!candidate.matches('div.mt-3')) continue;
+      const choices = candidate.querySelector(':scope > fieldset.flex.flex-col');
+      const results = candidate.querySelector(':scope > div > ul[aria-label="Poll results"],:scope > div > ul[aria-label="投票結果"]');
+      const labels = choices && [...choices.querySelectorAll(':scope > label')];
+      if (choices && /^(?:Poll choices|投票の選択肢)$/.test(clean(choices.querySelector(':scope > legend')?.textContent)) &&
+          labels.length >= 2 && labels.length <= 5 && labels.every(label =>
+            label.querySelector(':scope > input[type="radio"]') && label.querySelector(':scope > span.tl-user-text'))) {
+        return { root: candidate, compose: false };
+      }
+      if (results && results.children.length >= 2 && results.children.length <= 5 &&
+          [...results.children].every(row => row.matches('li.relative.overflow-hidden') && row.querySelector('span.tl-user-text'))) {
+        return { root: candidate, compose: false };
+      }
+    }
+    return null;
+  }
+
+  function isNativeLocalizationPollUI(el) {
+    const poll = nativeLocalizationPoll(el);
+    if (!poll) return false;
+    if (poll.compose) return el.matches('legend,label,button,button span,p[role="status"]');
+    return el.matches('legend.sr-only,span.sr-only,p[role="status"],p[role="alert"]') ||
+      (el.matches('button') && el.parentElement?.matches('div.mt-2.flex.items-center.justify-between')) ||
+      (el.matches('span.text-tl-app-text-muted,p.text-tl-app-text-muted') &&
+        (el.parentElement?.matches('div.mt-2.flex.items-center.justify-between') ||
+          el.parentElement?.matches('div.flex.flex-col.outline-none')));
+  }
+
+  function nativeLocalizationAccountMenu(el) {
+    if (!el?.matches('span.min-w-0.truncate') || !el.parentElement?.matches('button[role="menuitem"]') ||
+        !el.parentElement.querySelector(':scope > svg') || !el.parentElement.parentElement?.matches('[role="menu"]')) return null;
+    const host = el.parentElement.parentElement.parentElement;
+    const trigger = host?.querySelector(':scope > button[aria-haspopup="menu"]');
+    return trigger && /^(?:Profile options|プロフィールのメニュー)$/.test(trigger.getAttribute('aria-label') || '') ? el : null;
+  }
+
+  function nativeLocalizationAccountDialog(el) {
+    const dialog = el?.closest('[role="dialog"][aria-modal="true"].bg-tl-app-card.border');
+    if (!dialog || !/^(?:Report @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+を報告)$/.test(dialog.getAttribute('aria-label') || '') ||
+        !dialog.querySelector('h3.text-sm.font-bold.text-tl-app-text')) return null;
+    return dialog;
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
       'textarea,input,select,option,script,style,code,pre,kbd,samp,svg,' +
       '[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,' +
       '[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],' +
-      '.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
+      '.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
     // protection for profile names and account values everywhere else.
     const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications' }[location.pathname.replace(/\/$/, '')];
     const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
       el === document.querySelector('main h2') && !el.closest('article');
-    return !!el.closest('.truncate') && !isNativeSettingsNavigation(el) && !pageTitle;
+    return !!el.closest('.truncate') && !nativeLocalizationAccountMenu(el) && !isNativeSettingsNavigation(el) && !pageTitle;
   }
 
   function localizationNotificationRow(el) {
@@ -365,7 +403,16 @@
     if (!row?.closest('main') || isOwnedLocalizationElement(row)) return null;
     // Current tweet.app notification rows are border-separated buttons. Do not
     // interpret tab buttons or arbitrary paragraphs as notification content.
-    return row.matches('.items-start.border-b,[data-testid="notification-row"]') ? row : null;
+    if (row.matches('.items-start.border-b,[data-testid="notification-row"]')) return row;
+    // v2.1.0 moved the separator to a wrapper so the native Follow list can
+    // expand below its action. Match its 28px leading icon and direct body.
+    const icon = row.firstElementChild;
+    const body = icon?.nextElementSibling;
+    return row.matches('button.w-full.flex.items-start.text-left') &&
+      row.parentElement?.matches('div.border-b.border-tl-app-border') &&
+      row.parentElement.firstElementChild === row && icon?.matches('div.mt-0\\.5.shrink-0') &&
+      icon.querySelector(':scope > svg[width="28"][height="28"]') &&
+      body?.matches('div.flex-1.min-w-0') && body.querySelector(':scope > p') ? row : null;
   }
 
   function localizationNotificationAction(node) {
@@ -386,6 +433,10 @@
     if (isProtectedLocalizationElement(el)) return false;
     if (localizationNotificationAction(node)) return true;
     if (localizationNotificationRow(el)) return false;
+    if (isNativeLocalizationPollUI(el)) return true;
+    if (nativeLocalizationAccountMenu(el)) return node === el.firstChild &&
+      /^(?:Report|Mute unavailable|(?:Mute|Unmute) @[A-Za-z0-9_.-]+)$/.test(clean(node.nodeValue));
+    if (nativeLocalizationAccountDialog(el) && !el.closest('textarea,input')) return true;
     const text = clean(node.nodeValue);
     const link = el.closest('a[href]');
     if (link) {
@@ -452,8 +503,8 @@
     host?.querySelectorAll?.('button,[role="tab"],[role="menuitem"],input,textarea').forEach(el => controls.push(el));
     for (const el of controls) {
       if (isOwnedLocalizationElement(el) ||
-          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
-          el.closest('.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
+          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
+          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
       if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
           el.querySelector(':scope > svg.lucide-x') &&
           el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
@@ -491,7 +542,7 @@
     ]);
     for (const el of list) {
       if (isOwnedLocalizationElement(el) ||
-          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
+          el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
       const value = el.getAttribute('placeholder');
       const out = placeholders.get(value);
       if (out && out !== value) el.setAttribute('placeholder', out);
@@ -616,7 +667,7 @@
 
 
 
-  function localCard(item, reply = false) {
+  function localCard(item) {
     const row = document.createElement('div');
     row.className = 'ct-local-card';
 
@@ -630,12 +681,6 @@
     const main = document.createElement('div');
     main.className = 'ct-local-main';
 
-    if (reply) {
-      const kicker = document.createElement('div');
-      kicker.className = 'ct-reply-kicker';
-      kicker.textContent = 'replied to your Tweet';
-      main.appendChild(kicker);
-    }
 
     const meta = document.createElement('div');
     meta.className = 'ct-local-meta';
@@ -800,9 +845,8 @@
       patchFavoriteProfileTab();
 
       if (favoritesActive) renderFavoritesPanel();
-      renderReplyPanel();
-      patchReplyBadge();
     patchNavigation(root);
+    ctPatchNotificationFilters();
     patchOfficialBadges(root);
     ctMediaEnhance(root);
     patchJapaneseNews(root);
@@ -817,5 +861,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.10.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.11.0 loaded');
 })();

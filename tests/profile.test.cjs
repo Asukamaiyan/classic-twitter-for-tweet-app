@@ -19,6 +19,7 @@ function harness(t, options = {}) {
   });
   const { window } = dom; t.after(() => window.close());
   let auth = { uid: 'uid-viewer', token: 'token-viewer' }; let accountUser = 'viewer'; let pages = [{ posts: [], nextCursor: null }]; let userReplies = [];
+  let mutedPages = [{ success: true, users: [], nextCursor: null }];
   let override = null; const calls = [];
   window.ctNetworkState = { authUID: auth.uid };
   window.getAuth = async () => { window.ctNetworkState.authUID = auth?.uid || null; return auth; };
@@ -26,6 +27,10 @@ function harness(t, options = {}) {
     const endpoint = new URL(url); calls.push(endpoint.pathname + endpoint.search);
     assert.equal(endpoint.origin, 'https://api.tweet.app'); assert.match(headers.Authorization, /^Bearer /);
     if (override) { const result = await override(endpoint); if (result !== undefined) return result; }
+    if (endpoint.pathname === '/api/users/muted') {
+      assert.equal(endpoint.searchParams.has('limit'), false);
+      return mutedPages[Number(endpoint.searchParams.get('cursor') || 0)] ?? null;
+    }
     if (endpoint.pathname.startsWith('/api/user-profile/')) return { profile: { username: accountUser } };
     if (endpoint.pathname.endsWith('/replies')) return { replies: userReplies };
     assert.match(endpoint.pathname, /^\/api\/users\/[A-Za-z0-9_.-]+\/posts$/);
@@ -33,11 +38,11 @@ function harness(t, options = {}) {
     return pages[Number(endpoint.searchParams.get('cursor') || 0)] || { posts: [], nextCursor: null };
   };
   window.eval(`const CT_LOCALE='${options.locale || 'en'}'; const KEY={favorites:'legacy.favorites'}; const API_ORIGIN='https://api.tweet.app'; let favoritesActive=false; let ctPageActive=true; ${source}
-    window.profile={patch:patchFavoriteProfileTab, close:closeFavoritesPanel, render:renderFavoritesPanel, media:ctProfileLoadMedia, state:ctProfileState,
+    window.profile={patch:patchFavoriteProfileTab, close:closeFavoritesPanel, render:renderFavoritesPanel, media:ctProfileLoadMedia, mutes:ctProfileLoadFavoriteMutes, state:ctProfileState,
     save:ctProfileSaveFavorite, remove:ctProfileRemoveFavorite, load:ctProfileLoadFavorites, import:ctProfileImportFavorites, assets:ctProfileMediaAssets,
     context:ctProfileContext, viewerClose:ctProfileCloseViewer, setActive:value=>{ctPageActive=value;}};`);
   return { window, document: window.document, api: window.profile, calls,
-    pages: value => { pages = value; }, replies: value => { userReplies = value; }, override: value => { override = value; },
+    pages: value => { pages = value; }, replies: value => { userReplies = value; }, muted: value => { mutedPages = value; }, override: value => { override = value; },
     setAuth: (value, user = 'other') => { auth = value; accountUser = user; window.ctNetworkState.authUID = auth?.uid || null; },
     route: (route, user) => { window.history.replaceState({}, '', route); window.document.querySelector('main').innerHTML = `<div class="animate-fadeIn">${client(user)}</div>`; },
     async ready() { this.api.patch(); await new Promise(resolve => setTimeout(resolve, 0)); this.api.patch(); },
@@ -121,7 +126,7 @@ test('Media uses bounded read-only cursor pages, all original image assets, vide
 
 test('bad URLs, deleted/reposted/foreign posts are rejected and user text is never interpreted as HTML', async t => {
   const h = harness(t); await h.ready();
-  h.pages([{ posts: [post('bad-url', [{ media_type: 'image', public_url: 'javascript:alert(1)' }]), post('bad-credentials', [{ media_type: 'video', public_url: 'https://u:p@example.test/video' }]), post('foreign', undefined, { authorUsername: 'bob' }), post('deleted', undefined, { isDeleted: true }), post('repost', undefined, { originalPostId: 'original' }), post('own')], nextCursor: null }]);
+  h.pages([{ posts: [post('bad-url', [{ media_type: 'image', public_url: 'javascript:alert(1)' }]), post('bad-credentials', [{ media_type: 'video', public_url: 'https://u:p@example.test/video' }]), post('foreign', undefined, { authorUsername: 'bob' }), post('deleted', undefined, { isDeleted: true }), post('muted', undefined, { status: 'MUTED' }), post('repost', undefined, { originalPostId: 'original' }), post('own')], nextCursor: null }]);
   await h.select('media');
   assert.deepEqual([...h.document.querySelectorAll('[data-ct-profile-post]')].map(el => el.dataset.ctProfilePost), ['own']);
   assert.equal(h.document.querySelector('#ct-media-panel script'), null);
@@ -310,4 +315,139 @@ test('reply media is checked once, refreshed explicitly, and capped at the lates
   assert.equal(h.document.querySelector('[data-ct-profile-post=reply0]'), null); assert.ok(h.document.querySelector('[data-ct-profile-post=reply104]'));
   await h.api.media(); assert.equal(h.calls.filter(url => url.endsWith('/replies')).length, 1);
   await h.api.media(true); assert.equal(h.calls.filter(url => url.endsWith('/replies')).length, 2);
+});
+
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const mutedUser = username => ({ userId: 'uid-' + username.toLowerCase(), username, displayName: username, avatarUrl: 'https://images.example/avatar.jpg' });
+function favoriteRows(h) { return [...h.document.querySelectorAll('#ct-favorites-panel [data-ct-profile-post]')].map(row => row.dataset.ctProfilePost); }
+function favoriteControl(h, label) { return [...h.document.querySelectorAll('#ct-favorites-panel button')].find(button => button.textContent === label); }
+
+test('Favorites wait for native mute checking without showing snapshots and retain hidden saved data', async t => {
+  const h = harness(t); await h.ready();
+  h.api.save(item('muted', { username: 'ALICE' })); h.api.save(item('visible', { username: 'bob' })); h.api.save(item('unknown', { username: '' }));
+  const before = h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'); let release;
+  h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { release = resolve; }) : undefined);
+  h.document.getElementById('ct-favorites-tab').click();
+  assert.deepEqual(favoriteRows(h), []); await tick();
+  assert.deepEqual(favoriteRows(h), []); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Checking muted accounts/);
+  h.api.render(); h.api.patch(); assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 1);
+  release({ success: true, users: [mutedUser('Alice')], nextCursor: null }); await tick();
+  assert.deepEqual(favoriteRows(h), ['visible']); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /2 saved posts.*hidden.*retained/);
+  assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), before);
+  assert.equal(h.api.load().length, 3);
+});
+
+test('a failed partial mute check keeps all snapshots hidden until an explicit retry completes it', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('muted')); h.api.save(item('visible', { username: 'bob' }));
+  h.muted([{ success: true, users: [mutedUser('alice')], nextCursor: '1' }, null]); await h.select('favorites');
+  assert.deepEqual(favoriteRows(h), []); assert.equal(h.api.state.favoriteMutes.done, false); assert.equal(h.api.state.favoriteMutes.cursor, '1');
+  assert.match(h.document.getElementById('ct-favorites-panel').textContent, /could not be checked/);
+  const before = h.calls.length; h.api.patch(); h.api.render(); await tick(); assert.equal(h.calls.length, before);
+  h.muted([{ success: true, users: [mutedUser('alice')], nextCursor: '1' }, { success: true, users: [], nextCursor: null }]);
+  favoriteControl(h, 'Try again').click(); await tick();
+  assert.deepEqual(h.calls.slice(before), ['/api/users/muted?cursor=1']); assert.deepEqual(favoriteRows(h), ['visible']);
+  assert.equal(h.api.state.favoriteMutes.done, true); assert.equal(h.api.load().length, 2);
+});
+
+test('mute pagination stops after ten pages and requires explicit continuation before any saved row appears', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('last-page-muted')); h.api.save(item('visible', { username: 'bob' }));
+  h.muted(Array.from({ length: 11 }, (_, index) => ({ success: true, users: index === 10 ? [mutedUser('alice')] : [], nextCursor: index === 10 ? null : String(index + 1) })));
+  await h.select('favorites');
+  assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 10); assert.equal(h.api.state.favoriteMutes.done, false);
+  assert.deepEqual(favoriteRows(h), []); assert.ok(favoriteControl(h, 'Continue checking'));
+  h.api.patch(); h.api.render(); await tick(); assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 10);
+  favoriteControl(h, 'Continue checking').click(); await tick();
+  assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 11); assert.equal(h.api.state.favoriteMutes.pages, 11);
+  assert.deepEqual(favoriteRows(h), ['visible']);
+});
+
+test('bad mute records and invalid or repeating cursors never turn an incomplete check into success', async t => {
+  const bad = [null, { success: false, users: [] }, { success: true, users: {} }, { success: true, users: [{ username: 'alice' }] },
+    { success: true, users: [mutedUser('invalid user')] }, { success: true, users: [], nextCursor: 2 }, { success: true, users: [], nextCursor: '' }];
+  for (const response of bad) {
+    const h = harness(t); await h.ready(); h.api.save(item('saved')); h.muted([response]); await h.select('favorites');
+    assert.equal(h.api.state.favoriteMutes.done, false); assert.deepEqual(favoriteRows(h), []); assert.ok(favoriteControl(h, 'Try again')); assert.equal(h.api.load().length, 1);
+  }
+  const h = harness(t); await h.ready(); h.api.save(item('saved'));
+  h.muted([{ success: true, users: [], nextCursor: '1' }, { success: true, users: [], nextCursor: '1' }]); await h.select('favorites');
+  assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 2); assert.equal(h.api.state.favoriteMutes.done, false); assert.deepEqual(favoriteRows(h), []);
+});
+
+test('refreshing and returning to Favorites check native mutes anew and clear previously displayed snapshots while waiting', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('saved')); await h.select('favorites'); assert.deepEqual(favoriteRows(h), ['saved']);
+  let release; h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { release = resolve; }) : undefined);
+  favoriteControl(h, 'Refresh view').click(); assert.deepEqual(favoriteRows(h), []); await tick();
+  release({ success: true, users: [mutedUser('alice')], nextCursor: null }); await tick(); assert.deepEqual(favoriteRows(h), []);
+  assert.equal(h.api.load().length, 1);
+  h.override(null); h.muted([{ success: true, users: [], nextCursor: null }]); h.document.querySelector('[role=tab][aria-label=Tweets]').click();
+  const before = h.calls.filter(url => url.startsWith('/api/users/muted')).length; await h.select('favorites');
+  assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, before + 1); assert.deepEqual(favoriteRows(h), ['saved']);
+});
+
+test('late mute responses cannot affect another route or account and native content is restored', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('old')); let release; let requests = 0;
+  h.override(endpoint => endpoint.pathname === '/api/users/muted' ? (++requests === 1 ? new Promise(resolve => { release = resolve; }) : { success: true, users: [], nextCursor: null }) : undefined);
+  await h.select('favorites');
+  h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.route('/profile', 'other'); await h.ready(); h.api.save(item('new', { username: 'bob' })); await h.select('favorites');
+  release({ success: true, users: [mutedUser('bob')], nextCursor: null }); await tick();
+  assert.deepEqual(favoriteRows(h), ['new']); assert.equal(h.api.state.favoriteMutes.uid, 'uid-other'); assert.equal(h.api.state.favoriteMutes.handles.size, 0);
+  let late; h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { late = resolve; }) : undefined);
+  favoriteControl(h, 'Refresh view').click(); await tick(); h.route('/feed', 'other'); h.api.patch();
+  late({ success: true, users: [], nextCursor: null }); await tick();
+  assert.equal(h.document.getElementById('ct-favorites-panel'), null); assert.equal(h.api.state.favoriteMutes, null);
+  assert.equal(h.document.getElementById('native-timeline').hasAttribute('data-ct-profile-timeline-hidden'), false);
+});
+
+test('hidden and inactive pages send no mute requests and a background transition cannot complete a pending check', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('saved'));
+  Object.defineProperty(h.document, 'hidden', { configurable: true, value: true }); await h.select('favorites');
+  assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 0); assert.deepEqual(favoriteRows(h), []);
+  Object.defineProperty(h.document, 'hidden', { configurable: true, value: false }); h.api.setActive(false); await h.api.mutes();
+  assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 0);
+  h.api.setActive(true); let release; h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { release = resolve; }) : undefined);
+  const pending = h.api.mutes(); await tick(); Object.defineProperty(h.document, 'hidden', { configurable: true, value: true });
+  release({ success: true, users: [], nextCursor: null }); await pending;
+  assert.equal(h.api.state.favoriteMutes.done, false); assert.deepEqual(favoriteRows(h), []); assert.ok(favoriteControl(h, 'Try again'));
+  Object.defineProperty(h.document, 'hidden', { configurable: true, value: false }); h.override(null); await h.api.mutes();
+  assert.deepEqual(favoriteRows(h), ['saved']);
+});
+
+test('Favorite saves, removals, imports and storage events obey a completed mute check without erasing filtered snapshots', async t => {
+  const h = harness(t); await h.ready(); h.muted([{ success: true, users: [mutedUser('alice')], nextCursor: null }]); await h.select('favorites');
+  h.api.save(item('muted')); h.api.save(item('visible', { username: 'bob' })); assert.deepEqual(favoriteRows(h), ['visible']);
+  h.window.localStorage.setItem('legacy.favorites', JSON.stringify([item('legacy-muted'), item('legacy-visible', { username: 'bob' })])); h.api.render();
+  favoriteControl(h, 'Import older saved data').click(); assert.deepEqual(favoriteRows(h), ['visible', 'legacy-visible']); assert.equal(h.api.load().length, 4);
+  h.api.remove('visible', 'uid-viewer'); assert.deepEqual(favoriteRows(h), ['legacy-visible']);
+  h.window.localStorage.setItem('legacy.favorites:uid:uid-viewer', JSON.stringify([item('stored-muted'), item('stored-visible', { username: 'bob' })]));
+  h.window.dispatchEvent(new h.window.StorageEvent('storage', { key: 'legacy.favorites:uid:uid-viewer' })); assert.deepEqual(favoriteRows(h), ['stored-visible']); assert.equal(h.api.load().length, 2);
+  assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 1);
+});
+
+test('a detached legacy import control cannot claim storage for a newly signed-in account', async t => {
+  const h = harness(t); await h.ready(); h.window.localStorage.setItem('legacy.favorites', JSON.stringify([item('legacy')])); await h.select('favorites');
+  const oldImport = favoriteControl(h, 'Import older saved data');
+  h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.route('/profile', 'other'); await h.ready(); oldImport.click();
+  assert.equal(h.window.localStorage.getItem('legacy.favorites:owner'), null); assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-other'), null);
+  assert.equal(h.api.load().length, 0); assert.ok(h.window.localStorage.getItem('legacy.favorites'));
+});
+
+test('returning to Favorites supersedes a late mute check from the same account', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('saved')); let release; let requests = 0;
+  h.override(endpoint => endpoint.pathname === '/api/users/muted' ? (++requests === 1 ? new Promise(resolve => { release = resolve; }) : { success: true, users: [], nextCursor: null }) : undefined);
+  await h.select('favorites'); h.document.querySelector('[role=tab][aria-label=Tweets]').click(); await h.select('favorites');
+  assert.deepEqual(favoriteRows(h), ['saved']); const current = h.api.state.favoriteMutes;
+  release({ success: true, users: [mutedUser('alice')], nextCursor: null }); await tick();
+  assert.equal(h.api.state.favoriteMutes, current); assert.equal(current.handles.size, 0); assert.deepEqual(favoriteRows(h), ['saved']);
+});
+
+test('saves, removals and import during mute checking stay hidden until the current check completes', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('remove-me', { username: 'bob' }));
+  h.window.localStorage.setItem('legacy.favorites', JSON.stringify([item('legacy-muted'), item('legacy-visible', { username: 'bob' })]));
+  let release; h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { release = resolve; }) : undefined);
+  await h.select('favorites'); h.api.save(item('saved-muted')); h.api.save(item('saved-visible', { username: 'bob' })); h.api.remove('remove-me');
+  favoriteControl(h, 'Import older saved data').click(); assert.deepEqual(favoriteRows(h), []);
+  release({ success: true, users: [mutedUser('alice')], nextCursor: null }); await tick();
+  assert.deepEqual(favoriteRows(h), ['saved-visible', 'legacy-visible']); assert.equal(h.api.load().length, 4);
+  assert.equal(h.window.localStorage.getItem('legacy.favorites:owner'), 'uid-viewer');
+  assert.equal(h.api.load().some(row => row.id === 'remove-me'), false);
 });

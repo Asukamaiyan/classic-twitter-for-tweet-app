@@ -26,6 +26,8 @@ function fixture(language, html, route = '/feed') {
   const common = [
     'localizationScopeNodes', 'isOwnedLocalizationElement', 'isNativeSettingsNavigation',
     'isNativeLocalizationTimestamp', 'isProtectedLocalizationElement',
+    'nativeLocalizationPoll', 'isNativeLocalizationPollUI',
+    'nativeLocalizationAccountMenu', 'nativeLocalizationAccountDialog',
     'localizationNotificationRow', 'localizationNotificationAction', 'isLocalizationUI',
     'replaceLocalizationText', 'patchUIAttributes', 'translateTextNode', 'patchUI', 'patchInputs',
     'patchNotifications', 'patchRetweetRows'
@@ -33,7 +35,7 @@ function fixture(language, html, route = '/feed') {
   const japanese = [
     'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
     'isNativeEditedIndicator',
-    'isNativeTweetCount',
+    'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
     'notificationTextNodes', 'patchNotificationGrammar', 'patchNotificationConnectors',
     'patchNotificationParticles', 'patchNotificationFollowGrammar', 'patchReplyingTo',
     'patchComposeJapanese', 'patchProfileJoinedDate', 'patchInviteJoinedLabels'
@@ -517,3 +519,124 @@ for (const language of ['ja', 'en']) {
     f.dom.window.close();
   });
 }
+
+for (const language of ['ja', 'en']) test(`${language}: v2.1 native poll choices, results, and user text remain byte-for-byte intact`, () => {
+  const f = fixture(language, `<article>
+    <p class="tl-user-text" id="body211">Home</p>
+    <div class="mt-3" id="voting"><fieldset class="flex flex-col gap-1.5"><legend class="sr-only" id="choices">Poll choices</legend>
+      <label><input type="radio" name="poll" value="native-one"><span class="tl-user-text min-w-0 break-words" id="choice1">Home</span></label>
+      <label><input type="radio" name="poll" value="native-two"><span class="tl-user-text min-w-0 break-words" id="choice2">Reply</span></label>
+      </fieldset><div class="mt-2 flex items-center justify-between gap-2"><span class="text-[0.8125rem] text-tl-app-text-muted" id="deadline">3 h left</span>
+      <button type="button" aria-busy="false" id="vote">Vote</button></div><p role="status" class="sr-only" id="vote-status">Vote recorded.</p>
+    </div>
+    <div class="mt-3" id="results"><div class="flex flex-col gap-1.5 outline-none" tabindex="-1">
+      <ul class="flex flex-col gap-1.5" aria-label="Poll results" id="results-list">
+       <li class="relative overflow-hidden rounded-lg border"><div class="relative flex items-center justify-between">
+        <span class="flex min-w-0 items-center"><span class="tl-user-text min-w-0 break-words" id="result1">Posts</span><svg></svg><span class="sr-only" id="your-vote">(your vote)</span></span><span class="tabular-nums text-tl-app-text-muted">50%</span></div></li>
+       <li class="relative overflow-hidden rounded-lg border"><div><span><span class="tl-user-text" id="result2">Follow back</span></span><span>50%</span></div></li>
+      </ul><p class="text-[0.8125rem] text-tl-app-text-muted" id="total">2 votes · Final results</p></div><p role="status" class="sr-only"></p></div>
+    <button class="tl-user-text" id="fake-user-button">Like</button>
+    <label id="other-label">Vote</label><span class="text-tl-app-text-muted" id="fake-deadline">3 h left</span>
+  </article>`);
+  const vote = f.document.getElementById('vote');
+  const radio = f.document.querySelector('input');
+  let voteCalls = 0;
+  vote.addEventListener('click', () => voteCalls++);
+  radio.checked = true;
+  f.run();
+  for (const [id, expected] of Object.entries({ body211: 'Home', choice1: 'Home', choice2: 'Reply', result1: 'Posts', result2: 'Follow back', 'fake-user-button': 'Like', 'other-label': 'Vote', 'fake-deadline': '3 h left' })) assert.equal(f.text(id), expected, id);
+  assert.equal(f.text('choices'), language === 'ja' ? '投票の選択肢' : 'Poll choices');
+  assert.equal(f.text('deadline'), language === 'ja' ? '残り3時間' : '3 h left');
+  assert.equal(f.text('vote'), language === 'ja' ? '投票する' : 'Vote');
+  assert.equal(f.text('vote-status'), language === 'ja' ? '投票を記録しました。' : 'Vote recorded.');
+  assert.equal(f.text('your-vote'), language === 'ja' ? '（あなたの投票）' : '(your vote)');
+  assert.equal(f.text('total'), language === 'ja' ? '2票 · 最終結果' : '2 votes · Final results');
+  assert.equal(f.document.getElementById('results-list').getAttribute('aria-label'), language === 'ja' ? '投票結果' : 'Poll results');
+  assert.equal(radio.value, 'native-one'); assert.equal(radio.checked, true);
+  assert.equal(vote, f.document.getElementById('vote'));
+  vote.click(); assert.equal(voteCalls, 1, 'native vote listener is preserved');
+  assert.equal(vote.getAttribute('aria-busy'), 'false');
+  const once = f.document.body.innerHTML; f.run(); assert.equal(f.document.body.innerHTML, once);
+  f.document.getElementById('deadline').firstChild.nodeValue = '1 min left';
+  f.run(f.document.getElementById('deadline').firstChild);
+  assert.equal(f.text('deadline'), language === 'ja' ? '残り1分' : '1 min left');
+  f.dom.window.close();
+});
+
+function nativePollComposer211() {
+  return `<fieldset class="relative w-full mt-3 rounded-2xl border p-3 flex flex-col gap-2" id="poll-compose"><legend class="px-1 text-xs font-bold" id="poll-legend">Poll</legend>
+    <button aria-label="Remove poll" id="remove-poll"><svg></svg></button>
+    <div><div><label for="native-choice-0" class="sr-only" id="input-label">Choice <!-- -->1</label><input type="text" id="native-choice-0" maxlength="25" placeholder="Choice 1" value="Home"></div><span id="characters">4/25</span><button aria-label="Remove choice 1" id="remove-choice"><svg></svg></button></div>
+    <div><div><label for="native-choice-1" class="sr-only">Choice 2</label><input type="text" id="native-choice-1" maxlength="25" placeholder="Choice 2" value="Reply"></div></div>
+    <div><button id="add-choice">Add choice</button><label class="flex items-center gap-2 text-xs text-tl-app-text-muted" id="length-label">Poll length<select id="duration"><option value="1">1 hour</option><option value="24">1 day</option><option value="72">3 days</option><option value="168">7 days</option></select></label></div>
+    <p role="status" id="poll-error">Poll choices must be different from each other.</p></fieldset>`;
+}
+
+for (const language of ['ja', 'en']) test(`${language}: native poll composer keeps typed choices, duration values, and React nodes`, () => {
+  const f = fixture(language, `<main>${nativePollComposer211()}<label id="plain">Poll length<select id="unrelated"><option value="Home">Home</option></select></label></main>`);
+  const input = f.document.getElementById('native-choice-0');
+  const duration = f.document.getElementById('duration');
+  const options = [...duration.options];
+  const inputLabel = f.document.getElementById('input-label');
+  const countNode = inputLabel.lastChild;
+  duration.value = '72'; input.value = 'Like';
+  let changes = 0; duration.addEventListener('change', () => changes++);
+  f.run();
+  assert.equal(input.value, 'Like'); assert.equal(f.document.getElementById('native-choice-1').value, 'Reply');
+  assert.equal(input.getAttribute('placeholder'), language === 'ja' ? '選択肢 1' : 'Choice 1');
+  assert.equal(f.text('poll-legend'), language === 'ja' ? '投票' : 'Poll');
+  assert.equal(f.text('input-label'), language === 'ja' ? '選択肢 1' : 'Choice 1');
+  assert.equal(inputLabel.lastChild, countNode, 'React choice counter remains attached');
+  assert.equal(f.document.getElementById('remove-choice').getAttribute('aria-label'), language === 'ja' ? '選択肢 1を削除' : 'Remove choice 1');
+  assert.equal(f.document.getElementById('remove-poll').getAttribute('aria-label'), language === 'ja' ? '投票を削除' : 'Remove poll');
+  assert.equal(f.text('add-choice'), language === 'ja' ? '選択肢を追加' : 'Add choice');
+  assert.equal(f.text('poll-error'), language === 'ja' ? '選択肢にはそれぞれ異なる内容を入力してください。' : 'Poll choices must be different from each other.');
+  assert.deepEqual([...duration.options].map(option => option.value), ['1', '24', '72', '168']);
+  assert.deepEqual([...duration.options], options);
+  assert.deepEqual([...duration.options].map(option => option.textContent), language === 'ja' ? ['1時間', '1日', '3日', '7日'] : ['1 hour', '1 day', '3 days', '7 days']);
+  assert.equal(duration.value, '72'); assert.equal(changes, 0, 'localization never changes native state');
+  assert.equal(f.document.getElementById('unrelated').firstChild.textContent, 'Home');
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) test(`${language}: v2.1 wrapped native reply notifications translate action but preserve actors and preview`, () => {
+  const f = fixture(language, `<main><div class="border-b border-tl-app-border"><button class="w-full flex items-start gap-3 px-4 py-3.5 text-left">
+    <div class="mt-0.5 shrink-0"><svg width="28" height="28"></svg></div><div class="flex-1 min-w-0">
+    <div><img alt="Home"></div><p class="text-tl-app-text"><span class="font-extrabold" id="actor211">Home</span> <span class="text-tl-app-text-muted" id="reply211">replied to your post</span></p>
+    <p class="line-clamp-2" id="reply-preview211">Home</p></div></button></div>
+    <div class="border-b border-tl-app-border"><button class="w-full flex items-start text-left"><div class="mt-0.5 shrink-0"><svg width="16" height="16"></svg></div><div class="flex-1 min-w-0"><p id="fake211">replied to your post</p></div></button></div></main>`, '/notifications');
+  f.run(); assert.equal(f.text('actor211'), 'Home'); assert.equal(f.text('reply-preview211'), 'Home');
+  assert.equal(f.text('reply211'), language === 'ja' ? 'さんがあなたのツイートに返信しました' : 'replied to your Tweet');
+  assert.equal(f.text('fake211'), 'replied to your post');
+  const once = f.document.body.innerHTML; f.run(); assert.equal(f.document.body.innerHTML, once);
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) test(`${language}: native account report menu localizes actions while preserving split handles`, () => {
+  const f = fixture(language, `<main><div class="relative"><button aria-label="Profile options" aria-haspopup="menu"><svg></svg></button><div role="menu">
+    <button role="menuitem"><svg></svg><span class="min-w-0 truncate" title="Report @Home" id="report211">Report<!-- --> @<!-- -->Home</span></button>
+    <button role="menuitem"><svg></svg><span class="min-w-0 truncate" title="Mute @Reply" id="mute211">Mute @Reply</span></button></div></div>
+    <div role="dialog" aria-modal="true" aria-label="Report @Home" class="bg-tl-app-card border" id="report-dialog211"><h3 class="text-sm font-bold text-tl-app-text" id="report-heading211">Why are you reporting this account?</h3><p class="text-xs text-tl-app-text-muted" id="report-help211">Your report is private. We use it to review and improve safety.</p><label>Additional details (optional)<textarea id="report-draft211" placeholder="Add context that helps our review team.">Home</textarea></label><button>Submit report</button></div>
+    <span class="truncate" title="Report @Home" id="username211">Home</span></main>`, '/user/Home');
+  const label = f.document.getElementById('report211'); const handleNode = label.lastChild;
+  f.run();
+  assert.equal(f.text('report211'), language === 'ja' ? '報告する @Home' : 'Report @Home');
+  assert.equal(label.lastChild, handleNode); assert.equal(handleNode.nodeValue, 'Home');
+  assert.equal(f.text('mute211'), language === 'ja' ? '@Replyをミュート' : 'Mute @Reply');
+  assert.equal(label.getAttribute('title'), language === 'ja' ? '@Homeを報告' : 'Report @Home');
+  assert.equal(f.document.getElementById('report-dialog211').getAttribute('aria-label'), language === 'ja' ? '@Homeを報告' : 'Report @Home');
+  assert.equal(f.text('report-heading211'), language === 'ja' ? 'このアカウントを報告する理由は何ですか？' : 'Why are you reporting this account?');
+  assert.equal(f.document.getElementById('report-draft211').value, 'Home');
+  assert.equal(f.text('username211'), 'Home');
+  const once = f.document.body.innerHTML; f.run(); assert.equal(f.document.body.innerHTML, once);
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) test(`${language}: native Follow back and updated notification empty state preserve user cards`, () => {
+  const f = fixture(language, `<main><div><div><button class="font-bold truncate" id="followback-name">Follow back</button><p class="truncate">@Home</p></div><span><button id="followback">Follow back</button></span></div>
+    <div class="flex flex-col items-center text-center"><p class="text-tl-app-text-muted" id="empty211">Nothing to see here yet. Likes, reposts, replies, quotes, mentions, and follows will show up here.</p></div></main>`, '/notifications');
+  f.run(); assert.equal(f.text('followback-name'), 'Follow back');
+  assert.equal(f.text('followback'), language === 'ja' ? 'フォローバック' : 'Follow back');
+  assert.equal(f.text('empty211'), language === 'ja' ? '通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。' : 'Nothing to see here yet. Favorites, Retweets, replies, quotes, mentions, and follows will show up here.');
+  f.dom.window.close();
+});
