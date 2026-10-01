@@ -16,6 +16,18 @@
 
 検証の画像・機械可読記録・テストログは同リリースの添付ZIPに収録します。公式の更新項目ごとの証拠と残した補完機能は[API調査](API_RESEARCH.md#6110-tweet-210-compatibility-review-2026-10-01-jst)を参照してください。
 
+## 6.11.0 公開先照合
+
+[PR #9](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/9)をmainへマージ済み（`43ad8f01863c6207f3843a707939dd4f3f9fb124`）。最終コードコミット`03cc43dac20454c7c25c35d2d88418818a12e1fc`のpush/PR検証と、マージ後のmainのGitHub Actionsがすべて成功しました。
+
+Greasy Forkの日本語Chrome・日本語Safari・英語の3版すべてで6.11.0の掲載を確認。通常のインストールURLから取得した内容は、Greasy Fork追加のdownloadURL/updateURLメタデータ・改行差を除いてローカルの検証済みコードと一致しました。既存の限定公開（Unlisted）設定を維持し、詳細説明も本体の返信通知へ移行した内容に更新しています。
+
+| Greasy Fork ID | 配布内容 SHA-256（更新メタデータ・改行を正規化） |
+|---|---|
+| 594601 | `98ee9e118d71cd67e57633719ddd7f07f11055aa68e6074061b62da0cfb713d4` |
+| 594602 | `342440f9b1f4239b5b103877b36d887253ae37208482f94db04ef45138645713` |
+| 594603 | `70e8945fa2c5ccbee6d7e91a9265901914a67f858e86ee8c23734717f2ff3ed9` |
+
 ---
 
 # 6.10.0 検証記録
