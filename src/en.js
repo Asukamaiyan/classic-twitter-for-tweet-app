@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.12.0
+// @version      6.13.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -109,25 +109,123 @@
     ['retweeted your post', 'retweeted your Tweet']
   ]);
 
+  // Keep the same React nodes and remember only values written by this script.
+  // A later native render takes ownership again when it changes the value.
+  function ctLocalizationClassicEnabled() {
+    return typeof ctFavoritePresentationEnabled === 'function' ? ctFavoritePresentationEnabled() :
+      typeof classicAppearanceEnabled === 'function' ? classicAppearanceEnabled() : true;
+  }
+
+  function ctLocalizationState() {
+    return ctLocalizationState.value ||= { byNode: new WeakMap(), records: new Set() };
+  }
+
+  function ctLocalizationNativeRecordException(record) {
+    const el = record.attribute ? record.node : record.node.parentElement;
+    if (nativeLocalizationAccountMenu(el) || isNativeSettingsNavigation(el)) return true;
+    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')];
+    if (record.attribute || !routeTitle || clean(record.original) !== routeTitle ||
+        !el?.matches('h2.truncate') || el.closest('article')) return false;
+    const visibleHeading = [...document.querySelectorAll('main h2')].find(heading => {
+      for (let parent = heading; parent; parent = parent.parentElement) {
+        if (parent.hidden || parent.getAttribute('aria-hidden') === 'true' || parent.style.display === 'none') return false;
+      }
+      return !heading.closest('article');
+    });
+    return el === visibleHeading;
+  }
+
+  function ctLocalizationRecordAllowed(record) {
+    const el = record.attribute ? record.node : record.node.parentElement;
+    return !!el && !el.closest('[id^="ct-"],[data-ct-owned],[data-ct-local-ui],[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],[contenteditable]:not([contenteditable="false"]),.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]') &&
+      (!el.closest('.truncate') || ctLocalizationNativeRecordException(record)) &&
+      !(record.attribute === null && el.closest('textarea,input,select,option'));
+  }
+
+  function ctLocalizationRead(record) {
+    return record.attribute ? record.node.getAttribute(record.attribute) : record.node.nodeValue;
+  }
+
+  function ctLocalizationWrite(record, value) {
+    if (ctLocalizationRead(record) !== value) {
+      if (record.attribute) record.node.setAttribute(record.attribute, value);
+      else record.node.nodeValue = value;
+    }
+    record.written = value;
+  }
+
+  function ctLocalizationForget(record) {
+    const state = ctLocalizationState();
+    state.records.delete(record);
+    state.byNode.get(record.node)?.delete(record.attribute);
+  }
+
+  function ctRememberLocalization(node, attribute, classic, regular) {
+    const state = ctLocalizationState();
+    const current = attribute ? node.getAttribute(attribute) : node.nodeValue;
+    let entries = state.byNode.get(node);
+    let record = entries?.get(attribute);
+    if (record && current !== record.written) {
+      ctLocalizationForget(record);
+      record = null;
+    }
+    regular ??= record?.original ?? current;
+    if (classic === regular) {
+      if (record) ctLocalizationForget(record);
+      if (current !== classic) {
+        if (attribute) node.setAttribute(attribute, classic);
+        else node.nodeValue = classic;
+      }
+      return;
+    }
+    if (!record) {
+      record = { node, attribute, original: current, classic, regular, written: current };
+      if (!entries) state.byNode.set(node, entries = new Map());
+      entries.set(attribute, record);
+      state.records.add(record);
+    } else {
+      record.classic = classic;
+      record.regular = regular;
+    }
+    ctLocalizationWrite(record, ctLocalizationClassicEnabled() ? record.classic : record.regular);
+  }
+
+  function ctSyncLocalizationAppearance(root = document) {
+    const enabled = ctLocalizationClassicEnabled();
+    for (const record of ctLocalizationState().records) {
+      if (!record.node.isConnected || !ctLocalizationRecordAllowed(record) ||
+          ctLocalizationRead(record) !== record.written) {
+        ctLocalizationForget(record);
+        continue;
+      }
+      if (root !== document && root !== record.node && !root.contains?.(record.node)) continue;
+      ctLocalizationWrite(record, enabled ? record.classic : record.regular);
+    }
+    if (!enabled) {
+      if (root instanceof Element && root.classList.contains('ct-notification-fav-icon')) root.classList.remove('ct-notification-fav-icon');
+      root.querySelectorAll?.('.ct-notification-fav-icon').forEach(el => el.classList.remove('ct-notification-fav-icon'));
+    }
+  }
+
   function installStyle() {
     if (document.getElementById('ct-en-style')) return;
 
     const style = document.createElement('style');
     style.id = 'ct-en-style';
     style.textContent = `
-      [data-testid="tweet-like-action"].ct-favorite-button > svg { display:none!important; }
-      [data-testid="tweet-like-action"] > .ct-star {
+      html[data-ct-favorite-classic="on"] [data-testid="tweet-like-action"].ct-favorite-button > svg { display:none!important; }
+      html[data-ct-favorite-classic="on"] [data-testid="tweet-like-action"] > .ct-star {
         display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
         transform-origin:center; pointer-events:none;
       }
-      [data-testid="tweet-like-action"] > .ct-star svg {
+      html[data-ct-favorite-classic="on"] [data-testid="tweet-like-action"] > .ct-star svg {
         display:block!important; width:20px; height:20px; fill:none; stroke:currentColor;
         stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;
       }
-      [data-testid="tweet-like-action"].ct-is-liked { color:#ffac33!important; }
-      [data-testid="tweet-like-action"].ct-is-liked > .ct-star svg { fill:currentColor; }
+      html[data-ct-favorite-classic="on"] [data-testid="tweet-like-action"].ct-is-liked { color:#ffac33!important; }
+      html[data-ct-favorite-classic="on"] [data-testid="tweet-like-action"].ct-is-liked > .ct-star svg { fill:currentColor; }
       @media (hover:hover) {
-        [data-testid="tweet-like-action"].ct-favorite-button:hover {
+        html[data-ct-favorite-classic="on"] [data-testid="tweet-like-action"].ct-favorite-button:hover {
           color:#ffac33!important; background:rgba(255,172,51,.12)!important;
         }
       }
@@ -455,7 +553,7 @@
       // buttons are data, not labels. Real notification actions are handled above.
       const paragraph = el.closest('p');
       if ((paragraph && control.contains(paragraph)) || control.querySelector('p')) return false;
-      if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
+      if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Favorite|Favorites|Favorited|Unfavorite|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
       return true;
     }
     if (isNativeLocalizationTimestamp(el)) return true;
@@ -493,7 +591,7 @@
   function replaceLocalizationText(node, text) {
     const raw = node.nodeValue || '';
     if (clean(raw) === text) return;
-    node.nodeValue = raw.replace(/\S[\s\S]*\S|\S/, () => text);
+    ctRememberLocalization(node, null, raw.replace(/\S[\s\S]*\S|\S/, () => text));
   }
 
   function patchUIAttributes(root = document) {
@@ -512,7 +610,7 @@
       for (const attr of ['aria-label', 'title']) {
         const value = el.getAttribute(attr);
         const out = EN.get(value);
-        if (out && value !== out) el.setAttribute(attr, out);
+        if (out && value !== out) ctRememberLocalization(el, attr, out);
       }
     }
   }
@@ -528,11 +626,13 @@
   }
 
   function patchUI(root = document) {
+    ctSyncLocalizationAppearance(root);
     localizationScopeNodes(root).forEach(translateTextNode);
     patchUIAttributes(root);
   }
 
   function patchInputs(root = document) {
+    ctSyncLocalizationAppearance(root);
     const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
     const list = [];
     if (host instanceof Element && host.matches('input[placeholder],textarea[placeholder]')) list.push(host);
@@ -545,7 +645,7 @@
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]')) continue;
       const value = el.getAttribute('placeholder');
       const out = placeholders.get(value);
-      if (out && out !== value) el.setAttribute('placeholder', out);
+      if (out && out !== value) ctRememberLocalization(el, 'placeholder', out);
     }
   }
 
@@ -596,6 +696,7 @@
   }
 
   function patchRetweetRows(root = document) {
+    ctSyncLocalizationAppearance(root);
     for (const node of localizationScopeNodes(root)) {
       const el = node.parentElement;
       if (isProtectedLocalizationElement(el) || !el.matches('span')) continue;
@@ -719,12 +820,13 @@
   }
 
   function patchNotifications(root = document) {
+    ctSyncLocalizationAppearance(root);
     if (!location.pathname.startsWith('/notifications')) return;
     for (const node of localizationScopeNodes(root)) {
       const context = localizationNotificationAction(node);
       if (!context) continue;
       translateTextNode(node);
-      if (/favorited/i.test(clean(node.nodeValue))) {
+      if (ctLocalizationClassicEnabled() && /favorited/i.test(clean(node.nodeValue))) {
         context.row.querySelector('svg')?.parentElement?.classList.add('ct-notification-fav-icon');
       }
     }
@@ -852,11 +954,13 @@
     }
   }
 
+  ctPrepareFavoritePresentation();
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once: true });
   } else {
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.12.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.13.0 loaded');
 })();

@@ -218,7 +218,7 @@ test('classic OFF cancels and cleans active jobs while preserving native markup'
   assert.equal(f.qa.observing(), false);
   assert.equal(f.timers.size, 0);
   assert.equal(f.document.documentElement.classList.contains('ct-classic-motion-enabled'), false);
-  assert.equal(f.document.documentElement.classList.contains('ct-classic-motion-paused'), true);
+  assert.equal(f.document.documentElement.classList.contains('ct-classic-motion-paused'), false, 'OFF must release the transition overrides as well as active animations');
   assert.equal(f.button().outerHTML, before);
   f.qa.ctAnimateFavorite(f.button(), false);
   f.qa.ctAnimateFavorite(f.button(), true);
@@ -226,6 +226,23 @@ test('classic OFF cancels and cleans active jobs while preserving native markup'
   f.qa.patchClassicMotion(f.document, true);
   f.qa.ctAnimateFavorite(f.button(), true);
   assert.equal(f.animations.length, 1, 'turning the look on cannot replay an old favorite');
+});
+
+test('classic OFF releases native control transitions and never reinstates paused styling on backgrounding', t => {
+  const f = harness(t);
+  const style = f.document.createElement('style');
+  style.textContent = '#ct-local-tools button { transition:color 240ms ease-in; }';
+  f.document.head.append(style);
+  const tools = f.document.createElement('div'); tools.id = 'ct-local-tools'; tools.innerHTML = '<button>Tools</button>';
+  f.document.body.append(tools);
+  f.qa.patchClassicMotion(); f.setHidden(true);
+  assert.equal(f.window.getComputedStyle(tools.firstChild).transition, 'none');
+  f.qa.patchClassicMotion(f.document, false);
+  assert.equal(f.window.getComputedStyle(tools.firstChild).transition, 'color 240ms ease-in');
+  f.window.dispatchEvent(new f.window.Event('pagehide'));
+  f.window.dispatchEvent(new f.window.Event('pageshow'));
+  assert.equal(f.document.documentElement.classList.contains('ct-classic-motion-paused'), false);
+  assert.equal(f.window.getComputedStyle(tools.firstChild).transition, 'color 240ms ease-in');
 });
 
 test('removing a button or replacing its star immediately cancels that animation', async t => {

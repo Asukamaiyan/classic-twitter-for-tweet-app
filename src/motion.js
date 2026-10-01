@@ -31,9 +31,10 @@
 
   function ctSyncClassicMotion() {
     const paused = ctMotionPaused();
+    const classicPaused = ctClassicMotion.enabled && paused;
     const classes = document.documentElement.classList;
     if (classes.contains('ct-classic-motion-enabled') !== ctClassicMotion.enabled) classes.toggle('ct-classic-motion-enabled', ctClassicMotion.enabled);
-    if (classes.contains('ct-classic-motion-paused') !== paused) classes.toggle('ct-classic-motion-paused', paused);
+    if (classes.contains('ct-classic-motion-paused') !== classicPaused) classes.toggle('ct-classic-motion-paused', classicPaused);
     if (paused) ctStopClassicMotion();
   }
 
@@ -75,8 +76,8 @@
         transition:none!important;
       }
       @media (prefers-reduced-motion:reduce) {
-        html ${controls}, html [data-testid="tweet-like-action"] > .ct-star,
-        html #ct-local-tools-panel { animation:none!important; transition:none!important; }
+        html.ct-classic-motion-enabled ${controls}, html.ct-classic-motion-enabled [data-testid="tweet-like-action"] > .ct-star,
+        html.ct-classic-motion-enabled #ct-local-tools-panel { animation:none!important; transition:none!important; }
       }
     `;
     (document.head || document.documentElement).append(style);

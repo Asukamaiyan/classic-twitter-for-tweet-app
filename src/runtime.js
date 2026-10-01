@@ -5,6 +5,8 @@
   const ctManualTranslation = new WeakSet();
   const ctNativeLikeButtons = new WeakSet();
   const ctLikeLabels = new WeakMap();
+  const ctFavoriteButtonClasses = new WeakMap();
+  const ctFavoriteNativeTitles = new WeakMap();
   let ctAutoClick = false;
   let ctAutoTimer = null;
   let ctAutoCurrent = null;
@@ -174,33 +176,54 @@
     const label = button.getAttribute('aria-label') || '';
     const previous = ctLikeLabels.get(button);
     if (previous?.label === label) return previous.liked;
-    return /^(?:Unlike|Unfavorite|お気に入りを解除)(?:,|$)/i.test(label);
+    return /^(?:Unlike|Unfavorite|お気に入りを解除|いいねを取り消す)(?:,|$)/i.test(label);
   }
 
   function classicAppearanceEnabled() {
     return loadJSON('ct-classic-appearance-v1', true) !== false;
   }
 
+  function ctNativeFavoriteAction(liked) {
+    return CT_LOCALE === 'ja' ? (liked ? 'いいねを取り消す' : 'いいね') : (liked ? 'Unlike' : 'Like');
+  }
+
+  function ctSyncFavoriteAppearance(doc = document) {
+    const enabled = classicAppearanceEnabled();
+    if (doc.documentElement?.dataset.ctFavoriteClassic !== (enabled ? 'on' : 'off')) {
+      if (doc.documentElement) doc.documentElement.dataset.ctFavoriteClassic = enabled ? 'on' : 'off';
+      if (typeof ctSyncLocalizationAppearance === 'function') ctSyncLocalizationAppearance(doc);
+    }
+    return enabled;
+  }
+
   const ctFavoriteStarPath = 'M12 2.75 14.86 8.54 21.25 9.47 16.63 13.98 17.72 20.36 12 17.35 6.28 20.36 7.37 13.98 2.75 9.47 9.14 8.54Z';
+  const ctFavoriteButtonSelector = 'button[data-testid="tweet-like-action"]';
+  const ctFavoriteCountSelector = 'button[data-testid="tweet-like-action-count"]';
+  const ctFavoriteDialogSelector = 'div[role="dialog"][aria-modal="true"].bg-tl-app-card.border';
+  const ctFavoriteProtectedSelector = '[data-ct-owned],[data-ct-local-ui],[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]';
 
   function ctInstallFavoriteStyle(doc = document) {
-    if (doc.getElementById('ct-favorite-presentation-style')) return;
+    const existing = doc.getElementById('ct-favorite-presentation-style');
+    if (existing) return existing.matches('style[data-ct-owned="favorite-presentation"]') ? existing : null;
+    if (!doc.documentElement) return null;
     const style = doc.createElement('style');
     style.id = 'ct-favorite-presentation-style';
     style.dataset.ctOwned = 'favorite-presentation';
     const mask = fill => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${ctFavoriteStarPath}" fill="${fill ? 'black' : 'none'}" stroke="black" stroke-width="1.8" stroke-linejoin="round"/></svg>`)}")`;
-    const button = 'button[data-testid="tweet-like-action"][data-testid]';
+    const enabled = 'html[data-ct-favorite-classic="on"]';
+    const button = `${enabled} button[data-testid="tweet-like-action"][data-testid]`;
+    const count = `${enabled} button[data-testid="tweet-like-action-count"]`;
     const selected = `${button}:is([aria-pressed="true"],:not([aria-pressed]).text-pink-500,:not([aria-pressed]):not(.text-tl-app-text-muted):not(.text-pink-500).ct-is-liked)`;
     const notificationRows = [
-      '#root-container main button.w-full.flex.items-start.border-b',
-      '#root-container main div.border-b > button.w-full.flex.items-start.gap-3'
+      `${enabled} #root-container main button.w-full.flex.items-start.border-b`,
+      `${enabled} #root-container main div.border-b > button.w-full.flex.items-start.gap-3`
     ];
     const notificationIcons = notificationRows.map(row => `${row} > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]`);
     // React may replace both className and the icon before the next scan.
     // Stable native test IDs hide the heart immediately; the CSS vector fills
     // the brief gap until our motion-capable star is restored.
     style.textContent = `
-      ${button} > svg { display:none!important; }
+      ${button} > svg, ${button} > :not(span.ct-star) svg { display:none!important; }
       ${button} { color:var(--color-tl-app-text-muted, var(--tl-app-text-muted, #657786))!important; }
       ${button}::before {
         content:""!important; display:inline-block!important;
@@ -209,7 +232,16 @@
         -webkit-mask:${mask(false)} center/contain no-repeat;
         mask:${mask(false)} center/contain no-repeat;
       }
-      ${button} > .ct-star svg { fill:none!important; stroke:currentColor; }
+      ${button} > span.ct-star {
+        display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
+        transform-origin:center; pointer-events:none;
+      }
+      ${button} > .ct-star svg {
+        display:block!important; width:20px; height:20px;
+        fill:none!important; stroke:currentColor; stroke-width:1.8;
+        stroke-linecap:round; stroke-linejoin:round;
+      }
+      ${count} { color:var(--color-tl-app-text-muted, var(--tl-app-text-muted, #657786))!important; }
       ${selected} { color:#ffac33!important; }
       ${selected}::before {
         -webkit-mask-image:${mask(true)};
@@ -230,17 +262,20 @@
         ${button} > span.ct-star { display:none!important; }
       }
       @media (hover:hover) {
-        ${button}:hover { color:#ffac33!important; }
+        ${button}:hover, ${count}:hover { color:#ffac33!important; }
+        ${button}:hover { background:rgba(255,172,51,.12)!important; }
       }
     `;
     (doc.head || doc.documentElement).append(style);
+    return style;
   }
 
   function ctEnsureFavoriteStar(button) {
-    if (!button.classList.contains('ct-favorite-button')) button.classList.add('ct-favorite-button');
+    ctFavoriteClass(button, 'ct-favorite-button', true);
     if ([...button.children].some(node => node.matches('span.ct-star'))) return;
     const star = document.createElement('span');
     star.className = 'ct-star';
+    star.dataset.ctOwned = 'favorite-star';
     star.setAttribute('aria-hidden', 'true');
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
@@ -250,23 +285,211 @@
     svg.append(path); star.append(svg); button.prepend(star);
   }
 
+  function ctFavoriteClass(button, name, enabled) {
+    let record = ctFavoriteButtonClasses.get(button);
+    if (enabled && !button.classList.contains(name)) {
+      if (!record) {
+        record = { original: button.getAttribute('class'), added: new Set() };
+        ctFavoriteButtonClasses.set(button, record);
+      }
+      record.added.add(name); button.classList.add(name);
+    } else if (!enabled && record?.added.has(name)) {
+      button.classList.remove(name); record.added.delete(name);
+      if (!record.added.size) {
+        const original = (record.original || '').trim().split(/\s+/).filter(Boolean).sort().join(' ');
+        const current = [...button.classList].sort().join(' ');
+        if (original === current) {
+          if (record.original === null) button.removeAttribute('class');
+          else if (button.getAttribute('class') !== record.original) button.setAttribute('class', record.original);
+        }
+        ctFavoriteButtonClasses.delete(button);
+      }
+    }
+  }
+
+  function ctFavoriteTitle(button, action, classic) {
+    let record = ctFavoriteNativeTitles.get(button);
+    const current = button.getAttribute('title');
+    if (classic) {
+      if (!record) { record = { native: current, own: null }; ctFavoriteNativeTitles.set(button, record); }
+      else if (current !== record.own) record.native = current;
+      if (current !== action) button.setAttribute('title', action);
+      record.own = action;
+    } else if (record) {
+      // Preserve a title newly supplied by React. Otherwise restore the native
+      // absence/spelling instead of leaving our classic tooltip behind.
+      if (current === record.own) {
+        const native = record.native;
+        if (native === null) button.removeAttribute('title');
+        else {
+          const next = /^(?:Like|Unlike|いいね|いいねを取り消す|View\s+[\d,.]+\s+likes?|[\d,.]+件のいいねを表示|Close liked by list|いいねしたユーザー一覧を閉じる)$/i.test(native) ? action : native;
+          if (current !== next) button.setAttribute('title', next);
+        }
+      }
+      ctFavoriteNativeTitles.delete(button);
+    } else if (CT_LOCALE === 'ja' && /^(?:Like|Unlike)$/i.test(current || '')) {
+      button.setAttribute('title', action);
+    }
+  }
+
   function patchFavoriteButtons(root = document) {
-    ctInstallFavoriteStyle(root.nodeType === 9 ? root : root.ownerDocument || document);
-    const buttons = [...root.querySelectorAll?.('[data-testid="tweet-like-action"]') || []];
-    if (root.matches?.('[data-testid="tweet-like-action"]')) buttons.push(root);
+    const doc = root.nodeType === 9 ? root : root.ownerDocument || document;
+    const classic = ctSyncFavoriteAppearance(doc);
+    ctInstallFavoriteStyle(doc);
+    const buttons = [...root.querySelectorAll?.(ctFavoriteButtonSelector) || []];
+    if (root.matches?.(ctFavoriteButtonSelector)) buttons.push(root);
     for (const button of buttons) {
+      if (button.closest(ctFavoriteProtectedSelector)) continue;
       const liked = ctIsLiked(button);
-      ctEnsureFavoriteStar(button);
-      const action = CT_LOCALE === 'ja' ? (liked ? 'お気に入りを解除' : 'お気に入り') : (liked ? 'Unfavorite' : 'Favorite');
-      if (button.title !== action) button.title = action;
+      if (classic) ctEnsureFavoriteStar(button);
+      else {
+        button.querySelectorAll(':scope > span.ct-star[data-ct-owned="favorite-star"]').forEach(star => star.remove());
+        ctFavoriteClass(button, 'ct-favorite-button', false);
+        ctFavoriteClass(button, 'ct-is-liked', false);
+        if (typeof ctClearFavoriteMotion === 'function') ctClearFavoriteMotion(button, null, true);
+      }
+      const action = classic
+        ? (CT_LOCALE === 'ja' ? (liked ? 'お気に入りを解除' : 'お気に入り') : (liked ? 'Unfavorite' : 'Favorite'))
+        : ctNativeFavoriteAction(liked);
+      ctFavoriteTitle(button, action, classic);
       const old = button.getAttribute('aria-label') || '';
       const count = old.match(/,\s*([\d,.]+)\s*(?:likes?|favorites?|件)?/i)?.[1];
-      const label = count ? `${action}, ${count} ${CT_LOCALE === 'ja' ? '件' : 'favorites'}` : action;
+      const label = count ? `${action}, ${count} ${CT_LOCALE === 'ja' ? '件' : (classic ? 'favorites' : (count === '1' ? 'like' : 'likes'))}` : action;
       ctLikeLabels.set(button, { label, liked });
       if (old !== label) button.setAttribute('aria-label', label);
-      if (button.classList.contains('ct-is-liked') !== liked) button.classList.toggle('ct-is-liked', liked);
-      if (typeof ctAnimateFavorite === 'function') ctAnimateFavorite(button, liked);
+      if (classic) ctFavoriteClass(button, 'ct-is-liked', liked);
+      // Only an action's own literal label is UI. Keep numeric counts, icon
+      // nodes and any protected descendants instead of rebuilding the button.
+      const walker = button.ownerDocument.createTreeWalker(button, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.parentElement.closest(`${ctFavoriteProtectedSelector},svg`)) continue;
+        if (/^(?:Like|Unlike|いいね|いいねを取り消す|Favorite|Unfavorite|お気に入り|お気に入りを解除)$/i.test(clean(node.nodeValue))) {
+          const next = node.nodeValue.replace(/\S[\s\S]*\S|\S/, () => action);
+          if (node.nodeValue !== next) node.nodeValue = next;
+        }
+      }
+      if (classic && typeof ctAnimateFavorite === 'function') ctAnimateFavorite(button, liked);
     }
+    ctPatchFavoriteCountLabels(root);
+    ctPatchFavoriteDialogs(root);
+  }
+
+  function ctPatchFavoriteCountLabels(root = document) {
+    const classic = classicAppearanceEnabled();
+    const controls = [...root.querySelectorAll?.(ctFavoriteCountSelector) || []];
+    if (root.matches?.(ctFavoriteCountSelector)) controls.push(root);
+    for (const control of controls) {
+      if (control.closest(ctFavoriteProtectedSelector)) continue;
+      // Native count buttons have their own handler: only change its label.
+      const text = clean(control.textContent);
+      const match = /^(?:View\s+([\d,.]+)\s+(?:likes?|favorites?)|([\d,.]+)件の(?:お気に入り|いいね)を表示)$/i.exec(control.getAttribute('aria-label') || '');
+      const count = match?.[1] || match?.[2] || (/^[\d,.]+$/.test(text) ? text : null);
+      if (!count) continue;
+      const label = CT_LOCALE === 'ja' ? `${count}件の${classic ? 'お気に入り' : 'いいね'}を表示` : `View ${count} ${classic ? 'favorites' : 'likes'}`;
+      if (control.getAttribute('aria-label') !== label) control.setAttribute('aria-label', label);
+      ctFavoriteTitle(control, label, classic);
+    }
+  }
+
+  function ctPatchFavoriteDialogs(root = document) {
+    const classic = classicAppearanceEnabled();
+    const dialogs = new Set(root.querySelectorAll?.(ctFavoriteDialogSelector) || []);
+    const closest = root.closest?.(ctFavoriteDialogSelector);
+    if (closest) dialogs.add(closest);
+    for (const dialog of dialogs) {
+      if (dialog.closest(ctFavoriteProtectedSelector)) continue;
+      // Confirm the shipped Favorites dialog header and close button together;
+      // a person's name, post text or an unrelated dialog is never a label.
+      const header = [...dialog.children].find(child => child.matches('div.flex.items-center.justify-between.border-b') &&
+        child.querySelector(':scope > h3.text-sm.font-bold.text-tl-app-text') &&
+        child.querySelector(':scope > button > svg.lucide-x'));
+      if (!header) continue;
+      const title = header.querySelector(':scope > h3');
+      const close = header.querySelector(':scope > button');
+      if (title.children.length || !/^(?:Liked by|Favorited by|お気に入りしたユーザー|いいねしたユーザー)$/.test(clean(title.textContent)) ||
+          !/^(?:Close liked by list|Close Favorites list|お気に入りしたユーザー一覧を閉じる|いいねしたユーザー一覧を閉じる)$/.test(close.getAttribute('aria-label') || '')) continue;
+      const label = CT_LOCALE === 'ja' ? `${classic ? 'お気に入り' : 'いいね'}したユーザー` : (classic ? 'Favorited by' : 'Liked by');
+      const closeLabel = CT_LOCALE === 'ja' ? `${classic ? 'お気に入り' : 'いいね'}したユーザー一覧を閉じる` : (classic ? 'Close Favorites list' : 'Close liked by list');
+      if (title.textContent !== label && title.firstChild?.nodeType === Node.TEXT_NODE) title.firstChild.nodeValue = label;
+      if (dialog.getAttribute('aria-label') !== label) dialog.setAttribute('aria-label', label);
+      if (close.getAttribute('aria-label') !== closeLabel) close.setAttribute('aria-label', closeLabel);
+      ctFavoriteTitle(close, closeLabel, classic);
+      const empty = dialog.querySelector(':scope > div.flex-1.overflow-y-auto > div.px-4.py-10.text-center.text-xs.text-tl-app-text-muted.font-medium');
+      if (empty && !empty.children.length && /^(?:No likes yet\.|No favorites yet\.|お気に入りはまだありません。|いいねはまだありません。)$/.test(clean(empty.textContent)) && empty.firstChild?.nodeType === Node.TEXT_NODE) {
+        const label = CT_LOCALE === 'ja' ? `${classic ? 'お気に入り' : 'いいね'}はまだありません。` : `No ${classic ? 'favorites' : 'likes'} yet.`;
+        if (empty.firstChild.nodeValue !== label) empty.firstChild.nodeValue = label;
+      }
+    }
+  }
+
+  let ctFavoriteStartObserver = null;
+  function ctPrepareFavoritePresentation(doc = document) {
+    if (!doc.documentElement) {
+      // Some document-start managers run before <html> exists. Observe only
+      // document children until we can install the permanent presentation.
+      if (!ctFavoriteStartObserver) {
+        ctFavoriteStartObserver = new MutationObserver(() => {
+          if (!doc.documentElement) return;
+          ctFavoriteStartObserver.disconnect(); ctFavoriteStartObserver = null;
+          ctPrepareFavoritePresentation(doc);
+        });
+        ctFavoriteStartObserver.observe(doc, { childList: true });
+      }
+      return;
+    }
+    ctSyncFavoriteAppearance(doc);
+    let style = ctInstallFavoriteStyle(doc);
+    // Loading multiple editions before DOMContentLoaded must still produce
+    // one observer, in the same locale as the first edition's startup.
+    if (!style || style.dataset.ctFavoriteWatch === 'true') return;
+    style.dataset.ctFavoriteWatch = 'true';
+    let active = true;
+    const targets = `${ctFavoriteButtonSelector},${ctFavoriteCountSelector},${ctFavoriteDialogSelector}`;
+    const observe = () => {
+      if (active && doc.documentElement) watch.observe(doc.documentElement, {
+        childList: true, subtree: true, characterData: true, attributes: true,
+        attributeFilter: ['data-testid', 'class', 'aria-label', 'title', 'aria-pressed']
+      });
+    };
+    const watch = new MutationObserver(records => {
+      if (!active) return;
+      const roots = new Set();
+      const add = (node, descend = false) => {
+        const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+        if (!el?.isConnected || el.closest(ctFavoriteProtectedSelector)) return;
+        const control = el.closest(targets);
+        if (control) roots.add(control);
+        else if (descend) el.querySelectorAll?.(targets).forEach(control => {
+          if (!control.closest(ctFavoriteProtectedSelector)) roots.add(control);
+        });
+      };
+      for (const record of records) {
+        add(record.target);
+        if (record.type === 'childList') record.addedNodes.forEach(node => add(node, true));
+      }
+      if (!roots.size && style?.isConnected) return;
+      // MutationObserver runs before the next paint. This narrow repair cannot
+      // wait for the general 100ms scan, and must not observe its own changes.
+      watch.disconnect();
+      try {
+        if (!style?.isConnected) {
+          style = ctInstallFavoriteStyle(doc);
+          if (style) style.dataset.ctFavoriteWatch = 'true';
+        }
+        for (const root of roots) patchFavoriteButtons(root);
+      } finally { observe(); }
+    });
+    patchFavoriteButtons(doc);
+    observe();
+    doc.defaultView.addEventListener('pagehide', () => { active = false; watch.disconnect(); });
+    doc.defaultView.addEventListener('pageshow', event => {
+      if (!event.persisted || active) return;
+      active = true;
+      style = ctInstallFavoriteStyle(doc);
+      if (style) style.dataset.ctFavoriteWatch = 'true';
+      patchFavoriteButtons(doc); observe();
+    });
   }
 
   // Never mistake a quoted post's link for its parent post.
@@ -335,7 +558,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.12.0';
+    document.documentElement.dataset.ctActiveVersion = '6.13.0';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -348,6 +571,11 @@
       getClassicAppearance: classicAppearanceEnabled,
       setClassicAppearance: enabled => {
         if (!saveJSON('ct-classic-appearance-v1', enabled === true)) throw new Error('Storage unavailable');
+        // The toggle itself is synchronous: no frame may retain classic icons,
+        // colors or animation after its checkbox has switched off.
+        if (typeof patchClassicAppearance === 'function') patchClassicAppearance(document, enabled === true);
+        if (typeof patchClassicMotion === 'function') patchClassicMotion(document, enabled === true);
+        patchFavoriteButtons(document);
         ctScheduleScan();
       },
       getAutoTranslate: autoTranslationEnabled,
