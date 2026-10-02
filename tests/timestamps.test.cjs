@@ -67,6 +67,43 @@ for (const locale of ['ja', 'en']) test(`${locale}: exact creation time uses vie
   f.dom.window.close();
 });
 
+test('repeated timestamps reuse bounded Intl formatters for both languages and old-post date styles', () => {
+  const f = fixture('', '/feed');
+  const original = f.dom.window.Intl.DateTimeFormat;
+  let constructions = 0;
+  f.dom.window.Intl.DateTimeFormat = function (...args) { constructions++; return new original(...args); };
+  const created = '2026-09-01T12:00:00Z';
+  const current = Date.parse('2026-10-02T12:00:00Z');
+  f.dom.window.Date.now = () => current;
+  const expected = new Map();
+  for (const locale of ['ja', 'en']) expected.set(locale, [f.qa.ctTimestampExactText(created, locale), f.qa.ctTimestampRelativeText(created, current, locale)]);
+  assert.equal(constructions, 7); // One timezone probe, three formats per language.
+  for (let index = 0; index < 100; index++) for (const locale of ['ja', 'en']) {
+    assert.equal(f.qa.ctTimestampExactText(created, locale), expected.get(locale)[0]);
+    assert.equal(f.qa.ctTimestampRelativeText(created, current, locale), expected.get(locale)[1]);
+  }
+  assert.equal(constructions, 7);
+  f.dom.window.close();
+});
+
+test('formatter cache picks up timezone changes on the next minute or visibility restoration', () => {
+  const f = fixture(post('2026-10-02T00:00:00Z'), '/feed');
+  const original = f.dom.window.Intl.DateTimeFormat;
+  let zone = 'UTC', current = Date.parse('2026-10-02T02:00:00Z');
+  f.dom.window.Date.now = () => current;
+  f.dom.window.Intl.DateTimeFormat = function (language, options) { return new original(language, { ...options, timeZone: zone }); };
+  f.qa.ctTimestampPatchExactPostTime();
+  assert.match(f.qa.ctTimestampExactText('2026-10-02T00:00:00Z'), / · 00:00$/);
+  zone = 'Asia/Tokyo'; current += 60000;
+  assert.match(f.qa.ctTimestampExactText('2026-10-02T00:00:00Z'), / · 09:00$/);
+  zone = 'America/New_York';
+  f.document.dispatchEvent(new f.dom.window.Event('visibilitychange'));
+  assert.match(f.qa.ctTimestampExactText('2026-10-02T00:00:00Z'), / · 20:00$/);
+  current -= 120000; zone = 'UTC';
+  assert.match(f.qa.ctTimestampExactText('2026-10-02T00:00:00Z'), / · 00:00$/);
+  f.dom.window.close();
+});
+
 for (const locale of ['ja', 'en']) test(`${locale}: a native post stamp updates with React metadata and is removed when source becomes invalid`, () => {
   const f = fixture(post('2026-10-02T09:00:00Z'), '/post/current', locale);
   f.qa.ctTimestampPatchExactPostTime();
@@ -169,6 +206,60 @@ test('clock refreshes registered native creation nodes without replacing React n
   f.qa.ctTimestampRefreshRelative();
   assert.equal(f.qa.ctTimestampClockState().elements.size, 0);
   assert.equal(f.qa.ctTimestampClockState().timer, null);
+  f.dom.window.close();
+});
+
+test('scoped timestamp scans refresh only the changed article and reuse the global clock timer', t => {
+  const created = '2026-10-02T09:00:00Z';
+  const f = fixture(post(created, 'first') + post(created, 'second'), '/feed');
+  t.after(() => f.dom.window.close());
+  let current = f.qa.ctTimestampParse(created).getTime() + 120000;
+  f.dom.window.Date.now = () => current;
+  f.qa.ctTimestampPatchExactPostTime();
+  const state = f.qa.ctTimestampClockState();
+  const originalTimer = state.timer;
+  const originalNative = f.dom.window.ctTimestampNativeValue;
+  const reads = [];
+  f.dom.window.ctTimestampNativeValue = el => { reads.push(el.id); return originalNative(el); };
+  const first = f.document.getElementById('first-created');
+  const second = f.document.getElementById('second-created');
+  current += 60000;
+  f.qa.ctTimestampPatchExactPostTime(first);
+  assert.equal(first.textContent, '3分前');
+  assert.equal(second.textContent, '2分前');
+  assert.ok(reads.length > 0);
+  assert.ok(reads.includes('first-created'));
+  assert.ok(!reads.includes('second-created'));
+  assert.equal(state.timer, originalTimer);
+  first.title = 'invalid';
+  reads.length = 0;
+  f.qa.ctTimestampPatchExactPostTime(first);
+  assert.equal(state.elements.size, 1);
+  assert.equal([...state.elements][0], second);
+  assert.ok(!reads.includes('second-created'));
+  f.qa.ctTimestampRefreshRelative();
+  assert.equal(second.textContent, '3分前');
+  second.title = 'invalid';
+  f.qa.ctTimestampPatchExactPostTime(second);
+  assert.equal(state.elements.size, 0);
+  assert.equal(state.timer, null);
+  f.dom.window.close();
+});
+
+test('a newly tracked clock can move the global wake-up earlier without delaying changed-source display', t => {
+  const created = '2026-10-02T09:00:00Z';
+  const f = fixture(post(created), '/feed');
+  t.after(() => f.dom.window.close());
+  const current = f.qa.ctTimestampParse(created).getTime() + 120000;
+  f.dom.window.Date.now = () => current;
+  f.qa.ctTimestampPatchExactPostTime();
+  const state = f.qa.ctTimestampClockState();
+  assert.equal(state.dueAt, current + 60000);
+  const el = f.document.getElementById('main-created');
+  el.title = '2026-10-02T09:00:20Z';
+  f.qa.ctTimestampPatchExactPostTime(el);
+  assert.equal(el.textContent, '1分前');
+  assert.equal(state.dueAt, current + 20000);
   f.dom.window.close();
 });
 

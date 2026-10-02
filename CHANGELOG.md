@@ -1,5 +1,14 @@
 # Changelog
 
+## All distributions v6.18.0 — 2026-10-03
+
+- Coalesce native DOM changes and scan verified affected articles or shared UI contexts. Keep full initial, route, theme, settings and visibility-restoration passes; suspend the general observer while hidden.
+- Preserve pre-paint Favorite repair without scheduling redundant general scans. Ignore verified script-owned clock writes while continuing to detect native creation-source changes.
+- Update classic article markers locally; retain complete cleanup on classic OFF, layout/theme changes and removed or invalid native content.
+- Reuse date formatters and clock timers; skip already attempted, expired or failed reply matches before parsing article bodies. Remove duplicate Favorites rendering in each language scan.
+- Keep notification avatar repairs and detail-date cleanup working when native overlays, Back headers or reply footers are replaced.
+- Preserve six edition identities, storage, content, drafts and native actions. Counter benchmarks measure script traversal reduction, not server/network or whole-site speed.
+
 ## All distributions v6.17.0 — 2026-10-02
 
 - Separate each post's creation time from Edited tooltips, quotes and nested replies. Require the verified conversation panel for detail dates, refresh changed sources, and remove stale or unverified detail stamps.

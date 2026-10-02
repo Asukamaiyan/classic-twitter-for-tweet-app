@@ -164,6 +164,54 @@ test('new reply nodes cannot inherit an older duplicate reply from the opened-co
   assert.equal(f.calls.length, 1);
 });
 
+test('unknown replies are checked once and cannot inherit an old cached creation time after body changes', async t => {
+  const f = harness(t, reply('unknown', 'parent-a', 'Unmatched body'));
+  let authorReads = 0;
+  const author = f.w.articleAuthor;
+  f.w.articleAuthor = article => { authorReads++; return author(article); };
+  await f.patch(); assert.equal(f.source(), ''); assert.equal(f.calls.length, 1);
+  const initialReads = authorReads;
+  assert.ok(initialReads > 0);
+  for (let index = 0; index < 25; index++) await f.patch();
+  assert.equal(authorReads, initialReads);
+  f.doc.querySelector('p').textContent = 'My reply';
+  await f.patch(); assert.equal(f.source(), ''); assert.equal(authorReads, initialReads);
+  assert.equal(f.calls.length, 1);
+});
+
+test('failed, expired or replacement-node caches skip repeat body identity parsing without retrying the GET', async t => {
+  for (const state of ['failed', 'expired', 'replacement']) {
+    const f = harness(t, reply('unknown', 'parent-a', 'Unmatched body'));
+    let authorReads = 0;
+    const author = f.w.articleAuthor;
+    f.w.articleAuthor = article => { authorReads++; return author(article); };
+    if (state === 'failed') f.json = null;
+    await f.patch(); assert.equal(f.source(), '');
+    if (state === 'expired') f.time += 60000;
+    if (state === 'replacement') { const article = f.doc.querySelector('article'); article.replaceWith(article.cloneNode(true)); }
+    const initialReads = authorReads;
+    for (let index = 0; index < 25; index++) await f.patch();
+    assert.equal(authorReads, initialReads, state);
+    assert.equal(f.calls.length, 1, state);
+    assert.equal(f.source(), '', state);
+  }
+});
+
+test('an original reply scrolled out during the request can still be verified when visible again within the short cache', async t => {
+  const f = harness(t);
+  let resolve;
+  f.respond = () => new Promise(done => { resolve = done; });
+  const pending = f.patch(); await turn();
+  const article = f.doc.querySelector('article');
+  article.setAttribute('data-offscreen', '');
+  resolve(f.json); await pending;
+  assert.equal(f.source(), '');
+  article.removeAttribute('data-offscreen');
+  await f.patch();
+  assert.equal(f.source(), createdAt);
+  assert.equal(f.calls.length, 1);
+});
+
 test('at most four parent requests run concurrently even when scrolling reveals another parent during a read', async t => {
   const f = harness(t, Array.from({ length: 5 }, (_, index) => reply('reply-' + index, 'parent-' + index)).join(''));
   const resolvers = [];

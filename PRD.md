@@ -119,3 +119,8 @@ User now explicitly requests a site-wide appearance closer to old Twitter, prior
 標準の投稿と確認できた返信の経過時間は表示中に更新し、背景化・ページ終了時は止める。投稿詳細の日時補完には実際の会話パネルを確認し、URL変更中に残るフィードへ追加しない。日時の元が変われば更新し、根拠がなくなれば古い補完表示を削除する。スマホ・PCとも元の本文、操作、下書き、画像・動画を保持する。
 
 日時タイトルのない返信は、既存の親投稿返信GETを開いた欄ごとに1回だけ確認し、作者・原文・表示されていた経過時間が一意に一致した場合だけ使う。1ページ50件以内の完了応答、1走査20個の画面内返信、同時取得4件までとし、時計更新のたびにAPIを呼ばない。未完了ページ、翻訳中・曖昧な返信、新しいDOMへの古い応答流用、取得中のアカウント／画面／本文変更を拒否する。確認できない返信日時を推測して補わない。
+
+
+## 6.18.0: lower repeated work with correct partial updates
+
+Reduce repeated userscript DOM traversal on visible native changes, favorite commits and clock updates. Maintain full initial/route/theme/settings/visibility restoration and all classic OFF behavior. Promote verified shared avatar and conversation contexts so partial processing does not leave native overlays or stale detail dates. Benchmark deterministic traversal counts separately from whole-site latency. Preserve native events, storage identities, user content, drafts and reply source validation; no new API or polling.

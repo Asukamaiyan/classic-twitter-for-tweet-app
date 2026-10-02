@@ -78,6 +78,65 @@ test('unknown roots, unverified main structure and custom themes fail open witho
   }
 });
 
+test('a card-only update skips older cards while repairing the card and retaining layout markers', t => {
+  const { document, patch } = setup(t, client().replace(post('tweet'), Array.from({ length: 80 }, (_, i) => post('tweet-' + i)).join('')));
+  patch();
+  const first = document.getElementById('tweet-0');
+  const second = document.getElementById('tweet-1');
+  const unchanged = second.outerHTML;
+  const action = first.querySelector('[data-testid="tweet-action-bar"]');
+  action.classList.remove('ct-classic-actions');
+  let olderQueries = 0;
+  const original = second.querySelectorAll;
+  second.querySelectorAll = function (...args) { olderQueries++; return original.apply(this, args); };
+  patch(first);
+  assert.equal(olderQueries, 0);
+  assert.equal(second.outerHTML, unchanged);
+  assert.equal(action.classList.contains('ct-classic-actions'), true);
+  assert.ok(document.querySelector('.ct-classic-nav-desktop'));
+  assert.ok(document.querySelector('.ct-classic-composer'));
+  assert.equal(document.querySelectorAll('.ct-classic-tweet').length, 81);
+  first.querySelector('p').remove();
+  patch(first);
+  assert.equal(first.classList.contains('ct-classic-tweet'), false);
+  assert.equal(second.outerHTML, unchanged);
+  assert.ok(document.getElementById('ct-classic-appearance-style'));
+});
+
+test('scoped card passes style new nested replies and release detached native nodes', t => {
+  const { document, patch } = setup(t);
+  patch();
+  const first = document.getElementById('tweet');
+  first.insertAdjacentHTML('beforeend', post('nested-reply', true));
+  patch(first);
+  const nested = document.getElementById('nested-reply');
+  assert.ok(nested.classList.contains('ct-classic-tweet'));
+  const detached = first.querySelector('[data-testid="tweet-action-bar"]');
+  detached.remove();
+  patch(first);
+  assert.equal(detached.classList.contains('ct-classic-actions'), false);
+  assert.equal(first.classList.contains('ct-classic-tweet'), false);
+  assert.ok(nested.classList.contains('ct-classic-tweet'));
+  patch(document, false);
+  assert.equal(document.querySelectorAll('.ct-classic-tweet').length, 0);
+  assert.equal(document.getElementById('ct-classic-appearance-style'), null);
+});
+
+test('a partial root forces a full reset after native theme or layout changes', t => {
+  const { document, patch } = setup(t);
+  patch();
+  document.getElementById('root-container').setAttribute('data-app-theme', 'sepia');
+  patch(document.getElementById('tweet'));
+  assert.equal(document.querySelectorAll('.ct-classic-tweet').length, 0);
+  assert.equal(document.getElementById('ct-classic-appearance-style'), null);
+  document.getElementById('root-container').setAttribute('data-app-theme', 'light');
+  patch(document.getElementById('tweet'));
+  assert.equal(document.querySelectorAll('.ct-classic-tweet').length, 2);
+  document.querySelector('main').classList.remove('lg:col-span-6');
+  patch(document.getElementById('tweet'));
+  assert.equal(document.querySelectorAll('.ct-classic-tweet').length, 0);
+});
+
 test('inputs, focus, post body, profile strings, links, dimensions and native handlers remain intact', t => {
   const { document, patch } = setup(t);
   const input = document.getElementById('public-tweet-input');

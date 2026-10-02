@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.17.0
+// @version      6.18.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -1413,6 +1413,50 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return true;
   }
 
+  function ctClassicMarkArticles(articles, mark) {
+    for (const article of articles) {
+      if (article.closest(ctClassicExcluded) || !article.classList.contains('py-3')) continue;
+      // The current client renders this paragraph even for media-only Tweets.
+      const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')]
+        .find(element => ctClassicOwn(element, article));
+      const actions = [...article.querySelectorAll('[data-testid="tweet-action-bar"]')]
+        .find(element => ctClassicOwn(element, article) &&
+          ['tweet-like-action', 'tweet-open-comment-action', 'tweet-repost-action'].every(id =>
+            [...element.querySelectorAll(`[data-testid="${id}"]`)]
+              .some(control => control.tagName === 'BUTTON' && ctClassicOwn(control, article))));
+      if (!body || !actions) continue;
+      const author = [...article.querySelectorAll('button.font-bold.truncate')]
+        .find(element => ctClassicOwn(element, article));
+      if (!author) continue;
+      const row = [...article.children].find(element => element.classList.contains('flex') &&
+        element.classList.contains('items-start') && element.classList.contains('gap-3'));
+      const avatar = row?.firstElementChild;
+      const profile = avatar?.matches('button[aria-label^="View @"]') ? avatar :
+        avatar?.querySelector(':scope > button[aria-label^="View @"]');
+      if (!profile || !ctClassicOwn(profile, article)) continue;
+      const wrapper = profile.firstElementChild;
+      const visuals = wrapper?.matches('div.relative.inline-flex.shrink-0.isolate') ? wrapper.children : profile.children;
+      const visual = [...visuals].find(element =>
+        element.classList.contains('rounded-full') && (element.tagName === 'IMG' || element.getAttribute('role') === 'img'));
+      if (!visual) continue;
+      mark(article, 'ct-classic-tweet');
+      mark(actions, 'ct-classic-actions');
+      mark(profile, 'ct-classic-avatar');
+      mark(visual, 'ct-classic-avatar');
+      const favorite = [...actions.querySelectorAll('[data-testid="tweet-like-action"]')]
+        .find(element => ctClassicOwn(element, article));
+      const group = favorite?.parentElement;
+      const count = group?.children[1];
+      if (group?.parentElement === actions && group.firstElementChild === favorite &&
+          ['group', 'flex', 'items-center', 'gap-0.5'].every(name => group.classList.contains(name)) &&
+          group.children.length <= 2 && (!count || (count.children.length === 0 &&
+            /^[\d,.]+$/.test(count.textContent.trim()) &&
+            (count.matches('span.text-xs.tabular-nums') || count.matches('button[data-testid="tweet-like-action-count"]'))))) {
+        mark(group, 'ct-classic-favorite-group');
+      }
+    }
+  }
+
   function ctClassicDesired(shell) {
     const wanted = new Map();
     const mark = (element, name) => {
@@ -1531,47 +1575,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         (row === form || row.parentElement === form), [32, 40]);
     }
 
-    for (const article of main.querySelectorAll('article')) {
-      if (article.closest(ctClassicExcluded) || !article.classList.contains('py-3')) continue;
-      // The current client renders this paragraph even for media-only Tweets.
-      const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')]
-        .find(element => ctClassicOwn(element, article));
-      const actions = [...article.querySelectorAll('[data-testid="tweet-action-bar"]')]
-        .find(element => ctClassicOwn(element, article) &&
-          ['tweet-like-action', 'tweet-open-comment-action', 'tweet-repost-action'].every(id =>
-            [...element.querySelectorAll(`[data-testid="${id}"]`)]
-              .some(control => control.tagName === 'BUTTON' && ctClassicOwn(control, article))));
-      if (!body || !actions) continue;
-      const author = [...article.querySelectorAll('button.font-bold.truncate')]
-        .find(element => ctClassicOwn(element, article));
-      if (!author) continue;
-      const row = [...article.children].find(element => element.classList.contains('flex') &&
-        element.classList.contains('items-start') && element.classList.contains('gap-3'));
-      const avatar = row?.firstElementChild;
-      const profile = avatar?.matches('button[aria-label^="View @"]') ? avatar :
-        avatar?.querySelector(':scope > button[aria-label^="View @"]');
-      if (!profile || !ctClassicOwn(profile, article)) continue;
-      const wrapper = profile.firstElementChild;
-      const visuals = wrapper?.matches('div.relative.inline-flex.shrink-0.isolate') ? wrapper.children : profile.children;
-      const visual = [...visuals].find(element =>
-        element.classList.contains('rounded-full') && (element.tagName === 'IMG' || element.getAttribute('role') === 'img'));
-      if (!visual) continue;
-      mark(article, 'ct-classic-tweet');
-      mark(actions, 'ct-classic-actions');
-      mark(profile, 'ct-classic-avatar');
-      mark(visual, 'ct-classic-avatar');
-      const favorite = [...actions.querySelectorAll('[data-testid="tweet-like-action"]')]
-        .find(element => ctClassicOwn(element, article));
-      const group = favorite?.parentElement;
-      const count = group?.children[1];
-      if (group?.parentElement === actions && group.firstElementChild === favorite &&
-          ['group', 'flex', 'items-center', 'gap-0.5'].every(name => group.classList.contains(name)) &&
-          group.children.length <= 2 && (!count || (count.children.length === 0 &&
-            /^[\d,.]+$/.test(count.textContent.trim()) &&
-            (count.matches('span.text-xs.tabular-nums') || count.matches('button[data-testid="tweet-like-action-count"]'))))) {
-        mark(group, 'ct-classic-favorite-group');
-      }
-    }
+    ctClassicMarkArticles(main.querySelectorAll('article'), mark);
     return wanted;
   }
 
@@ -1600,31 +1604,55 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       state = { marked: new Map(), style: null };
       ctClassicAppearanceStates.set(doc, state);
     }
+    const shell = doc.getElementById('root-container');
+    const scope = root?.nodeType === 1 ? root.closest('article') : null;
+    const main = state.main;
+    // A native card update cannot alter the surrounding layout. Keep its
+    // markers current without traversing every older card in the timeline.
+    const partial = enabled && state.enabled === enabled && scope?.isConnected &&
+      shell === state.shell && shell?.getAttribute('data-app-theme') === state.theme &&
+      main?.isConnected && main.classList.contains('lg:col-span-6') &&
+      main.classList.contains('bg-tl-app-card') && main.parentElement?.classList.contains('lg:grid-cols-12') &&
+      main.closest('#root-container') === shell && main.contains(scope) && !main.closest(ctClassicExcluded);
     const wanted = new Map();
-    if (enabled) {
+    if (partial) {
+      ctClassicMarkArticles([scope, ...scope.querySelectorAll('article')], (element, name) => {
+        if (!element || element.closest(ctClassicExcluded)) return;
+        if (!wanted.has(element)) wanted.set(element, new Set());
+        wanted.get(element).add(name);
+      });
+    } else if (enabled) {
       const shell = doc.querySelector('#root-container[data-app-theme="light"],#root-container[data-app-theme="dark"]');
       if (shell && !shell.closest(ctClassicExcluded)) {
         for (const [element, names] of ctClassicDesired(shell)) wanted.set(element, names);
       }
     }
+    if (!partial) {
+      state.shell = shell;
+      state.theme = shell?.getAttribute('data-app-theme');
+      state.main = [...wanted].find(([, names]) => names.has('ct-classic-timeline'))?.[0] || null;
+      state.enabled = enabled;
+    }
     if (wanted.size && !ctClassicStyle(doc, state)) wanted.clear();
     for (const [element, record] of state.marked) {
+      if (partial && element.isConnected && record.article !== scope && !scope.contains(element)) continue;
       ctClassicRemoveClasses(element, record, wanted.get(element));
       if (!record.added.size) state.marked.delete(element);
     }
     for (const [element, names] of wanted) {
       let record = state.marked.get(element);
+      if (record) record.article = element.closest('article');
       for (const name of names) {
         if (element.classList.contains(name)) continue;
         if (!record) {
-          record = { originalClass: element.getAttribute('class'), added: new Set() };
+          record = { originalClass: element.getAttribute('class'), added: new Set(), article: element.closest('article') };
           state.marked.set(element, record);
         }
         element.classList.add(name);
         record.added.add(name);
       }
     }
-    if (!wanted.size && state.style) {
+    if (!partial && !wanted.size && state.style) {
       state.style.remove();
       state.style = null;
     }
@@ -2297,25 +2325,112 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   let ctScanning = false;
   let ctPageActive = true;
   let ctStarted = false;
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
-  const observer = new MutationObserver(mutations => {
-    if (ctScanning || !ctPageActive) return;
-    if (!mutations.some(m => {
-      const el = m.target.nodeType === Node.ELEMENT_NODE ? m.target : m.target.parentElement;
-      if (el?.closest('[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel')) return false;
-      if (m.type === 'attributes') return m.oldValue !== m.target.getAttribute(m.attributeName);
-      if (m.type === 'characterData') return m.oldValue !== m.target.data;
-      if (m.type === 'childList' && m.addedNodes.length && m.removedNodes.length &&
-          [...m.addedNodes, ...m.removedNodes].every(node => node.nodeType === Node.TEXT_NODE)) {
-        return [...m.addedNodes].map(node => node.data).join('') !== [...m.removedNodes].map(node => node.data).join('');
+  let ctScanFull = false;
+  const ctScanRoots = new Set();
+  let ctScanConversationPanels = new WeakSet();
+  let ctScanConversationPath = location.pathname;
+  const ctScanOwnedSelector = '[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel';
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
+
+  function ctScanElement(node) {
+    return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  }
+
+  function ctMutationChanged(mutation) {
+    const el = ctScanElement(mutation.target);
+    if (el?.closest(ctScanOwnedSelector)) return false;
+    if (typeof ctTimestampOwnMutation === 'function' && ctTimestampOwnMutation(mutation)) return false;
+    // The document-start observer already repairs these controls before paint.
+    // Its own labels, classes and vector inserts must not start a second scan.
+    const favorite = el?.closest(`${ctFavoriteButtonSelector},${ctFavoriteCountSelector}`);
+    if (favorite && !favorite.closest(ctFavoriteProtectedSelector) &&
+        document.getElementById('ct-favorite-presentation-style')?.dataset.ctFavoriteWatch === 'true') return false;
+    if (mutation.type === 'attributes') return mutation.oldValue !== mutation.target.getAttribute(mutation.attributeName);
+    if (mutation.type === 'characterData') return mutation.oldValue !== mutation.target.data;
+    const changed = [...mutation.addedNodes, ...mutation.removedNodes];
+    if (!changed.length || changed.every(node => node.nodeType === Node.ELEMENT_NODE && node.matches(ctScanOwnedSelector))) return false;
+    if (mutation.addedNodes.length && mutation.removedNodes.length &&
+        changed.every(node => node.nodeType === Node.TEXT_NODE)) {
+      return [...mutation.addedNodes].map(node => node.data).join('') !== [...mutation.removedNodes].map(node => node.data).join('');
+    }
+    return true;
+  }
+
+  function ctChangedScanRoot(node) {
+    const el = ctScanElement(node);
+    if (!el || el.matches('html,body')) return document;
+    // A card's author, reply header, media and action rows share identity. Keep
+    // that context together rather than scanning unrelated cards in the feed.
+    const article = el.closest('article');
+    if (article) return article;
+    if (typeof ctTimestampDetailContext === 'function') {
+      // A conversation's Back/header, scroll area and reply footer determine
+      // whether its article timestamps can be shown. Remember a verified panel
+      // so invalidating or removing one of those siblings also clears stamps.
+      if (ctScanConversationPath === location.pathname) {
+        for (let parent = el; parent; parent = parent.parentElement) {
+          if (ctScanConversationPanels.has(parent)) return parent;
+        }
       }
-      return true;
-    })) return;
-    ctScheduleScan();
+      const candidate = el.closest('div.animate-fadeIn.flex.flex-col');
+      const post = candidate?.querySelector(':scope > div.min-h-0.flex-1.overflow-y-auto article');
+      if (post && ctTimestampDetailContext(post) === candidate) return candidate;
+    }
+    // Grouped notification avatars live outside articles. Their native Follow
+    // overlay can be replaced independently, while navigation needs the whole
+    // verified avatar wrapper to repair it and retain its own profile link.
+    const avatar = typeof ctAvatarWrapperSelector === 'string' ? el.closest(ctAvatarWrapperSelector) : null;
+    return avatar || el.closest('[role="dialog"],[role="tablist"],[role="form"],form,nav,aside,header,footer') || el;
+  }
+
+  function ctRememberScanContexts(root) {
+    if (typeof ctTimestampDetailContext !== 'function') return;
+    if (ctScanConversationPath !== location.pathname) {
+      ctScanConversationPath = location.pathname;
+      ctScanConversationPanels = new WeakSet();
+    }
+    const articles = new Set(root.querySelectorAll?.('article') || []);
+    const own = root.closest?.('article');
+    if (own) articles.add(own);
+    for (const article of articles) {
+      const panel = ctTimestampDetailContext(article);
+      if (panel?.isConnected) ctScanConversationPanels.add(panel);
+    }
+  }
+
+  function ctQueueScanRoot(root) {
+    if (ctScanFull) return;
+    if (root === document || root?.nodeType === Node.DOCUMENT_NODE || !root?.querySelectorAll) {
+      ctScanFull = true; ctScanRoots.clear(); return;
+    }
+    for (const existing of ctScanRoots) {
+      if (existing === root || existing.contains(root)) return;
+      if (root.contains(existing)) ctScanRoots.delete(existing);
+    }
+    ctScanRoots.add(root);
+    // A large React commit is cheaper and simpler to process once as a page.
+    if (ctScanRoots.size > 12) { ctScanFull = true; ctScanRoots.clear(); }
+  }
+
+  const observer = new MutationObserver(mutations => {
+    if (ctScanning || !ctPageActive || document.hidden) return;
+    let changed = false;
+    for (const mutation of mutations) {
+      if (!ctMutationChanged(mutation)) continue;
+      changed = true;
+      if (mutation.type === 'attributes' && mutation.attributeName === 'data-app-theme') ctQueueScanRoot(document);
+      else if (mutation.type === 'childList' && mutation.addedNodes.length) {
+        for (const node of mutation.addedNodes) {
+          const el = ctScanElement(node);
+          if (el?.isConnected && !el.closest(ctScanOwnedSelector)) ctQueueScanRoot(ctChangedScanRoot(el));
+        }
+      } else ctQueueScanRoot(ctChangedScanRoot(mutation.target));
+    }
+    if (changed) ctScheduleScan(null);
   });
 
   function ctObserve() {
-    if (ctPageActive && document.documentElement) observer.observe(document.documentElement, {
+    if (ctPageActive && !document.hidden && document.documentElement) observer.observe(document.documentElement, {
       childList: true, subtree: true, characterData: true, characterDataOldValue: true,
       attributes: true, attributeOldValue: true, attributeFilter: ctObservedAttributes
     });
@@ -2323,15 +2438,27 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   function ctRunScan() {
     ctScanTimer = null;
-    if (ctScanning || !ctPageActive || !document.body) return;
+    if (ctScanning || !ctPageActive || document.hidden || !document.body) return;
+    const roots = ctScanFull || !ctScanRoots.size ? [document] : [...ctScanRoots].filter(root => root.isConnected);
+    ctScanFull = false; ctScanRoots.clear();
     ctScanning = true;
     observer.disconnect();
-    try { scan(document); ctTools?.refresh(); }
+    try {
+      // If every changed node was unmounted before the debounce, a page pass
+      // still lets shared modules release their detached state.
+      for (const root of roots.length ? roots : [document]) {
+        ctRememberScanContexts(root);
+        scan(root);
+      }
+      ctTools?.refresh();
+    }
     finally { ctScanning = false; ctObserve(); }
   }
 
-  function ctScheduleScan() {
-    if (!ctPageActive || ctScanTimer !== null) return;
+  function ctScheduleScan(root = document) {
+    if (!ctPageActive || document.hidden) return;
+    if (root !== null) ctQueueScanRoot(root);
+    if (ctScanTimer !== null) return;
     ctScanTimer = setTimeout(ctRunScan, 100);
   }
 
@@ -2340,7 +2467,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.17.0';
+    document.documentElement.dataset.ctActiveVersion = '6.18.0';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -2393,14 +2520,17 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       };
     }
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) ctCancelTranslations();
-      else ctScheduleScan();
+      if (document.hidden) {
+        observer.disconnect(); clearTimeout(ctScanTimer); ctScanTimer = null;
+        ctScanFull = false; ctScanRoots.clear(); ctCancelTranslations();
+      } else { ctObserve(); ctScheduleScan(); }
     });
     window.addEventListener('pagehide', () => {
       ctPageActive = false;
       observer.disconnect();
       clearTimeout(ctScanTimer);
       ctScanTimer = null;
+      ctScanFull = false; ctScanRoots.clear();
       ctCancelTranslations();
     });
     window.addEventListener('pageshow', event => {
@@ -2529,16 +2659,51 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return ctTimestampParse(ctTimestampPostValue(post));
   }
 
+  // Intl formatters are expensive to construct. Share the few native formats
+  // across cards, and recheck the device timezone on minute/visibility changes.
+  const ctTimestampFormatCache = new Map();
+  let ctTimestampFormatZone = null;
+  let ctTimestampFormatCheckedAt = -Infinity;
+  const ctTimestampClockWrites = new WeakMap();
+
+  function ctTimestampOwnMutation(mutation) {
+    if (mutation.type !== 'characterData') return false;
+    const node = mutation.target;
+    const write = ctTimestampClockWrites.get(node);
+    return !!write && node.data === write.value && node.parentElement === write.parent &&
+      ctTimestampNativeValue(write.parent) === write.source;
+  }
+
+  function ctTimestampFormatReset() {
+    ctTimestampFormatCheckedAt = -Infinity;
+  }
+
+  function ctTimestampFormatter(locale, kind) {
+    const now = Date.now();
+    if (ctTimestampFormatZone === null || now < ctTimestampFormatCheckedAt || now - ctTimestampFormatCheckedAt >= 60000) {
+      const zone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (zone !== ctTimestampFormatZone) {
+        ctTimestampFormatCache.clear();
+        ctTimestampFormatZone = zone;
+      }
+      ctTimestampFormatCheckedAt = now;
+    }
+    const japanese = locale === 'ja';
+    const language = japanese ? 'ja-JP' : 'en-US';
+    const key = `${language}:${kind}`;
+    if (!ctTimestampFormatCache.has(key)) {
+      const options = kind === 'time' ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } :
+        { ...(kind === 'date' ? { year: 'numeric' } : {}), month: japanese ? 'long' : 'short', day: 'numeric' };
+      ctTimestampFormatCache.set(key, new Intl.DateTimeFormat(language, options));
+    }
+    return ctTimestampFormatCache.get(key);
+  }
+
   function ctTimestampExactText(value, locale = CT_LOCALE) {
     const date = value instanceof Date ? value : ctTimestampParse(value);
     if (!date || !Number.isFinite(date.getTime())) return '';
-    const language = locale === 'ja' ? 'ja-JP' : 'en-US';
-    const dateText = new Intl.DateTimeFormat(language, {
-      year: 'numeric', month: locale === 'ja' ? 'long' : 'short', day: 'numeric'
-    }).format(date);
-    const timeText = new Intl.DateTimeFormat(language, {
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-    }).format(date);
+    const dateText = ctTimestampFormatter(locale, 'date').format(date);
+    const timeText = ctTimestampFormatter(locale, 'time').format(date);
     return `${dateText} · ${timeText}`;
   }
 
@@ -2586,24 +2751,31 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ]) {
       if (seconds < limit) return `${Math.floor(seconds / divisor)}${locale === 'ja' ? japanese : english}`;
     }
-    const year = date.getFullYear() !== new Date(now).getFullYear() ? 'numeric' : undefined;
-    return new Intl.DateTimeFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
-      ...(year ? { year } : {}), month: locale === 'ja' ? 'long' : 'short', day: 'numeric'
-    }).format(date);
+    const kind = date.getFullYear() !== new Date(now).getFullYear() ? 'date' : 'month-day';
+    return ctTimestampFormatter(locale, kind).format(date);
   }
 
   function ctTimestampClockState() {
-    return ctTimestampClockState.value ||= { elements: new Set(), timer: null, active: true, installed: false };
+    return ctTimestampClockState.value ||= { elements: new Set(), articles: new WeakMap(), timer: null, dueAt: null, active: true, installed: false };
   }
 
-  function ctTimestampRefreshRelative() {
-    const state = ctTimestampClockState();
+  function ctTimestampStopClock(state) {
     clearTimeout(state.timer);
     state.timer = null;
-    if (!state.active || document.hidden) return;
+    state.dueAt = null;
+  }
+
+  function ctTimestampRefreshRelative(dirtyElements) {
+    const state = ctTimestampClockState();
+    const partial = dirtyElements instanceof Set;
+    if (!partial) ctTimestampStopClock(state);
+    if (!state.active || document.hidden) {
+      ctTimestampStopClock(state);
+      return;
+    }
     const now = Date.now();
     let delay = 60000;
-    for (const el of state.elements) {
+    for (const el of partial ? dirtyElements : state.elements) {
       const value = el.isConnected && ctTimestampNativeValue(el);
       const date = value && ctTimestampParse(value);
       const node = el.firstChild;
@@ -2613,28 +2785,50 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
       const text = ctTimestampRelativeText(date, now);
       if (node.nodeValue !== text) {
+        ctTimestampClockWrites.set(node, { value: text, parent: el, source: value });
         node.nodeValue = text;
         if (typeof ctReplyTimeRendered === 'function' && !el.hasAttribute('title')) ctReplyTimeRendered(el, text);
       }
       const age = now - date.getTime();
       if (age >= 0 && age < 604800000) delay = Math.min(delay, 60000 - age % 60000);
     }
-    if (state.elements.size) state.timer = setTimeout(ctTimestampRefreshRelative, Math.max(1000, delay));
+    if (!state.elements.size) {
+      ctTimestampStopClock(state);
+      return;
+    }
+    const dueAt = now + Math.max(1000, delay);
+    // A scoped scan refreshes only changed cards. Keep the already scheduled
+    // global boundary unless a new clock needs an earlier wake-up.
+    if (!state.timer || dueAt < state.dueAt) {
+      ctTimestampStopClock(state);
+      state.dueAt = dueAt;
+      state.timer = setTimeout(ctTimestampRefreshRelative, dueAt - now);
+    }
   }
 
-  function ctTimestampTrackRelative(el) {
+  function ctTimestampTrackRelative(el, article) {
     const state = ctTimestampClockState();
+    const previous = state.articles.get(article);
+    if (previous && previous !== el) state.elements.delete(previous);
+    if (!el) {
+      state.articles.delete(article);
+      return;
+    }
+    state.articles.set(article, el);
     if (!state.installed) {
       state.installed = true;
-      document.addEventListener('visibilitychange', ctTimestampRefreshRelative);
+      document.addEventListener('visibilitychange', () => {
+        ctTimestampFormatReset();
+        ctTimestampRefreshRelative();
+      });
       window.addEventListener('pagehide', () => {
         state.active = false;
-        clearTimeout(state.timer);
-        state.timer = null;
+        ctTimestampStopClock(state);
       });
       window.addEventListener('pageshow', event => {
         if (event.persisted) {
           state.active = true;
+          ctTimestampFormatReset();
           ctTimestampRefreshRelative();
         }
       });
@@ -2663,12 +2857,14 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (parent) articles.add(parent);
     }
     scope?.querySelectorAll?.('article').forEach(article => articles.add(article));
+    const clocks = new Set();
     for (const article of articles) {
       if (!article.isConnected) continue;
       const stamps = [...article.querySelectorAll('.ct-detail-post-time')]
         .filter(stamp => stamp.closest('article') === article);
       const creation = ctTimestampCreationNode(article);
-      if (creation) ctTimestampTrackRelative(creation);
+      ctTimestampTrackRelative(creation, article);
+      if (creation) clocks.add(creation);
       const source = ctTimestampDetailContext(article) ? creation : null;
       const value = source && ctTimestampNativeValue(source);
       const date = value && ctTimestampParse(value);
@@ -2696,7 +2892,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         if (stamp.nextSibling !== actionRow || stamp.parentElement !== column) column.insertBefore(stamp, actionRow);
       } else if (stamp.parentElement !== column) column.append(stamp);
     }
-    ctTimestampRefreshRelative();
+    ctTimestampRefreshRelative(clocks);
   }
 
     // Profile additions use Tweet's verified posts GET. Favorites are browser-local
@@ -4059,7 +4255,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return bounds.height > 0 && bounds.width > 0 && bounds.bottom > 0 && bounds.top < innerHeight;
   }
 
-  function ctReplyTimeCandidate(el) {
+  function ctReplyTimeContext(el) {
     if (!el?.matches('span.text-tl-app-text-muted.shrink-0:not([title])') || el.closest('button,a,[role="button"],blockquote,[aria-label^="Quoted post"]')) return null;
     const article = el.closest('article');
     const inline = article?.closest('[id^="inline-replies-"]');
@@ -4067,6 +4263,21 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const panel = !inline && article ? ctTimestampDetailContext(article) : null;
     const container = inline || panel?.querySelector(':scope > div.min-h-0.flex-1.overflow-y-auto');
     const parentId = inlineId || (panel ? location.pathname.match(/^\/(?:post|posts)\/([A-Za-z0-9_-]{1,160})\/?$/)?.[1] : null);
+    return article && container && parentId ? { article, container, panel, inline: !!inline, parentId } : null;
+  }
+
+  function ctReplyTimeCanCheck(el, context) {
+    const record = ctReplyTimeContainers.get(context.container);
+    if (!record || record.uid !== ctReplyTimeUID() || record.path !== location.pathname + location.search || record.parentId !== context.parentId) return true;
+    // A complete response is only for the original nodes and each gets one
+    // identity attempt. An edited unknown node cannot later inherit cached data.
+    return record.elements.has(el) && !record.usedElements.has(el) &&
+      (!!record.pending || !!record.posts && Date.now() - record.at < 60000);
+  }
+
+  function ctReplyTimeCandidate(el, context) {
+    if (!context) return null;
+    const { article, container, panel, inline, parentId } = context;
     const header = el.parentElement;
     const author = header?.querySelector(':scope > button.font-bold.truncate');
     const separator = el.previousElementSibling;
@@ -4081,7 +4292,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!native || native.translated || native.parentId && native.parentId !== parentId ||
         typeof native.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(native.username) ||
         typeof native.text !== 'string' || native.text !== body.textContent) return null;
-    return { el, article, container, panel, inline: !!inline, parentId, body, author, username: native.username.toLowerCase(),
+    return { el, article, container, panel, inline, parentId, body, author, username: native.username.toLowerCase(),
       text: body.textContent, authorLabel: author.getAttribute('aria-label') || '', authorText: author.textContent,
       initialText: el.textContent, observedAt: Date.now(), uid: ctReplyTimeUID(), path: location.pathname + location.search };
   }
@@ -4182,8 +4393,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (record.pending) await record.pending;
     if (!record.posts || Date.now() - record.at >= 60000 || ctReplyTimeContainers.get(container) !== record) return;
     let changed = false;
-    for (const candidate of candidates) if (record.elements.has(candidate.el) && !record.usedElements.has(candidate.el) && ctReplyTimeBind(candidate, record.posts)) {
-      record.usedElements.add(candidate.el); changed = true;
+    for (const candidate of candidates) if (record.elements.has(candidate.el) && !record.usedElements.has(candidate.el) && ctReplyTimeVisible(candidate.article)) {
+      record.usedElements.add(candidate.el);
+      if (ctReplyTimeBind(candidate, record.posts)) changed = true;
     }
     if (changed && typeof ctScheduleScan === 'function') ctScheduleScan();
   }
@@ -4198,7 +4410,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     for (const el of elements) {
       if (count >= 20) break;
       if (ctReplyTimeSource(el)) continue;
-      const candidate = ctReplyTimeCandidate(el);
+      const context = ctReplyTimeContext(el);
+      if (!context || !ctReplyTimeCanCheck(el, context)) continue;
+      const candidate = ctReplyTimeCandidate(el, context);
       if (!candidate || !ctReplyTimeVisible(candidate.article)) continue;
       if (!groups.has(candidate.container)) {
         if (groups.size >= 4) continue;
@@ -7104,7 +7318,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       patchProfileFounder();
       patchFavoriteProfileTab();
 
-      if (favoritesActive) renderFavoritesPanel();
     patchNavigation(root);
     ctPatchNotificationFilters();
     patchOfficialBadges(root);
@@ -7123,5 +7336,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.17.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.18.0 loaded');
 })();
