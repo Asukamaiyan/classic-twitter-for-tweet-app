@@ -10,7 +10,7 @@
 
 **未検証:** 実サービスでの6.14.0通常操作、実Tampermonkeyの更新適用、Safari＋Stay／Android Firefox実機。Chrome拡張管理画面はブラウザURL制限により自動操作できません。過去全お気に入りの取得APIは確認できず、読み込み済み分の復元だけです。投稿・アップロード・投票・ミュート変更・フォロー操作はしていません。
 
-**配布:** GitHub [PR #12](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/12)で6.14.0のコードを更新。Greasy Forkの6版更新はログイン待ちで、掲載済み版を6.14.0と扱っていません。
+**配布:** GitHub [PR #12](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/12)で6.14.0のコードを更新。Greasy Forkの全6版で掲載バージョン6.14.0と導入・更新案内を確認。既存ID・名前・namespace・限定公開設定を保持しました。通常のインストールURLから取得したコードは、Greasy Forkが追加するdownloadURL/updateURLと改行・末尾空白を除き、検証済みローカルコードと全6版で一致しました。
 
 ---
 
