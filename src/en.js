@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.16.0
+// @version      6.17.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -27,8 +27,10 @@
   /* @include motion */
   /* @include runtime */
   /* @include presentation */
+  /* @include timestamps */
   /* @include profile */
   /* @include favorite-capture */
+  /* @include reply-times */
   /* @include favorite-history */
   /* @include navigation */
   /* @include notification-filters */
@@ -420,9 +422,7 @@
     if (!el?.matches('span[title]') || !el.closest('article') ||
         el.closest('button,a,[role="button"]') ||
         !el.classList.contains('text-tl-app-text-muted') || !el.classList.contains('hover:underline')) return false;
-    const title = el.getAttribute('title');
-    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(title) &&
-      Number.isFinite(Date.parse(title));
+    return !!ctTimestampParse(el.getAttribute('title'));
   }
 
   // Tweet v2.1.0 keeps user-written poll choices in tl-user-text. Recognize
@@ -902,26 +902,7 @@
 
 
   function patchExactPostTime(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const articles = [];
-    if (scope instanceof Element && scope.matches('article')) articles.push(scope);
-    scope.querySelectorAll?.('article').forEach(a => articles.push(a));
-    for (const article of articles) {
-      if (!article.isConnected) continue;
-      const path = location.pathname;
-      const isDetail = /\/status\/|\/post\/|\/posts\//i.test(path) ||
-        !!article.querySelector('[data-testid*="reply" i] textarea, textarea[placeholder*="reply" i]');
-      if (!isDetail || article.querySelector('.ct-detail-post-time')) continue;
-      const timeEl = article.querySelector('time[datetime]');
-      let date = timeEl ? new Date(timeEl.getAttribute('datetime') || '') : null;
-      if (!date || Number.isNaN(date.getTime())) continue;
-      const stamp=document.createElement('div');
-      stamp.className='ct-detail-post-time';
-      const timeText=new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}).format(date);
-      const dateText=new Intl.DateTimeFormat('en-US',{year:'numeric',month:'short',day:'numeric'}).format(date);
-      stamp.textContent=`${dateText} · ${timeText}`;
-      article.append(stamp);
-    }
+    ctTimestampPatchExactPostTime(root);
   }
 
 
@@ -940,6 +921,7 @@
       patchFeed(root);
       patchRetweetRows(root);
       patchAutoTranslation(root, 'en');
+      ctReplyTimesEnhance(root);
       patchExactPostTime(root);
       patchProfileFounder();
       patchFavoriteProfileTab();
@@ -963,5 +945,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.16.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.17.0 loaded');
 })();

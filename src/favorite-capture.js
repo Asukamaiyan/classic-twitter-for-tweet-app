@@ -13,8 +13,8 @@
   }
 
   function ctFavoriteRelativeTimeMatches(text, createdAt, observedAt) {
-    const created = Date.parse(createdAt);
-    if (!Number.isFinite(created)) return false;
+    const created = ctTimestampParse(createdAt)?.getTime();
+    if (!Number.isFinite(created) || !Number.isFinite(observedAt)) return false;
     const value = text.trim();
     const short = /^(\d+)([mhd])$/.exec(value);
     const japanese = /^(\d+)(分|時間|日)前$/.exec(value);
@@ -58,8 +58,8 @@
 
   function ctFavoriteCandidate(article) {
     const timestamp = [...article.querySelectorAll('span.text-tl-app-text-muted.hover\\:underline[title]')].find(el =>
-      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote') &&
-      /^\d{4}-\d{2}-\d{2}T/.test(el.title) && Number.isFinite(Date.parse(el.title)));
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border') &&
+      !!ctTimestampParse(el.title));
     const known = snapshotFavorite(article);
     if (known) return { ...known, createdAt: timestamp?.title || '', media: ctFavoriteDOMMedia(article) };
     const username = validUser(articleAuthor(article));
@@ -77,7 +77,7 @@
     // Do not infer its identity from the translated text.
     if (!timestamp && translated) return null;
     const author = [...article.querySelectorAll('button.truncate.font-bold')].find(el =>
-      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote'));
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border'));
     return { username, name: author?.textContent || username, text: body.textContent,
       avatar: articleAvatar(article), createdAt: timestamp?.title || '', savedAt: Date.now(),
       relativeText: replyTime?.textContent || '', observedAt: Date.now(), parentId, translated };
@@ -138,7 +138,7 @@
   }
 
   async function ctResolveFavorite(candidate, uid, deadline = Infinity) {
-    if (!candidate || !uid) return null;
+    if (!candidate || !uid || (candidate.createdAt && !ctTimestampParse(candidate.createdAt))) return null;
     const auth = await getAuth();
     if (!auth?.token || auth.uid !== uid) return null;
     if (candidate.id) return candidate;
@@ -150,12 +150,12 @@
       !post.isDeleted && !post.originalPostId && !post.isRepost &&
       post.status !== 'MUTED' &&
       post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&
-      (candidate.createdAt ? Date.parse(post.createdAt ?? post.created_at) === Date.parse(candidate.createdAt) :
-        ctFavoriteRelativeTimeMatches(candidate.relativeText, post.createdAt ?? post.created_at, candidate.observedAt)) &&
+      (candidate.createdAt ? ctTimestampPostDate(post)?.getTime() === ctTimestampParse(candidate.createdAt)?.getTime() :
+        ctFavoriteRelativeTimeMatches(candidate.relativeText, ctTimestampPostValue(post), candidate.observedAt)) &&
       typeof post.text === 'string' && (candidate.translated || post.text === candidate.text));
     const unique = [...new Map(matches.map(post => [post.id, post])).values()];
     if (unique.length !== 1) return null;
-    return { ...candidate, id: unique[0].id, text: unique[0].text, createdAt: unique[0].createdAt ?? unique[0].created_at,
+    return { ...candidate, id: unique[0].id, text: unique[0].text, createdAt: ctTimestampPostValue(unique[0]),
       href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
       avatar: ctProfileURL(unique[0].authorAvatar) || candidate.avatar,
       media: ctProfileMediaAssets(unique[0]) };
@@ -188,7 +188,7 @@
           if (!json || json.success === false || json.error || post?.id !== snapshot.id || post.hasLiked !== true ||
               post.isDeleted || post.status === 'MUTED' || post.isRepost || post.originalPostId ||
               post.authorUsername?.toLowerCase() !== snapshot.username.toLowerCase() || typeof post.text !== 'string') snapshot = null;
-          else snapshot = {...snapshot,text:post.text,createdAt:post.createdAt ?? post.created_at,
+          else snapshot = {...snapshot,text:post.text,createdAt:ctTimestampPostValue(post),
             media:ctProfileMediaAssets(post),avatar:ctProfileURL(post.authorAvatar) || snapshot.avatar};
         } else snapshot = null;
         const current = await getAuth();

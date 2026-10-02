@@ -24,6 +24,7 @@ function fixture(language, html, route = '/feed') {
   const start = source.indexOf(`  const ${map} = new Map([`);
   const end = source.indexOf('\n  ]);', start) + '\n  ]);'.length;
   const common = [
+    'ctTimestampParse',
     'localizationScopeNodes', 'isOwnedLocalizationElement', 'isNativeSettingsNavigation',
     'isNativeLocalizationTimestamp', 'isProtectedLocalizationElement',
     'nativeLocalizationPoll', 'isNativeLocalizationPollUI',
@@ -442,6 +443,21 @@ test('ja: old native tweet dates localize only with valid ISO metadata', () => {
   assert.equal(f.text('date'), '9月27日');
   assert.equal(f.text('invalid'), 'Sep 27');
   assert.equal(f.text('body'), 'Sep 27');
+  f.dom.window.close();
+});
+
+test('ja: impossible or timezone-ambiguous creation and edit metadata never authorize localization', () => {
+  const f = fixture('ja', `<article><div class="flex items-center"><button class="font-bold truncate">alice</button>
+    <span class="text-tl-app-text-muted hover:underline" title="2026-02-29T00:00:00Z" id="invalid-day">3h</span>
+    <span class="text-tl-app-text-muted hover:underline" title="2026-10-02T09:00:00" id="no-zone">3h</span>
+    <span>·</span><span class="text-tl-app-text-muted" title="2026-04-31T00:00:00Z" id="edited">Edited</span>
+    <span class="text-tl-app-text-muted hover:underline" title="2024-02-29T00:00:00.123456Z" id="valid-leap">3h</span>
+    </div><p class="tl-user-text">Edited 3h</p></article>`);
+  f.run();
+  assert.equal(f.text('invalid-day'), '3h');
+  assert.equal(f.text('no-zone'), '3h');
+  assert.equal(f.text('edited'), 'Edited');
+  assert.equal(f.text('valid-leap'), '3時間前');
   f.dom.window.close();
 });
 

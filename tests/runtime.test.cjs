@@ -726,3 +726,19 @@ for (const locale of ['ja', 'en']) {
     close.click(); assert.equal(closes, 1);
   });
 }
+
+
+test('a native datetime-only update refreshes the existing time display and settles without an idle scan loop', async t => {
+  const f = harness(t, '<main><article><time id="created" datetime="2026-10-02T01:00:00Z">native</time><span id="display"></span></article></main>', {
+    route: '/post/time-a',
+    scan(document) {
+      document.getElementById('display').textContent = document.getElementById('created').getAttribute('datetime');
+    }
+  });
+  f.qa.start(); assert.equal(f.document.getElementById('display').textContent,'2026-10-02T01:00:00Z');
+  f.document.getElementById('created').setAttribute('datetime','2026-10-01T23:00:00Z');
+  await f.advance(100);
+  assert.equal(f.document.getElementById('display').textContent,'2026-10-01T23:00:00Z');
+  assert.equal(f.stats.scans,2);
+  await f.advance(1000); assert.equal(f.stats.scans,2);
+});

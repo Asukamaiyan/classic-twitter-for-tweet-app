@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(path.join(__dirname, '../src/profile.js'), 'utf8');
+const timestamps = fs.readFileSync(path.join(__dirname, '../src/timestamps.js'), 'utf8');
 function client(user = 'viewer', labels = ['Tweets', 'Replies', 'Reposts']) {
   return `<div class="overflow-hidden"><img src="https://images.example/cover.jpg" alt="Cover"></div><div><div class="mt-3 flex flex-col gap-1"><h2 class="font-extrabold"><span>${user}</span></h2><p class="text-tl-app-text-muted">@${user}</p></div><p class="mt-3 text-tl-app-text leading-relaxed">Profile bio</p></div>
     <div role="tablist" class="flex border-b border-tl-app-border">${labels.map((label, index) => `<button type="button" role="tab" aria-label="${label}" aria-selected="${index === 0}"><span><svg></svg>${index === 0 ? '<span class="native-underline"></span>' : ''}</span></button>`).join('')}</div>
@@ -39,7 +40,7 @@ function harness(t, options = {}) {
     assert.equal(endpoint.searchParams.get('limit'), '24');
     return pages[Number(endpoint.searchParams.get('cursor') || 0)] || { posts: [], nextCursor: null };
   };
-  window.eval(`const CT_LOCALE='${options.locale || 'en'}'; const KEY={favorites:'legacy.favorites'}; const API_ORIGIN='https://api.tweet.app'; let favoritesActive=false; let ctPageActive=true; ${source}
+  window.eval(`const CT_LOCALE='${options.locale || 'en'}'; const KEY={favorites:'legacy.favorites'}; const API_ORIGIN='https://api.tweet.app'; let favoritesActive=false; let ctPageActive=true; ${timestamps} ${source}
     window.profile={patch:patchFavoriteProfileTab, close:closeFavoritesPanel, render:renderFavoritesPanel, media:ctProfileLoadMedia, mutes:ctProfileLoadFavoriteMutes, state:ctProfileState,
     save:ctProfileSaveFavorite, remove:ctProfileRemoveFavorite, remember:ctProfileRememberLikedPosts, load:ctProfileLoadFavorites, import:ctProfileImportFavorites, assets:ctProfileMediaAssets,
     context:ctProfileContext, viewerClose:ctProfileCloseViewer, backup:ctProfileFavoriteBackup, backupParts:ctProfileFavoriteBackupParts, importBackup:ctProfileImportFavoriteBackup, setActive:value=>{ctPageActive=value;}};`);
@@ -272,6 +273,65 @@ test('saved Favorite timestamps are preserved and profile tab arrow keys move fo
   assert.equal(h.document.activeElement, tabs[0]); assert.equal(h.api.state.active, 'favorites');
 });
 
+test('Favorite creation times show local date and clock time and update from the same post without using save time', async t => {
+  const h = harness(t, { locale: 'ja' }); await h.ready();
+  h.api.save(item('dated', { username: 'viewer', createdAt: '2026-09-29T23:55:00Z', savedAt: 123 }));
+  await h.select('favorites'); const initial = h.document.querySelector('[data-ct-profile-post=dated] time');
+  assert.equal(initial.textContent, new Date('2026-09-29T23:55:00Z').toLocaleString('ja-JP', {
+    year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }));
+  assert.match(initial.title, /2026/);
+  h.api.remember([post('dated', [], { hasLiked: true, createdAt: '2026-09-30T01:05:00Z', created_at: '2026-09-30T00:05:00Z' })], 'uid-viewer', 'viewer');
+  const corrected = h.document.querySelector('[data-ct-profile-post=dated] time');
+  assert.notEqual(corrected, initial); assert.equal(corrected.dateTime, '2026-09-30T00:05:00Z');
+  assert.equal(h.api.load()[0].savedAt, 123);
+  h.api.remember([post('dated', [], { hasLiked: true, createdAt: '', created_at: 'invalid', updatedAt: '2026-10-02T00:00:00Z' })], 'uid-viewer', 'viewer');
+  assert.equal(h.api.load()[0].createdAt, '2026-09-30T00:05:00Z');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=dated] time').dateTime, '2026-09-30T00:05:00Z');
+  h.api.remember([post('undated', [], { hasLiked: true, createdAt: '', created_at: null, savedAt: Date.now() })], 'uid-viewer', 'viewer');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=undated] time'), null);
+});
+
+test('ambiguous legacy Favorite date strings remain in backups but do not invent a date or clock time', async t => {
+  const h = harness(t); await h.ready();
+  for (const [id, createdAt] of [['date-only', '2026-09-30'], ['no-zone', '2026-09-30T11:45:00'], ['rollover', '2026-02-30T00:00:00Z']]) {
+    h.api.save(item(id, { createdAt, savedAt: 123 }));
+  }
+  const raw = h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer');
+  const backup = JSON.parse(h.api.backup());
+  await h.select('favorites');
+  assert.equal(h.document.querySelectorAll('#ct-favorites-panel time').length, 0);
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /dates unavailable/);
+  assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), raw);
+  assert.deepEqual(backup.items.map(row => row.createdAt).sort(), ['2026-02-30T00:00:00Z', '2026-09-30', '2026-09-30T11:45:00'].sort());
+  backup.items[0].id = 'imported-legacy';
+  assert.equal(h.api.importBackup(JSON.stringify(backup)), 1);
+  assert.equal(h.api.load().find(row => row.id === 'imported-legacy').createdAt, backup.items[0].createdAt);
+  h.api.save(item('known', { createdAt: '2026-09-30T11:45:00+09:00' }));
+  assert.equal(h.document.querySelectorAll('#ct-favorites-panel time').length, 1);
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /1 dated/);
+});
+
+test('microsecond API creation dates survive Favorite storage and backup import when native Safari parsing rejects raw fractions', async t => {
+  const h = harness(t); await h.ready(); const NativeDate = h.window.Date;
+  const microseconds = value => typeof value === 'string' && /\.\d{4,9}(?:Z|[+-]\d{2}:\d{2})$/.test(value);
+  h.window.Date = class SafariDate extends NativeDate {
+    constructor(...values) { super(...(microseconds(values[0]) ? [NaN] : values)); }
+    static parse(value) { return microseconds(value) ? NaN : NativeDate.parse(value); }
+  };
+  const createdAt = '2026-09-30T10:11:12.123456Z';
+  assert.equal(Number.isNaN(h.window.Date.parse(createdAt)), true);
+  h.api.remember([post('micro', [], { hasLiked: true, created_at: createdAt })], 'uid-viewer', 'viewer');
+  assert.equal(h.api.load()[0].createdAt, createdAt);
+  await h.select('favorites'); assert.equal(h.document.querySelector('[data-ct-profile-post=micro] time').dateTime, createdAt);
+  const backup = JSON.parse(h.api.backup()); assert.equal(backup.items[0].createdAt, createdAt);
+  backup.items[0].id = 'imported-micro';
+  assert.equal(h.api.importBackup(JSON.stringify(backup)), 1);
+  assert.equal(h.api.load().find(row => row.id === 'imported-micro').createdAt, createdAt);
+  assert.equal(h.document.querySelector('[data-ct-profile-post=imported-micro] time').dateTime, createdAt);
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /2 dated/);
+});
+
 
 test('own-profile handle edits with the same uid revalidate identity and restore the Favorites tab', async t => {
   const h = harness(t); await h.ready();
@@ -342,6 +402,23 @@ test('Media includes all media assets of own reply wrappers and rejects parent-p
   assert.ok(h.document.querySelector('[data-ct-profile-post=reply-video] video'));
   assert.equal(h.document.querySelector('[data-ct-profile-post=parent]'), null); assert.equal(h.document.querySelector('[data-ct-profile-post=foreign-reply]'), null);
   assert.match(h.document.getElementById('ct-media-panel').textContent, /1 posts and 2 replies checked/);
+});
+
+test('reply Media uses each reply creation time, valid native aliases and no parent or wrapper timestamp', async t => {
+  const h = harness(t); await h.ready(); h.pages([{ posts: [], nextCursor: null }]);
+  h.replies([
+    { createdAt: '2030-01-01T00:00:00Z', parentPost: post('parent', undefined, { createdAt: '2026-10-01T23:00:00Z' }),
+      post: post('reply', undefined, { createdAt: '2026-09-30T09:00:00Z', created_at: '2026-09-30T08:00:00Z', parentId: 'parent' }) },
+    { post: post('fallback', undefined, { created_at: 'invalid', createdAt: '2026-09-30T10:00:00Z' }) },
+    { post: post('unknown', undefined, { createdAt: '2026-02-30T00:00:00Z', created_at: '', updatedAt: '2030-01-01T00:00:00Z' }),
+      parentPost: post('parent2', undefined, { createdAt: '2030-01-01T00:00:00Z' }) }
+  ]);
+  await h.select('media');
+  assert.deepEqual(Array.from(h.api.state.media.items, row => row.id), ['fallback', 'reply', 'unknown']);
+  assert.equal(h.document.querySelector('[data-ct-profile-post=reply] time').dateTime, '2026-09-30T08:00:00Z');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=fallback] time').dateTime, '2026-09-30T10:00:00Z');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=unknown] time'), null);
+  assert.equal(h.document.querySelector('[data-ct-profile-post=parent]'), null);
 });
 
 test('reply media failure preserves successful Tweets and manual retry rechecks only the failed replies', async t => {

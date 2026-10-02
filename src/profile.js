@@ -48,7 +48,7 @@
       name: typeof item.name === 'string' ? item.name.slice(0, 200) : '',
       text: typeof item.text === 'string' ? item.text.slice(0, 10000) : '',
       avatar: ctProfileURL(item.avatar), savedAt: Number.isFinite(Number(item.savedAt)) && Number(item.savedAt) >= 0 ? Number(item.savedAt) : 0,
-      createdAt: typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) ? item.createdAt : '',
+      createdAt: typeof item.createdAt === 'string' && (ctTimestampParse(item.createdAt) || Number.isFinite(Date.parse(item.createdAt))) ? item.createdAt : '',
       href: `${location.origin}/post/${encodeURIComponent(item.id)}`,
       media: Array.isArray(item.media) ? item.media.slice(0, 16).filter(asset =>
         ['image', 'video'].includes(asset?.type) && ctProfileURL(asset.url)).map(asset => ({
@@ -109,11 +109,13 @@
       if (post?.hasLiked !== true || !ctProfileId(post.id) || !username ||
           (expectedHandle && username !== expectedHandle) || post.isDeleted || post.status === 'MUTED' ||
           post.isRepost || post.originalPostId || post.repostedBy || removed?.has(post.id) || typeof post.text !== 'string') continue;
-      const createdAt = post.createdAt ?? post.created_at;
+      // The native client prefers created_at. A missing or invalid alias must
+      // not hide a valid creation time or replace a known time with savedAt.
+      const createdAt = ctTimestampPostValue(post) || known.get(post.id)?.createdAt || '';
       recovered.set(post.id, { id: post.id, username,
         name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : username,
         avatar: ctProfileURL(post.authorAvatar), text: post.text.slice(0, 10000),
-        createdAt: typeof createdAt === 'string' && Number.isFinite(Date.parse(createdAt)) ? createdAt : '',
+        createdAt,
         savedAt: known.get(post.id)?.savedAt ?? Date.now(), media: ctProfileMediaAssets(post) });
     }
     if (!recovered.size || expectedUid !== ctProfileUID()) return 0;
@@ -227,6 +229,7 @@
       .ct-profile-meta{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;font-size:14px;line-height:20px}
       .ct-profile-name{font-weight:700;color:inherit;text-decoration:none}
       .ct-profile-handle,.ct-profile-time{font-size:12px;color:var(--color-tl-app-text-muted,#657786);text-decoration:none}
+      .ct-profile-time{white-space:nowrap}
       .ct-profile-text{font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 10px}
       .ct-profile-gallery{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;border-radius:4px;scrollbar-width:thin}
       .ct-profile-photo{display:block;flex:0 0 100%;min-width:0;padding:0;background:var(--color-tl-app-bg,#f5f8fa);border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;overflow:hidden;scroll-snap-align:start;cursor:zoom-in}
@@ -527,9 +530,13 @@
     if (item.username) {
       const handle = document.createElement('span'); handle.className = 'ct-profile-handle'; handle.textContent = '@' + item.username; meta.append(handle);
     }
-    if (Number.isFinite(Date.parse(item.createdAt))) {
+    const created = ctTimestampParse(item.createdAt);
+    if (created) {
       const time = document.createElement('time'); time.className = 'ct-profile-time'; time.dateTime = item.createdAt;
-      time.textContent = new Date(item.createdAt).toLocaleDateString(CT_LOCALE === 'ja' ? 'ja-JP' : 'en-US'); meta.append(time);
+      const locale = CT_LOCALE === 'ja' ? 'ja-JP' : 'en-US';
+      time.textContent = created.toLocaleString(locale, { year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+      time.title = `${ctTimestampExactText(item.createdAt)} (${item.createdAt})`; meta.append(time);
     }
     main.append(meta);
     if (item.text) { const text = document.createElement('p'); text.className = 'ct-profile-text'; text.textContent = item.text; main.append(text); }
@@ -739,7 +746,7 @@
           !ctProfileId(item.id) || typeof item.username !== 'string' || (item.username && !ctProfileHandle(item.username)) ||
           typeof item.name !== 'string' || item.name.length > 200 || typeof item.text !== 'string' || item.text.length > 10000 ||
           !safeURL(item.avatar) || typeof item.savedAt !== 'number' || !Number.isFinite(item.savedAt) || item.savedAt < 0 ||
-          typeof item.createdAt !== 'string' || (item.createdAt && !Number.isFinite(Date.parse(item.createdAt))) ||
+          typeof item.createdAt !== 'string' || (item.createdAt && !ctTimestampParse(item.createdAt) && !Number.isFinite(Date.parse(item.createdAt))) ||
           !Array.isArray(item.media) || item.media.length > 16 || item.media.some(asset =>
             !keys(asset, ['type', 'url', 'poster']) || !['image', 'video'].includes(asset.type) ||
             !asset.url || !safeURL(asset.url) || !safeURL(asset.poster))) throw new Error('format');
@@ -786,8 +793,8 @@
   function ctProfileFavoriteDateRange(items) {
     let firstDate = Infinity; let lastDate = -Infinity; let dated = 0;
     for (const item of items) {
-      const date = Date.parse(item.createdAt);
-      if (!Number.isFinite(date)) continue;
+      const date = ctTimestampParse(item.createdAt)?.getTime();
+      if (date === undefined) continue;
       firstDate = Math.min(firstDate, date); lastDate = Math.max(lastDate, date); dated++;
     }
     if (!dated) return ctProfileText('保存した投稿の日付範囲：日付未確認', 'Saved Tweet date range: dates unavailable');
@@ -967,7 +974,7 @@
     return { id: post.id, username: user,
       name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : user,
       avatar: ctProfileURL(post.authorAvatar), text: typeof post.text === 'string' ? post.text.slice(0, 10000) : '',
-      createdAt: typeof (post.createdAt ?? post.created_at) === 'string' ? (post.createdAt ?? post.created_at) : '',
+      createdAt: ctTimestampPostValue(post),
       href: '/post/' + encodeURIComponent(post.id), media };
   }
   async function ctProfileLoadMedia(refresh = false) {
@@ -998,7 +1005,7 @@
         ctProfileUID() === auth.uid && ctProfileContext()?.user === user;
       const publish = () => {
         state.items = [...new Map([...state.postItems, ...state.replyItems].map(item => [item.id, item])).values()]
-          .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+          .sort((a, b) => (ctTimestampParse(b.createdAt)?.getTime() ?? -Infinity) - (ctTimestampParse(a.createdAt)?.getTime() ?? -Infinity));
         state.error = [state.postError, state.replyError].filter(Boolean).join(' ');
         ctProfileRenderMedia();
       };
@@ -1031,7 +1038,7 @@
         } else {
           const replies = repliesJSON.replies.map(item => item?.post).filter(post =>
             ctProfileId(post?.id) && ctProfileHandle(post.authorUsername) === user)
-            .sort((a, b) => (Date.parse(b.createdAt ?? b.created_at) || 0) - (Date.parse(a.createdAt ?? a.created_at) || 0));
+            .sort((a, b) => (ctTimestampPostDate(b)?.getTime() ?? -Infinity) - (ctTimestampPostDate(a)?.getTime() ?? -Infinity));
           const checked = replies.slice(0, 100);
           ctProfileRememberLikedPosts(checked, auth.uid, user);
           state.replyItems = checked.map(post => ctProfilePostItem(post, user)).filter(Boolean);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.16.0
+// @version      6.17.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -27,8 +27,10 @@
   /* @include motion */
   /* @include runtime */
   /* @include presentation */
+  /* @include timestamps */
   /* @include profile */
   /* @include favorite-capture */
+  /* @include reply-times */
   /* @include favorite-history */
   /* @include navigation */
   /* @include notification-filters */
@@ -1106,9 +1108,7 @@ if (/^just\s+now$/i.test(t)) {
     if (!el?.matches('span[title]') || !el.closest('article') ||
         el.closest('button,a,[role="button"]') ||
         !el.classList.contains('text-tl-app-text-muted') || !el.classList.contains('hover:underline')) return false;
-    const title = el.getAttribute('title');
-    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(title) &&
-      Number.isFinite(Date.parse(title));
+    return !!ctTimestampParse(el.getAttribute('title'));
   }
 
   function isNativeReplyTimestamp(el) {
@@ -1194,9 +1194,7 @@ if (/^just\s+now$/i.test(t)) {
     if (!el?.matches('span.text-tl-app-text-muted[title]') ||
         !el.closest('article') || el.closest('button,a,[role="button"]') ||
         !/^(?:edited|編集済み)$/i.test(clean(el.textContent))) return false;
-    const title = el.getAttribute('title');
-    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(title) ||
-        !Number.isFinite(Date.parse(title))) return false;
+    if (!ctTimestampParse(el.getAttribute('title'))) return false;
     // Both native tweet and inline-reply headers place the indicator directly
     // after a separator, alongside their author button and creation timestamp.
     const header = el.parentElement;
@@ -2171,52 +2169,9 @@ if (/^just\s+now$/i.test(t)) {
 
 
   function patchExactPostTime(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const articles = [];
-    if (scope instanceof Element && scope.matches('article')) articles.push(scope);
-    scope.querySelectorAll?.('article').forEach(a => articles.push(a));
-
-    for (const article of articles) {
-      if (!article.isConnected) continue;
-
-      // Only add the X-style timestamp to the Tweet detail/conversation view.
-      // Feed cards keep their compact relative timestamp.
-      const path = location.pathname;
-      const isDetail = /\/status\/|\/post\/|\/posts\//i.test(path) ||
-        !!article.querySelector('[data-testid*="reply" i] textarea, textarea[placeholder*="reply" i]');
-      if (!isDetail) continue;
-      if (article.querySelector('.ct-detail-post-time')) continue;
-
-      const timeEl = article.querySelector('time[datetime]');
-      let date = timeEl ? new Date(timeEl.getAttribute('datetime') || '') : null;
-
-      if (!date || Number.isNaN(date.getTime())) {
-        const candidates = [...article.querySelectorAll('[title],[datetime]')];
-        for (const el of candidates) {
-          const raw = el.getAttribute('datetime') || el.getAttribute('title') || '';
-          const d = new Date(raw);
-          if (!Number.isNaN(d.getTime())) { date = d; break; }
-        }
-      }
-      if (!date || Number.isNaN(date.getTime())) continue;
-
-      const stamp = document.createElement('div');
-      stamp.className = 'ct-detail-post-time';
-      const timeText = new Intl.DateTimeFormat('ja-JP', {
-        hour:'2-digit', minute:'2-digit', hour12:false
-      }).format(date);
-      const dateText = new Intl.DateTimeFormat('ja-JP', {
-        year:'numeric', month:'long', day:'numeric'
-      }).format(date);
-      stamp.textContent = `${dateText} · ${timeText}`;
-
-      // Put it below the Tweet body/media and above the action row when possible.
-      const actions = [...article.querySelectorAll('button')].map(b => b.parentElement)
-        .find(el => el && /reply|返信|repost|retweet|リツイート|like|お気に入り/i.test(el.textContent || ''));
-      if (actions?.parentElement) actions.parentElement.insertBefore(stamp, actions);
-      else article.append(stamp);
-    }
+    ctTimestampPatchExactPostTime(root);
   }
+
 
   function patchProfileJoinedDate(root = document) {
     if (!/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname)) return;
@@ -2300,6 +2255,7 @@ if (/^just\s+now$/i.test(t)) {
       patchComposeJapanese(root);
       patchNotificationFollowGrammar(root);
       patchAutoTranslation(root, 'ja');
+      ctReplyTimesEnhance(root);
       patchExactPostTime(root);
       patchInviteJoinedLabels(root);
       patchProfileJoinedDate(root);
@@ -2348,6 +2304,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.16.0 loaded'
+    '🐦 Classic Twitter JP v6.17.0 loaded'
   );
 })();
