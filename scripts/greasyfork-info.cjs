@@ -128,7 +128,7 @@ function render(edition) {
     `<h3>${japanese ? '版を選ぶ' : 'Choose an edition'}</h3>`,
     editionTable(edition.locale),
     `<p>${features}</p>`,
-    `<p>${japanese ? '過去のお気に入りが抜けているときは「便利ツール」→「読み込み済みのお気に入りを復元」。今の画面で読み込んだ分を保存します（1回40件まで）。全履歴は取得できません。' : 'For missing past Favorites, use Tools → Restore loaded Favorites. Saves already-favorited Tweets loaded on the current screen (up to 40 per run); the entire history cannot be retrieved.'}</p>`,
+    `<p>${japanese ? '過去のお気に入りは「便利ツール」→「過去の投稿から探す」。画面を開いたまま使い、「続きから探す」で再開できます（1回100ページまで）。返されるタイムラインの範囲で復元するため、全履歴は保証できません。プロフィールの「お気に入り」で検索・写真動画の絞り込み・JSONバックアップができます。' : 'For older Favorites: Tools → Search older posts, then Continue searching to resume (up to 100 pages per run while visible). Recovery covers returned timelines and cannot guarantee your entire history. Search/filter and save a JSON backup on your profile’s Favorites tab.'}</p>`,
     safariFeature,
     `<p>${link(readmeUrl, japanese ? '機能・保存データ・対応範囲の詳細' : 'Features, saved data and compatibility details')}</p>`
   ].filter(Boolean).join('\n') + '\n';

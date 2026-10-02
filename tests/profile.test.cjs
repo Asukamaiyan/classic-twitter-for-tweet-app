@@ -40,7 +40,7 @@ function harness(t, options = {}) {
   window.eval(`const CT_LOCALE='${options.locale || 'en'}'; const KEY={favorites:'legacy.favorites'}; const API_ORIGIN='https://api.tweet.app'; let favoritesActive=false; let ctPageActive=true; ${source}
     window.profile={patch:patchFavoriteProfileTab, close:closeFavoritesPanel, render:renderFavoritesPanel, media:ctProfileLoadMedia, mutes:ctProfileLoadFavoriteMutes, state:ctProfileState,
     save:ctProfileSaveFavorite, remove:ctProfileRemoveFavorite, remember:ctProfileRememberLikedPosts, load:ctProfileLoadFavorites, import:ctProfileImportFavorites, assets:ctProfileMediaAssets,
-    context:ctProfileContext, viewerClose:ctProfileCloseViewer, setActive:value=>{ctPageActive=value;}};`);
+    context:ctProfileContext, viewerClose:ctProfileCloseViewer, backup:ctProfileFavoriteBackup, backupParts:ctProfileFavoriteBackupParts, importBackup:ctProfileImportFavoriteBackup, setActive:value=>{ctPageActive=value;}};`);
   return { window, document: window.document, api: window.profile, calls,
     pages: value => { pages = value; }, replies: value => { userReplies = value; }, muted: value => { mutedPages = value; }, override: value => { override = value; },
     setAuth: (value, user = 'other') => { auth = value; accountUser = user; window.ctNetworkState.authUID = auth?.uid || null; },
@@ -600,8 +600,9 @@ test('Media restores confirmed older Favorites without requiring images and pres
   assert.deepEqual(Array.from(h.api.load(), row => row.id), ['existing', 'older-liked', 'liked-reply']);
   assert.equal(h.api.load()[0].savedAt, 123); const before = JSON.stringify(h.api.load());
   await h.api.media(true); assert.equal(JSON.stringify(h.api.load()), before);
-  await h.select('favorites'); assert.deepEqual(favoriteRows(h), ['existing', 'older-liked', 'liked-reply']);
-  assert.match(h.document.getElementById('ct-favorites-panel').textContent, /entire past history cannot be retrieved/);
+  await h.select('favorites'); assert.equal(favoriteRows(h).at(-1), 'existing');
+  assert.deepEqual(new Set(favoriteRows(h)), new Set(['existing', 'older-liked', 'liked-reply']));
+  assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Use Tools to restore Favorites from the past timeline.*entire past history is not guaranteed/);
 });
 
 test('read restoration rejects unconfirmed, deleted, muted, reposted, foreign or stale-account data', async t => {
@@ -622,4 +623,200 @@ test('an old hasLiked read cannot revive a newer native Unlike, but a confirmed 
   h.api.remove('removed', 'uid-viewer'); h.api.remember([liked], 'uid-viewer', 'viewer'); assert.equal(h.api.load().length, 0);
   h.api.save(item('removed', { username: 'viewer' }), 'uid-viewer'); h.api.remember([liked], 'uid-viewer', 'viewer'); assert.equal(h.api.load().length, 1);
   h.setAuth({ uid: 'uid-other', token: 'token-other' }); assert.equal(h.api.remember([liked], 'uid-viewer', 'viewer'), 0); assert.equal(h.api.load().length, 0);
+});
+
+test('Favorites retain more than 500 records and mount progressively without rebuilding existing media', async t => {
+  const h = harness(t); await h.ready();
+  const data = Array.from({ length: 620 }, (_, index) => item('archive-' + index, { savedAt: 620 - index,
+    media: index === 0 ? [{ type: 'video', url: 'https://images.example/video.mp4', poster: '' }] : [] }));
+  h.window.localStorage.setItem('legacy.favorites:uid:uid-viewer', JSON.stringify(data));
+  assert.equal(h.api.load().length, 620);
+  h.api.save(item('new', { savedAt: 1000 })); assert.equal(h.api.load().length, 621);
+  assert.equal(h.api.load().at(-1).id, 'archive-619'); await h.select('favorites');
+  assert.equal(favoriteRows(h).length, 50);
+  const row = h.document.querySelector('[data-ct-profile-post=archive-0]'); const video = row.querySelector('video'); video.currentTime = 24;
+  const more = favoriteControl(h, 'Show 50 more'); more.focus(); more.click();
+  assert.equal(favoriteRows(h).length, 100); assert.equal(h.document.querySelector('[data-ct-profile-post=archive-0]'), row);
+  assert.equal(favoriteControl(h, 'Show 50 more'), more); assert.equal(h.document.activeElement, more);
+  assert.equal(row.querySelector('video'), video); assert.equal(video.currentTime, 24);
+  assert.match(h.document.getElementById('ct-favorite-count').textContent, /100 of 621.*621 saved/);
+  assert.equal(h.api.load().length, 621);
+});
+
+test('Favorites search, media filters and sorting use local data and preserve input focus and IME', async t => {
+  const h = harness(t); await h.ready();
+  h.api.save(item('old-photo', { name: 'Alice', text: '星の写真', savedAt: 10, createdAt: '2020-01-01T00:00:00Z', media: [{ type: 'image', url: 'https://images.example/photo.jpg', poster: '' }] }));
+  h.api.save(item('new-video', { username: 'bob', name: 'Bob', text: '星の動画', savedAt: 30, createdAt: '2026-01-01T00:00:00Z', media: [{ type: 'video', url: 'https://images.example/video.mp4', poster: '' }] }));
+  h.api.save(item('middle', { username: 'carol', text: 'Other words', savedAt: 20, createdAt: '2023-01-01T00:00:00Z' }));
+  await h.select('favorites'); const before = h.calls.length;
+  assert.deepEqual(favoriteRows(h), ['new-video', 'middle', 'old-photo']);
+  const query = h.document.getElementById('ct-favorite-query'); const tools = query.closest('[data-ct-favorite-tools]'); query.focus();
+  query.dispatchEvent(new h.window.CompositionEvent('compositionstart', { bubbles: true })); query.value = '星';
+  query.dispatchEvent(new h.window.InputEvent('input', { bubbles: true, isComposing: true }));
+  h.api.save(item('extra', { savedAt: 0 }));
+  assert.equal(h.document.getElementById('ct-favorite-query'), query); assert.equal(h.document.activeElement, query); assert.equal(query.value, '星');
+  assert.equal(favoriteRows(h).length, 4);
+  query.dispatchEvent(new h.window.CompositionEvent('compositionend', { bubbles: true }));
+  assert.deepEqual(favoriteRows(h), ['new-video', 'old-photo']); assert.equal(query.closest('[data-ct-favorite-tools]'), tools);
+  const video = h.document.querySelector('[data-ct-profile-post=new-video] video'); video.currentTime = 9;
+  const sort = h.document.getElementById('ct-favorite-sort'); sort.value = 'oldest'; sort.dispatchEvent(new h.window.Event('change', { bubbles: true }));
+  assert.deepEqual(favoriteRows(h), ['old-photo', 'new-video']); assert.equal(h.document.querySelector('[data-ct-profile-post=new-video] video'), video); assert.equal(video.currentTime, 9);
+  const type = h.document.getElementById('ct-favorite-type'); type.value = 'video'; type.dispatchEvent(new h.window.Event('change', { bubbles: true }));
+  assert.deepEqual(favoriteRows(h), ['new-video']);
+  query.value = '@BOB'; query.dispatchEvent(new h.window.Event('input', { bubbles: true })); assert.deepEqual(favoriteRows(h), ['new-video']);
+  query.value = 'not found'; query.dispatchEvent(new h.window.Event('input', { bubbles: true }));
+  assert.deepEqual(favoriteRows(h), []); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /No Favorites match/);
+  assert.equal(h.calls.length, before); assert.equal(h.api.load().length, 4);
+});
+
+test('search does not reveal muted snapshots and progress resets when conditions change', async t => {
+  const h = harness(t); await h.ready();
+  h.window.localStorage.setItem('legacy.favorites:uid:uid-viewer', JSON.stringify([
+    item('hidden', { text: 'secret needle', username: 'alice' }),
+    ...Array.from({ length: 105 }, (_, index) => item('visible-' + index, { text: 'needle', username: 'bob' }))
+  ]));
+  h.muted([{ success: true, users: [mutedUser('alice')], nextCursor: null }]); await h.select('favorites');
+  favoriteControl(h, 'Show 50 more').click(); assert.equal(favoriteRows(h).length, 100);
+  const query = h.document.getElementById('ct-favorite-query'); query.value = 'needle'; query.dispatchEvent(new h.window.Event('input', { bubbles: true }));
+  assert.equal(favoriteRows(h).length, 50); assert.ok(!favoriteRows(h).includes('hidden'));
+  query.value = 'secret'; query.dispatchEvent(new h.window.Event('input', { bubbles: true }));
+  assert.deepEqual(favoriteRows(h), []); assert.doesNotMatch(h.document.getElementById('ct-favorites-panel').textContent, /secret needle/);
+  assert.equal(h.api.load().length, 106);
+});
+
+test('local Favorite backups contain only this account snapshots and merge without altering saved records', async t => {
+  const h = harness(t); await h.ready();
+  h.api.save(item('existing', { savedAt: 42, text: 'Keep this body', createdAt: '2020-01-01T00:00:00Z' }));
+  const backup = JSON.parse(h.api.backup());
+  assert.equal(backup.uid, 'uid-viewer'); assert.equal(backup.format, 'classic-twitter-favorites'); assert.equal(backup.items[0].href, undefined);
+  assert.doesNotMatch(JSON.stringify(backup), /token-viewer|Authorization|firebase/);
+  backup.items[0].text = 'Older backup replacement'; backup.items[0].savedAt = 1;
+  backup.items.push({ ...backup.items[0], id: 'added', text: 'Added <script> Like Edited' });
+  backup.items.push({ ...backup.items[0], id: 'added', text: 'Duplicate should not replace first' });
+  const before = h.calls.length; assert.equal(h.api.importBackup(JSON.stringify(backup)), 1);
+  assert.equal(h.calls.length, before); const data = h.api.load();
+  assert.deepEqual(Array.from(data, row => row.id), ['existing', 'added']); assert.equal(data[0].text, 'Keep this body'); assert.equal(data[0].savedAt, 42);
+  assert.equal(data[1].text, 'Added <script> Like Edited'); assert.equal(data[1].href, 'https://app.tweet.app/post/added');
+  assert.equal(h.api.importBackup(JSON.stringify(backup)), 0);
+  await h.select('favorites'); assert.equal(h.document.querySelector('#ct-favorites-panel script'), null);
+});
+
+test('backup imports reject other accounts, invalid fields and excessive sizes atomically', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('kept', { savedAt: 9 }));
+  const valid = JSON.parse(h.api.backup()); const before = h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer');
+  const variants = [
+    { ...valid, uid: 'uid-other' }, { ...valid, version: 2 }, { ...valid, token: 'unexpected' },
+    { ...valid, items: [{ ...valid.items[0], avatar: 'javascript:alert(1)' }] },
+    { ...valid, items: [{ ...valid.items[0], savedAt: '9' }] },
+    { ...valid, items: [{ ...valid.items[0], media: [{ type: 'image', url: 'https://user:password@example.test/a', poster: '' }] }] },
+    { ...valid, items: Array(100001).fill(null) }
+  ];
+  for (const value of variants) { assert.throws(() => h.api.importBackup(JSON.stringify(value))); assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), before); }
+  assert.throws(() => h.api.importBackup(' '.repeat(32 * 1024 * 1024 + 1)), /size/);
+  assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), before);
+  h.setAuth({ uid: 'uid-other', token: 'token-other' }); assert.throws(() => h.api.backup('uid-viewer'), /account/);
+  assert.throws(() => h.api.importBackup(JSON.stringify(valid), 'uid-viewer'), /account/); assert.equal(h.api.load().length, 0);
+});
+
+test('file selection is explicit, imports only local backup and rejects late results after account change', async t => {
+  const h = harness(t, { locale: 'ja' }); await h.ready(); h.api.save(item('kept')); const backup = JSON.parse(h.api.backup());
+  backup.items.push({ ...backup.items[0], id: 'new-file' }); await h.select('favorites');
+  const file = h.document.getElementById('ct-favorite-import-file'); let picker = 0; file.click = () => picker++;
+  h.document.getElementById('ct-favorite-import').click(); assert.equal(picker, 1); assert.equal(h.api.load().length, 1);
+  Object.defineProperty(file, 'files', { configurable: true, value: [{ size: 100, text: async () => JSON.stringify(backup) }] });
+  file.dispatchEvent(new h.window.Event('change', { bubbles: true })); await tick(); await tick();
+  assert.equal(h.api.load().length, 2); assert.match(h.document.getElementById('ct-favorite-backup-status').textContent, /1件を取り込みました.*変更していません/);
+  let release;
+  Object.defineProperty(file, 'files', { configurable: true, value: [{ size: 100, text: () => new Promise(resolve => { release = resolve; }) }] });
+  file.dispatchEvent(new h.window.Event('change', { bubbles: true }));
+  h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.route('/profile', 'other'); await h.ready(); await h.select('favorites');
+  release(JSON.stringify(backup)); await tick(); await tick();
+  assert.equal(h.api.load().length, 0); assert.equal(h.document.getElementById('ct-favorite-backup-status').textContent, '');
+  file.dispatchEvent(new h.window.Event('change', { bubbles: true })); assert.equal(h.api.load().length, 0);
+});
+
+test('quota failure preserves the entire archive in memory and allows a complete local backup', async t => {
+  const h = harness(t); await h.ready();
+  const data = Array.from({ length: 550 }, (_, index) => item('stored-' + index, { savedAt: index }));
+  h.window.localStorage.setItem('legacy.favorites:uid:uid-viewer', JSON.stringify(data));
+  const proto = Object.getPrototypeOf(h.window.localStorage); const original = proto.setItem;
+  proto.setItem = () => { throw new Error('Quota'); }; t.after(() => { proto.setItem = original; });
+  h.api.save(item('unsaved', { savedAt: 1000 })); assert.equal(h.api.load().length, 551);
+  const backup = JSON.parse(h.api.backup()); assert.equal(backup.items.length, 551); assert.ok(backup.items.some(row => row.id === 'stored-549'));
+  await h.select('favorites'); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Save a backup before closing/);
+  backup.items.push({ ...backup.items[0], id: 'import-memory' }); assert.equal(h.api.importBackup(JSON.stringify(backup)), 1);
+  assert.equal(h.api.load().length, 552); assert.equal(JSON.parse(h.api.backup()).items.length, 552);
+});
+
+test('legacy import keeps all older records and never replaces existing snapshots on duplicates', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('existing', { text: 'Keep', savedAt: 77 }));
+  h.window.localStorage.setItem('legacy.favorites', JSON.stringify([
+    item('existing', { text: 'Legacy replacement', savedAt: 1 }), ...Array.from({ length: 550 }, (_, index) => item('legacy-' + index))
+  ])); h.api.import();
+  assert.equal(h.api.load().length, 551); assert.equal(h.api.load()[0].text, 'Keep'); assert.equal(h.api.load()[0].savedAt, 77);
+  assert.equal(h.api.load().at(-1).id, 'legacy-549'); assert.equal(h.window.localStorage.getItem('legacy.favorites:owner'), 'uid-viewer');
+});
+
+test('aggregate quota-held archives export in importable parts through explicit downloads and clean up on route changes', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('template')); const base = JSON.parse(h.api.backup());
+  const first = JSON.stringify({ ...base, items: Array.from({ length: 1900 }, (_, index) => ({ ...base.items[0], id: 'first-' + index, text: 'x'.repeat(10000) })) });
+  const second = JSON.stringify({ ...base, items: Array.from({ length: 1900 }, (_, index) => ({ ...base.items[0], id: 'second-' + index, text: 'y'.repeat(10000) })) });
+  assert.ok(Buffer.byteLength(first) < 32 * 1024 * 1024); assert.ok(Buffer.byteLength(second) < 32 * 1024 * 1024);
+  const proto = Object.getPrototypeOf(h.window.localStorage); const original = proto.setItem;
+  proto.setItem = () => { throw new Error('Quota'); }; t.after(() => { proto.setItem = original; });
+  assert.equal(h.api.importBackup(first), 1900); assert.equal(h.api.importBackup(second), 1900);
+  assert.equal(h.api.load().length, 3801); assert.ok(h.api.state.dirtyMemory.has('uid-viewer'));
+  const parts = Array.from(h.api.backupParts()); assert.equal(parts.length, 2);
+  assert.equal(parts.reduce((count, text) => count + JSON.parse(text).items.length, 0), 3801);
+  for (const text of parts) { assert.ok(Buffer.byteLength(text) <= 32 * 1024 * 1024); assert.ok(JSON.parse(text).items.length <= 100000); }
+  const target = harness(t); await target.ready();
+  for (const text of parts) target.api.importBackup(text);
+  assert.equal(target.api.load().length, 3801); assert.equal(target.api.load().at(-1).id, 'second-1899');
+  assert.equal(target.api.load().find(row => row.id === 'first-0').text.length, 10000);
+  await h.select('favorites'); const downloads = []; const revoked = []; let serial = 0;
+  h.window.URL.createObjectURL = () => 'blob:backup-' + (++serial); h.window.URL.revokeObjectURL = url => revoked.push(url);
+  h.window.HTMLAnchorElement.prototype.click = function() { downloads.push({ href: this.href, file: this.download }); };
+  h.document.getElementById('ct-favorite-export').click(); await tick(); await tick();
+  assert.equal(downloads.length, 0); assert.equal(serial, 0);
+  const partButtons = [...h.document.querySelectorAll('#ct-favorite-backup-parts button')]; assert.equal(partButtons.length, 2);
+  assert.match(h.document.getElementById('ct-favorite-backup-status').textContent, /Split the archive into 2 files/);
+  partButtons[0].click(); await tick(); assert.equal(downloads.length, 1); assert.match(downloads[0].file, /part-1-of-2\.json$/);
+  const firstView = h.api.state.favoriteView; const oldParts = firstView.backupParts;
+  h.document.getElementById('ct-favorite-export').click(); await tick(); await tick();
+  assert.notEqual(firstView.backupParts, oldParts); assert.ok(revoked.includes('blob:backup-1')); assert.equal(downloads.length, 1);
+  partButtons[1].click(); await tick(); assert.equal(downloads.length, 1);
+  h.document.querySelector('#ct-favorite-backup-parts button').click(); await tick(); assert.equal(downloads.length, 2);
+  h.route('/feed', 'viewer'); h.api.patch(); assert.equal(firstView.backupParts, null); assert.equal(firstView.backupURLs.size, 0);
+  assert.ok(revoked.includes('blob:backup-2')); assert.equal(h.document.querySelector('#ct-favorite-backup-parts'), null);
+  const before = downloads.length; partButtons[0].click(); await tick(); assert.equal(downloads.length, before);
+  h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.route('/profile', 'other'); await h.ready(); await h.select('favorites');
+  assert.equal(h.document.querySelectorAll('#ct-favorite-backup-parts button').length, 0);
+  assert.throws(() => h.api.backupParts('uid-viewer'), /account/);
+});
+
+test('successful legacy import after quota clears dirty memory so later same-account disk updates are preserved', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('existing'));
+  const proto = Object.getPrototypeOf(h.window.localStorage); const original = proto.setItem;
+  proto.setItem = () => { throw new Error('Quota'); }; h.api.save(item('memory')); assert.ok(h.api.state.dirtyMemory.has('uid-viewer'));
+  proto.setItem = original;
+  h.window.localStorage.setItem('legacy.favorites', JSON.stringify([item('legacy')])); h.api.import();
+  assert.equal(h.api.state.dirtyMemory.has('uid-viewer'), false); assert.equal(h.api.state.storageError, false);
+  const disk = JSON.parse(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer')); disk.push(item('other-tab'));
+  h.window.localStorage.setItem('legacy.favorites:uid:uid-viewer', JSON.stringify(disk));
+  h.window.dispatchEvent(new h.window.StorageEvent('storage', { key: 'legacy.favorites:uid:uid-viewer' }));
+  h.api.save(item('latest')); assert.ok(h.api.load().some(row => row.id === 'other-tab'));
+  assert.deepEqual(new Set(Array.from(h.api.load(), row => row.id)), new Set(['existing', 'memory', 'legacy', 'other-tab', 'latest']));
+});
+
+test('Favorites quota warnings follow the affected UID and remain visible after another account saves successfully', async t => {
+  const h = harness(t); await h.ready(); const proto = Object.getPrototypeOf(h.window.localStorage); const original = proto.setItem;
+  proto.setItem = () => { throw new Error('Quota'); }; h.api.save(item('a-memory')); proto.setItem = original;
+  await h.select('favorites'); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Browser storage is unavailable/);
+  h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.route('/profile', 'other'); await h.ready(); await h.select('favorites');
+  assert.doesNotMatch(h.document.getElementById('ct-favorites-panel').textContent, /Browser storage is unavailable/);
+  h.api.save(item('b-stored')); assert.equal(h.api.state.storageError, false);
+  assert.doesNotMatch(h.document.getElementById('ct-favorites-panel').textContent, /Browser storage is unavailable/);
+  h.setAuth({ uid: 'uid-viewer', token: 'token-viewer' }, 'viewer'); h.route('/profile', 'viewer'); await h.ready(); await h.select('favorites');
+  assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Browser storage is unavailable/);
+  assert.equal(h.api.load()[0].id, 'a-memory');
 });

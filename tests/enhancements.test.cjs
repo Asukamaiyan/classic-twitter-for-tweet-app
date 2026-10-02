@@ -65,6 +65,33 @@ test('Favorites restoration is explicit and reports partial recovery or a retrya
   assert.equal(button.disabled,false);
 });
 
+test('historical recovery starts only on a click and updates pause, resume, terminal and storage feedback', async t => {
+  let state={pages:0,scanned:0,recovered:0,busy:false},runs=0,stops=0,restarts=0;
+  const {document,window}=setup(t,{options:{getFavoriteHistoryStatus:()=>state,
+    runFavoriteHistory:()=>{runs++;state={...state,busy:true};},
+    stopFavoriteHistory:()=>{stops++;state={...state,busy:false,paused:true};},
+    restartFavoriteHistory:()=>{restarts++;state={pages:0,busy:true};}}});
+  const run=document.getElementById('ct-history-run'),stop=document.getElementById('ct-history-stop'),restart=document.getElementById('ct-history-restart');
+  assert.equal(runs,0);assert.equal(stop.disabled,true);run.click();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(runs,1);assert.equal(run.disabled,true);assert.equal(restart.disabled,true);assert.equal(stop.disabled,false);
+  stop.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(stops,1);assert.match(document.getElementById('ct-history-status').textContent,/Paused/);
+  state={pages:3,scanned:60,recovered:7,busy:false};window.dispatchEvent(new window.Event('ct-favorite-history-change'));
+  assert.equal(run.textContent,'Continue searching');assert.match(document.getElementById('ct-history-status').textContent,/3 pages.*60 posts.*7/);
+  state={...state,done:true};window.dispatchEvent(new window.Event('ct-favorite-history-change'));assert.equal(run.disabled,true);
+  assert.match(document.getElementById('ct-history-status').textContent,/end of the timelines returned/);
+  restart.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(restarts,1);
+  state={...state,busy:false,warning:'storage'};window.dispatchEvent(new window.Event('ct-favorite-history-change'));
+  assert.match(document.getElementById('ct-history-status').textContent,/Back up Favorites as JSON/);
+});
+
+test('history controls explain the service boundary in Japanese and unsubscribe when destroyed', t => {
+  let reads=0;
+  const {document,window,controller}=setup(t,{options:{locale:'ja',getFavoriteHistoryStatus:()=>{reads++;return {};},runFavoriteHistory:()=>{},stopFavoriteHistory:()=>{},restartFavoriteHistory:()=>{}}});
+  assert.match(document.getElementById('ct-history-help').textContent,/全お気に入りを保証するものではありません/);
+  assert.equal(document.getElementById('ct-history-run').textContent,'過去の投稿から探す');
+  controller.destroy();const before=reads;window.dispatchEvent(new window.Event('ct-favorite-history-change'));assert.equal(reads,before);
+});
+
 test('save feedback stays outside the scrolling form body and inputs reference visible help', t => {
   const { document, window } = setup(t);
   const panel = document.getElementById('ct-local-tools-panel');

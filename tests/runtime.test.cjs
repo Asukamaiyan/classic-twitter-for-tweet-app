@@ -69,6 +69,10 @@ function harness(t, html = '', options = {}) {
   };
   window.ctCaptureFavoriteClick = () => {};
   window.ctRestoreVisibleFavorites = async () => ({saved:0,unresolved:0});
+  window.ctFavoriteHistoryStatus = () => ({pages:0});
+  window.ctRunFavoriteHistory = async () => {};
+  window.ctStopFavoriteHistory = () => {};
+  window.ctRestartFavoriteHistory = async () => {};
   window.eval(`
     const KEY = { autoTranslate: 'autoTranslate' };
     const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};

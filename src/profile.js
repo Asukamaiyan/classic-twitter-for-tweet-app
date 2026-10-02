@@ -4,8 +4,8 @@
     path: '', user: '', uid: null, authSeen: undefined, accountUser: '', active: '', tablist: null,
     timeline: null, panel: null, sequence: 0, identityBusy: false, identityRetry: 0,
     nativeSelection: new Map(), tabsBound: new WeakSet(), rendered: '', media: null, favoriteMutes: null,
-    storageBound: false, storageError: false, memory: new Map(), dirtyMemory: new Set(), viewer: null,
-    rowItems: new WeakMap(), muteCache: new Map(), mediaCache: new Map(), favoriteRemovals: new Map()
+    storageBound: false, storageError: false, storageFailureUID: null, memory: new Map(), dirtyMemory: new Set(), viewer: null,
+    rowItems: new WeakMap(), muteCache: new Map(), mediaCache: new Map(), favoriteRemovals: new Map(), favoriteView: null
   };
   function ctProfileText(ja, en) { return CT_LOCALE === 'ja' ? ja : en; }
   function ctProfileId(value) {
@@ -38,18 +38,25 @@
   }
   function ctProfileFavoriteItems(data) {
     if (!Array.isArray(data)) return [];
-    return [...new Map(data.filter(item => ctProfileId(item?.id)).slice(0, 500).map(item => [item.id, {
+    // Keep the first occurrence, including its saved time. An archive must not
+    // silently discard older records when the collection grows past 500.
+    const items = new Map();
+    for (const item of data) {
+      if (!ctProfileId(item?.id) || items.has(item.id)) continue;
+      items.set(item.id, {
       id: item.id, username: ctProfileHandle(item.username) || '',
       name: typeof item.name === 'string' ? item.name.slice(0, 200) : '',
       text: typeof item.text === 'string' ? item.text.slice(0, 10000) : '',
-      avatar: ctProfileURL(item.avatar), savedAt: Number(item.savedAt) || 0,
+      avatar: ctProfileURL(item.avatar), savedAt: Number.isFinite(Number(item.savedAt)) && Number(item.savedAt) >= 0 ? Number(item.savedAt) : 0,
       createdAt: typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) ? item.createdAt : '',
       href: `${location.origin}/post/${encodeURIComponent(item.id)}`,
       media: Array.isArray(item.media) ? item.media.slice(0, 16).filter(asset =>
         ['image', 'video'].includes(asset?.type) && ctProfileURL(asset.url)).map(asset => ({
           type: asset.type, url: ctProfileURL(asset.url), poster: ctProfileURL(asset.poster)
         })) : []
-    }])).values()];
+      });
+    }
+    return [...items.values()];
   }
   function ctProfileFavoriteKey(uid) { return KEY.favorites + ':uid:' + encodeURIComponent(uid); }
   function ctProfileLoadFavorites() {
@@ -67,17 +74,19 @@
     if (!uid || uid !== ctProfileUID()) return false;
     const items = ctProfileFavoriteItems(data);
     ctProfileState.memory.set(uid, items);
+    if (ctProfileState.favoriteView?.uid === uid) ctProfileClearFavoriteBackupParts();
     try {
       localStorage.setItem(ctProfileFavoriteKey(uid), JSON.stringify(items));
       ctProfileState.storageError = false; ctProfileState.dirtyMemory.delete(uid);
-    } catch { ctProfileState.storageError = true; ctProfileState.dirtyMemory.add(uid); }
+      if (ctProfileState.storageFailureUID === uid) ctProfileState.storageFailureUID = null;
+    } catch { ctProfileState.storageError = true; ctProfileState.storageFailureUID = uid; ctProfileState.dirtyMemory.add(uid); }
     if (favoritesActive) renderFavoritesPanel();
     return true;
   }
   function ctProfileSaveFavorite(item, expectedUid = ctProfileUID()) {
     if (!ctProfileId(item?.id) || !expectedUid || expectedUid !== ctProfileUID()) return false;
     ctProfileState.favoriteRemovals.get(expectedUid)?.delete(item.id);
-    return ctProfileWriteFavorites(expectedUid, [item, ...ctProfileLoadFavorites().filter(row => row.id !== item.id)].slice(0, 500));
+    return ctProfileWriteFavorites(expectedUid, [item, ...ctProfileLoadFavorites().filter(row => row.id !== item.id)]);
   }
   function ctProfileRemoveFavorite(id, expectedUid = ctProfileUID()) {
     if (!ctProfileId(id) || !expectedUid || expectedUid !== ctProfileUID()) return false;
@@ -129,12 +138,14 @@
     if (!uid || uid !== ctProfileUID() || !legacy.length) return;
     try {
       const merged = [...ctProfileLoadFavorites(), ...legacy];
-      const items = ctProfileFavoriteItems(merged).slice(0, 500);
+      const items = ctProfileFavoriteItems(merged);
       localStorage.setItem(ctProfileFavoriteKey(uid), JSON.stringify(items));
       localStorage.setItem(KEY.favorites + ':owner', uid);
       ctProfileState.memory.set(uid, items);
-      ctProfileState.storageError = false;
-    } catch { ctProfileState.storageError = true; }
+      ctProfileState.storageError = false; ctProfileState.dirtyMemory.delete(uid);
+      if (ctProfileState.storageFailureUID === uid) ctProfileState.storageFailureUID = null;
+      if (ctProfileState.favoriteView?.uid === uid) ctProfileClearFavoriteBackupParts();
+    } catch { ctProfileState.storageError = true; ctProfileState.storageFailureUID = uid; }
     renderFavoritesPanel();
   }
   function ctProfileNativeReplyEditor(el, timeline) {
@@ -205,6 +216,14 @@
       .ct-profile-empty{padding:32px 16px;text-align:center;color:var(--color-tl-app-text-muted,#657786);font-size:14px}
       .ct-profile-control{min-height:44px;padding:8px 14px;border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:4px 0}
       .ct-profile-control:disabled{cursor:wait;opacity:.6}
+      .ct-favorite-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+      .ct-favorite-tools label{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 140px}
+      .ct-favorite-tools input[type=search],.ct-favorite-tools select{box-sizing:border-box;width:100%;min-height:44px;min-width:0;padding:8px;border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;background:var(--color-tl-app-input-bg,transparent);color:inherit;font:inherit;font-size:16px}
+      .ct-favorite-tools input:focus-visible,.ct-favorite-tools select:focus-visible{outline:2px solid #55acee;outline-offset:1px}
+      .ct-favorite-tools input[type=file]{display:none}
+      .ct-favorite-tools .ct-profile-control{margin:0}
+      .ct-favorite-summary{flex-basis:100%;overflow-wrap:anywhere}
+      #ct-favorite-backup-status[data-error=true]{color:var(--color-tl-app-danger,#c23636)}
       .ct-profile-row{display:flex;gap:12px;padding:16px;border-bottom:1px solid var(--color-tl-app-border,#8b98a544)}
       .ct-profile-avatar{width:40px;height:40px;flex:none;border-radius:4px;object-fit:cover}
       .ct-profile-row-main{min-width:0;flex:1}
@@ -287,6 +306,7 @@
     ctProfileCloseViewer();
   }
   function closeFavoritesPanel() {
+    ctProfileClearFavoriteBackupParts();
     ctProfileState.sequence++;
     ctProfileState.favoriteMutes = null;
     ctProfileState.active = ''; favoritesActive = false;
@@ -306,9 +326,11 @@
     if (ctProfileState.storageBound) return;
     ctProfileState.storageBound = true;
     window.addEventListener('storage', event => {
-      if (event.key === ctProfileFavoriteKey(ctProfileUID() || '') || event.key === KEY.favorites + ':owner') renderFavoritesPanel();
+      if (event.key === ctProfileFavoriteKey(ctProfileUID() || '') || event.key === KEY.favorites + ':owner') {
+        ctProfileClearFavoriteBackupParts(); renderFavoritesPanel();
+      }
     });
-    window.addEventListener('pagehide', ctProfileCloseViewer);
+    window.addEventListener('pagehide', () => { ctProfileCloseViewer(); ctProfileClearFavoriteBackupParts(); });
     document.addEventListener('click', event => {
       const button = event.target.closest?.('button');
       if (!button || button.disabled || button.closest('[data-ct-owned],[data-ct-local-ui],[data-user-content],.tl-user-text,.whitespace-pre-wrap,.break-words,[contenteditable]')) return;
@@ -376,6 +398,7 @@
       if (type === 'favorites' && (!ctProfileUID() || ctProfileState.accountUser !== context.user)) return;
       if (ctProfileState.active === type) return;
       ctProfileCloseViewer(); ctProfileState.sequence++;
+      if (type !== 'favorites') ctProfileClearFavoriteBackupParts();
       ctProfileState.active = type; favoritesActive = type === 'favorites'; ctProfileState.rendered = '';
       ctProfileState.favoriteMutes = null;
       ctProfileShow(context);
@@ -614,6 +637,186 @@
       if (ctProfileFavoriteMuteCurrent(state, sequence)) renderFavoritesPanel();
     }
   }
+  const CT_FAVORITE_BACKUP_BYTES = 32 * 1024 * 1024;
+  const CT_FAVORITE_BACKUP_ROWS = 100000;
+  function ctProfileFavoriteStorageError(uid = ctProfileUID()) {
+    return !!uid && (ctProfileState.dirtyMemory.has(uid) || ctProfileState.storageFailureUID === uid);
+  }
+  function ctProfileFavoriteView() {
+    const uid = ctProfileUID();
+    if (!ctProfileState.favoriteView || ctProfileState.favoriteView.uid !== uid) {
+      ctProfileClearFavoriteBackupParts();
+      ctProfileState.favoriteView = { uid, query: '', type: 'all', sort: 'saved', limit: 50, message: '', error: false, busy: false,
+        backupParts: null, backupRevision: 0, backupURLs: new Map() };
+    }
+    return ctProfileState.favoriteView;
+  }
+  function ctProfileFavoriteViewCurrent(view) {
+    return !!view?.uid && ctProfileState.favoriteView === view && view.uid === ctProfileUID() &&
+      favoritesActive && ctProfileState.active === 'favorites' && ctProfileState.uid === view.uid &&
+      ctProfileState.accountUser === ctProfileContext()?.user;
+  }
+  function ctProfileFavoriteMessage(view, text, error = false) {
+    if (!ctProfileFavoriteViewCurrent(view)) return;
+    view.message = text; view.error = error; renderFavoritesPanel();
+  }
+  function ctProfileFavoriteBackupParts(uid = ctProfileUID()) {
+    if (!uid || uid !== ctProfileUID()) throw new Error('account');
+    const header = JSON.stringify({ format: 'classic-twitter-favorites', version: 1, uid,
+      account: ctProfileState.accountUser, exportedAt: new Date().toISOString() }).slice(0, -1) + ',"items":[';
+    const overhead = new Blob([header + ']}']).size;
+    const parts = []; let chunks = []; let bytes = overhead;
+    for (const { href, ...item } of ctProfileLoadFavorites()) {
+      const chunk = JSON.stringify(item); const size = new Blob([chunk]).size;
+      // Each normalized record is bounded well below one part's byte limit.
+      // Split the whole archive; never trim old rows after storage quota fails.
+      if (chunks.length && (chunks.length >= CT_FAVORITE_BACKUP_ROWS || bytes + 1 + size > CT_FAVORITE_BACKUP_BYTES)) {
+        parts.push(header + chunks.join(',') + ']}'); chunks = []; bytes = overhead;
+      }
+      bytes += (chunks.length ? 1 : 0) + size; chunks.push(chunk);
+    }
+    if (chunks.length || !parts.length) parts.push(header + chunks.join(',') + ']}');
+    return parts;
+  }
+  function ctProfileFavoriteBackup(uid = ctProfileUID()) {
+    const parts = ctProfileFavoriteBackupParts(uid);
+    if (parts.length !== 1) throw new Error('parts');
+    return parts[0];
+  }
+  function ctProfileClearFavoriteBackupParts(view = ctProfileState.favoriteView) {
+    if (!view) return;
+    for (const [url, timer] of view.backupURLs || []) {
+      clearTimeout(timer); try { URL.revokeObjectURL(url); } catch {}
+    }
+    view.backupURLs?.clear(); view.backupParts = null; view.backupRevision = (view.backupRevision || 0) + 1;
+    view.message = '';
+    ctProfileState.panel?.querySelector('#ct-favorite-backup-parts')?.replaceChildren();
+  }
+  function ctProfileDownloadFavoriteBackup(view, text, index = 0, total = 1) {
+    if (!ctProfileFavoriteViewCurrent(view)) return;
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url;
+    link.download = 'tweet-favorites-' + new Date().toISOString().slice(0, 10) + (total > 1 ? `-part-${index + 1}-of-${total}` : '') + '.json';
+    document.body.append(link);
+    try { link.click(); }
+    finally {
+      link.remove();
+      const timer = setTimeout(() => { try { URL.revokeObjectURL(url); } catch {} view.backupURLs.delete(url); }, 1000);
+      view.backupURLs.set(url, timer);
+    }
+  }
+  function ctProfileReadFavoriteBackup(text, uid) {
+    if (typeof text !== 'string' || new Blob([text]).size > CT_FAVORITE_BACKUP_BYTES) throw new Error('size');
+    const data = JSON.parse(text);
+    const keys = (object, allowed) => object && typeof object === 'object' && !Array.isArray(object) &&
+      Object.keys(object).every(key => allowed.includes(key));
+    if (!keys(data, ['format', 'version', 'uid', 'account', 'exportedAt', 'items']) ||
+        data.format !== 'classic-twitter-favorites' || data.version !== 1 || !ctProfileId(data.uid) ||
+        typeof data.account !== 'string' || data.account.length > 80 ||
+        typeof data.exportedAt !== 'string' || !Number.isFinite(Date.parse(data.exportedAt)) || !Array.isArray(data.items)) throw new Error('format');
+    if (data.uid !== uid) throw new Error('account');
+    if (data.items.length > CT_FAVORITE_BACKUP_ROWS) throw new Error('size');
+    const safeURL = value => typeof value === 'string' && (value === '' || ctProfileURL(value) === value);
+    for (const item of data.items) {
+      if (!keys(item, ['id', 'username', 'name', 'text', 'avatar', 'savedAt', 'createdAt', 'media']) ||
+          !ctProfileId(item.id) || typeof item.username !== 'string' || (item.username && !ctProfileHandle(item.username)) ||
+          typeof item.name !== 'string' || item.name.length > 200 || typeof item.text !== 'string' || item.text.length > 10000 ||
+          !safeURL(item.avatar) || typeof item.savedAt !== 'number' || !Number.isFinite(item.savedAt) || item.savedAt < 0 ||
+          typeof item.createdAt !== 'string' || (item.createdAt && !Number.isFinite(Date.parse(item.createdAt))) ||
+          !Array.isArray(item.media) || item.media.length > 16 || item.media.some(asset =>
+            !keys(asset, ['type', 'url', 'poster']) || !['image', 'video'].includes(asset.type) ||
+            !asset.url || !safeURL(asset.url) || !safeURL(asset.poster))) throw new Error('format');
+    }
+    return ctProfileFavoriteItems(data.items);
+  }
+  function ctProfileImportFavoriteBackup(text, expectedUid = ctProfileUID()) {
+    if (!expectedUid || expectedUid !== ctProfileUID()) throw new Error('account');
+    const imported = ctProfileReadFavoriteBackup(text, expectedUid);
+    if (expectedUid !== ctProfileUID()) throw new Error('account');
+    const existing = ctProfileLoadFavorites();
+    const merged = ctProfileFavoriteItems([...existing, ...imported]);
+    if (!ctProfileWriteFavorites(expectedUid, merged)) throw new Error('account');
+    return merged.length - existing.length;
+  }
+  function ctProfileFavoriteBackupError(error) {
+    return error?.message === 'account' ? ctProfileText('使用中のアカウントのバックアップだけを取り込めます。', 'Only a backup for the current account can be imported.') :
+      error?.message === 'size' ? ctProfileText('バックアップは32MB・10万件以内です。データは変更していません。', 'Backups must fit within 32 MB and 100,000 records. Data has not changed.') :
+        ctProfileText('バックアップを読み込めませんでした。形式とファイルを確認してください。データは変更していません。', 'Could not read the backup. Check its format and file. Data has not changed.');
+  }
+  function ctProfileFavoriteTools(panel, view) {
+    const previous = panel.querySelector(':scope > [data-ct-favorite-tools]');
+    if (previous?.ctFavoriteView === view) return previous;
+    const tools = ctProfileStatus(''); tools.dataset.ctFavoriteTools = ''; tools.classList.add('ct-favorite-tools'); tools.ctFavoriteView = view;
+    function field(text, control) { const label = document.createElement('label'); label.append(document.createTextNode(text), control); tools.append(label); }
+    const query = document.createElement('input'); query.type = 'search'; query.id = 'ct-favorite-query'; query.maxLength = 200;
+    query.value = view.query; query.autocomplete = 'off'; field(ctProfileText('お気に入りを検索（本文・作者）', 'Search Favorites (text or author)'), query);
+    let composing = false;
+    const applyQuery = () => {
+      if (composing || !ctProfileFavoriteViewCurrent(view)) return;
+      view.query = query.value; view.limit = 50; renderFavoritesPanel();
+    };
+    query.addEventListener('compositionstart', () => { composing = true; });
+    query.addEventListener('compositionend', () => { composing = false; applyQuery(); });
+    query.addEventListener('input', event => { if (!event.isComposing) applyQuery(); });
+    function select(id, title, options, property) {
+      const control = document.createElement('select'); control.id = id;
+      for (const [value, text] of options) { const option = document.createElement('option'); option.value = value; option.textContent = text; control.append(option); }
+      control.value = view[property]; field(title, control);
+      control.addEventListener('change', () => {
+        if (!ctProfileFavoriteViewCurrent(view)) return;
+        view[property] = control.value; view.limit = 50; renderFavoritesPanel();
+      });
+    }
+    select('ct-favorite-type', ctProfileText('表示', 'Show'), [
+      ['all', ctProfileText('全て', 'All')], ['image', ctProfileText('写真', 'Photos')], ['video', ctProfileText('動画', 'Videos')]
+    ], 'type');
+    select('ct-favorite-sort', ctProfileText('並べ替え', 'Sort'), [
+      ['saved', ctProfileText('保存した順（新しい順）', 'Recently saved')], ['newest', ctProfileText('投稿が新しい順', 'Newest Tweets')], ['oldest', ctProfileText('投稿が古い順', 'Oldest Tweets')]
+    ], 'sort');
+    const download = ctProfileControl(ctProfileText('バックアップを保存', 'Save local backup'), async () => {
+      if (!ctProfileFavoriteViewCurrent(view)) return;
+      try {
+        const auth = await getAuth();
+        if (!ctProfileFavoriteViewCurrent(view) || auth?.uid !== view.uid) return;
+        const parts = ctProfileFavoriteBackupParts(view.uid); ctProfileClearFavoriteBackupParts(view);
+        if (parts.length === 1) {
+          ctProfileDownloadFavoriteBackup(view, parts[0]);
+          ctProfileFavoriteMessage(view, ctProfileText('このアカウントのお気に入りのダウンロードを開始しました。', 'Started downloading a local Favorites backup for this account.'));
+        } else {
+          view.backupParts = parts; view.backupRevision++;
+          ctProfileFavoriteMessage(view, ctProfileText(`${parts.length}個のファイルに分けました。下のボタンから全て保存してください。取り込むときは1個ずつ選択します。`, `Split the archive into ${parts.length} files. Save every part using the buttons below; import them one at a time.`));
+        }
+      } catch (error) { ctProfileFavoriteMessage(view, error?.message === 'size' ? ctProfileFavoriteBackupError(error) : ctProfileText('バックアップを保存できませんでした。ブラウザのダウンロード設定を確認してください。', 'Could not save the backup. Check browser download settings.'), true); }
+    });
+    download.id = 'ct-favorite-export';
+    const file = document.createElement('input'); file.type = 'file'; file.accept = '.json,application/json'; file.id = 'ct-favorite-import-file';
+    const importButton = ctProfileControl(ctProfileText('バックアップを取り込む', 'Import local backup'), () => {
+      if (ctProfileFavoriteViewCurrent(view) && !view.busy) file.click();
+    });
+    importButton.id = 'ct-favorite-import';
+    file.addEventListener('change', async () => {
+      if (!ctProfileFavoriteViewCurrent(view) || view.busy || !file.files?.[0]) return;
+      const selected = file.files[0]; view.busy = true; view.message = ''; renderFavoritesPanel();
+      try {
+        if (selected.size > CT_FAVORITE_BACKUP_BYTES) throw new Error('size');
+        const text = typeof selected.text === 'function' ? await selected.text() : await new Promise((resolve, reject) => {
+          const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('file')); reader.readAsText(selected);
+        });
+        const auth = await getAuth();
+        if (!ctProfileFavoriteViewCurrent(view) || auth?.uid !== view.uid) return;
+        const added = ctProfileImportFavoriteBackup(text, view.uid);
+        ctProfileFavoriteMessage(view, ctProfileFavoriteStorageError(view.uid) ? ctProfileText('取り込んだ内容を一時保持しています。ブラウザに保存できないため、この画面を閉じる前にバックアップしてください。', 'Imported records are held temporarily. Browser storage is unavailable; save a backup before closing this page.') :
+          ctProfileText(`${added}件を取り込みました。Tweet上の星・いいねの状態は変更していません。`, `Imported ${added}. Favorite/Like states on Tweet were not changed.`), ctProfileFavoriteStorageError(view.uid));
+      } catch (error) { ctProfileFavoriteMessage(view, ctProfileFavoriteBackupError(error), true); }
+      finally { view.busy = false; file.value = ''; if (ctProfileFavoriteViewCurrent(view)) renderFavoritesPanel(); }
+    });
+    tools.append(download, importButton, file);
+    const note = document.createElement('div'); note.className = 'ct-favorite-summary'; note.textContent = ctProfileText('このアカウントのブラウザ内保存データです。バックアップの取り込みはTweet上のお気に入りを変更しません。', 'Browser-local data for this account. Importing a backup does not change Favorites on Tweet.');
+    const count = document.createElement('div'); count.id = 'ct-favorite-count'; count.className = 'ct-favorite-summary'; count.setAttribute('role', 'status');
+    const message = document.createElement('div'); message.id = 'ct-favorite-backup-status'; message.className = 'ct-favorite-summary'; message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
+    const parts = document.createElement('div'); parts.id = 'ct-favorite-backup-parts'; parts.className = 'ct-favorite-summary';
+    tools.append(note, count, message, parts); return tools;
+  }
   function renderFavoritesPanel() {
     if (!favoritesActive || ctProfileState.active !== 'favorites') return;
     const context = ctProfileContext();
@@ -623,15 +826,38 @@
     const panel = ctProfileState.panel;
     if (!panel?.isConnected) return;
     const items = ctProfileLoadFavorites(); const legacy = ctProfileLegacyFavorites();
-    const uid = ctProfileUID(); const muted = ctProfileFavoriteMuteState();
-    const signature = JSON.stringify(['favorites', uid, items, legacy.length, ctProfileState.storageError,
-      muted.busy, muted.done, muted.error, muted.pages, [...muted.handles]]);
+    const uid = ctProfileUID(); const muted = ctProfileFavoriteMuteState(); const view = ctProfileFavoriteView();
+    const storageError = ctProfileFavoriteStorageError(uid);
+    const signature = JSON.stringify(['favorites', uid, items, legacy.length, storageError,
+      muted.busy, muted.done, muted.error, muted.pages, [...muted.handles], view.query, view.type, view.sort, view.limit, view.message, view.error, view.busy, view.backupRevision]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
     const rows = ctProfileExistingRows(panel);
     const focused = panel.contains(document.activeElement) ? document.activeElement : null;
     const content = [];
-    content.push(ctProfileStatus(ctProfileText('このブラウザに保存したお気に入りです。読み込み済みの投稿から復元します。過去の全履歴は取得できません。', 'Favorites saved in this browser. Restores Favorites from loaded posts; the entire past history cannot be retrieved.')));
+    content.push(ctProfileStatus(ctProfileText('このブラウザに保存したお気に入りです。便利ツールで過去のタイムラインから復元できます。全履歴の復元は保証できません。', 'Favorites saved in this browser. Use Tools to restore Favorites from the past timeline. Coverage of the entire past history is not guaranteed.')));
+    const tools = ctProfileFavoriteTools(panel, view);
+    const importButton = tools.querySelector('#ct-favorite-import');
+    if (importButton.disabled !== view.busy) importButton.disabled = view.busy;
+    const message = tools.querySelector('#ct-favorite-backup-status');
+    if (message.textContent !== view.message) message.textContent = view.message;
+    if (message.dataset.error !== String(view.error)) message.dataset.error = String(view.error);
+    const partControls = tools.querySelector('#ct-favorite-backup-parts');
+    if (partControls.ctBackupParts !== view.backupParts) {
+      partControls.ctBackupParts = view.backupParts; partControls.replaceChildren();
+      const parts = view.backupParts;
+      for (const [index, text] of (parts || []).entries()) partControls.append(ctProfileControl(
+        ctProfileText(`ファイル${index + 1}/${parts.length}を保存`, `Save part ${index + 1}/${parts.length}`), async () => {
+          if (!ctProfileFavoriteViewCurrent(view) || view.backupParts !== parts) return;
+          try {
+            const auth = await getAuth();
+            if (!ctProfileFavoriteViewCurrent(view) || auth?.uid !== view.uid || view.backupParts !== parts) return;
+            ctProfileDownloadFavoriteBackup(view, text, index, parts.length);
+            ctProfileFavoriteMessage(view, ctProfileText(`ファイル${index + 1}/${parts.length}のダウンロードを開始しました。全てのファイルを保存してください。`, `Started downloading part ${index + 1}/${parts.length}. Save every part.`));
+          } catch { ctProfileFavoriteMessage(view, ctProfileText('ファイルを保存できませんでした。もう一度お試しください。', 'Could not save this part. Try again.'), true); }
+        }));
+    }
+    content.push(tools);
     const controls = ctProfileStatus('');
     const update = ctProfileControl(ctProfileText('表示を更新', 'Refresh view'), () => ctProfileLoadFavoriteMutes(true));
     update.disabled = muted.busy; controls.append(update); content.push(controls);
@@ -639,8 +865,11 @@
       const migration = ctProfileStatus(ctProfileText('以前の保存データがあります。使用中のアカウントのものか確認して取り込めます。', 'Older saved data is available. Import it if it belongs to this account.'));
       migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.push(migration);
     }
-    if (ctProfileState.storageError) content.push(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。保存設定を確認してください。', 'Browser storage is unavailable. Check your storage settings.')));
+    if (storageError) content.push(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。この画面を閉じる前にバックアップを保存してください。', 'Browser storage is unavailable. Save a backup before closing this page.')));
     if (!muted.done) {
+      const count = tools.querySelector('#ct-favorite-count');
+      const summary = ctProfileText(`保存済み${items.length}件 · 表示前にミュート一覧を確認しています`, `${items.length} saved · Checking muted accounts before display`);
+      if (count.textContent !== summary) count.textContent = summary;
       const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート一覧を確認中…', 'Checking muted accounts…') :
         muted.error || ctProfileText('ミュート一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted accounts have been checked.'));
       waiting.setAttribute('role', 'status');
@@ -648,16 +877,40 @@
         muted.error ? ctProfileText('再試行', 'Try again') : ctProfileText('続きを確認', 'Continue checking'), () => ctProfileLoadFavoriteMutes()));
       content.push(waiting);
     } else {
-      const visible = items.filter(item => item.username && !muted.handles.has(item.username));
-      if (visible.length < items.length) content.push(ctProfileStatus(ctProfileText(
-        `ミュートした作者や作者を確認できない投稿${items.length - visible.length}件を非表示にしています。保存データは保持しています。`,
-        `${items.length - visible.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`)));
+      const unmuted = items.filter(item => item.username && !muted.handles.has(item.username));
+      if (unmuted.length < items.length) content.push(ctProfileStatus(ctProfileText(
+        `ミュートした作者や作者を確認できない投稿${items.length - unmuted.length}件を非表示にしています。保存データは保持しています。`,
+        `${items.length - unmuted.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`)));
+      const normalize = value => String(value).normalize('NFKC').toLowerCase();
+      const query = normalize(view.query.trim());
+      const matching = unmuted.filter(item => (!query || normalize([item.text, item.name, '@' + item.username].join('\n')).includes(query)) &&
+        (view.type === 'all' || item.media.some(asset => asset.type === view.type)));
+      matching.sort((a, b) => view.sort === 'saved' ? b.savedAt - a.savedAt :
+        view.sort === 'oldest' ? (Date.parse(a.createdAt) || Infinity) - (Date.parse(b.createdAt) || Infinity) :
+          (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+      const visible = matching.slice(0, view.limit);
+      const count = tools.querySelector('#ct-favorite-count');
+      const summary = ctProfileText(`${matching.length}件中${visible.length}件を表示 · 保存済み${items.length}件`, `${visible.length} of ${matching.length} matches shown · ${items.length} saved`);
+      if (count.textContent !== summary) count.textContent = summary;
       if (!visible.length) {
         const empty = document.createElement('p'); empty.className = 'ct-profile-empty';
-        empty.textContent = items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
+        empty.textContent = query || view.type !== 'all' ? ctProfileText('条件に合うお気に入りはありません。', 'No Favorites match these filters.') : items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
           ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.');
         content.push(empty);
       } else for (const item of visible) content.push(ctProfileReuseRow(item, rows));
+      if (matching.length > visible.length) {
+        let more = panel.querySelector(':scope > [data-ct-favorite-more]');
+        if (!more || more.ctFavoriteView !== view) {
+          more = ctProfileStatus(''); more.dataset.ctFavoriteMore = ''; more.ctFavoriteView = view;
+          more.append(ctProfileControl(ctProfileText('さらに50件を表示', 'Show 50 more'), event => {
+            if (!ctProfileFavoriteViewCurrent(view)) return;
+            const focused = document.activeElement === event.currentTarget;
+            view.limit += 50; renderFavoritesPanel();
+            if (focused && !event.currentTarget.isConnected) panel.querySelector(':scope > .ct-profile-row:last-of-type .ct-profile-post-link')?.focus({ preventScroll: true });
+          }));
+        }
+        content.push(more);
+      }
     }
     ctProfileReplaceContent(panel, content, focused);
   }
