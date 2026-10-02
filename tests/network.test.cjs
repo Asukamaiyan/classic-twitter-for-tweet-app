@@ -267,3 +267,29 @@ test('profile cache refreshes after TTL and account changes, mismatched identity
   assert.equal(await c.network.fetchProfile('alice'), null);
   assert.equal(c.network.profileCache.size, 0);
 });
+
+
+test('sandbox lexical GM works without a global property and retains its receiver', async () => {
+  const manager = { xmlHttpRequest(options) {
+    assert.equal(this, manager);
+    assert.equal(options.method, 'GET');
+    return Promise.resolve({ status: 200, responseText: '{"lexical":true}', finalUrl: apiURL });
+  } };
+  const c = harness({ manager, fetch() { throw new Error('must use the manager'); } });
+  vm.runInContext('const GM = manager;', c);
+  assert.equal(c.GM, undefined);
+  assert.equal((await c.network.requestJSON(apiURL)).lexical, true);
+});
+
+test('manager acknowledgement waits for the HTTP callback and remains bounded without it', async () => {
+  for (const acknowledgement of [undefined, null, { requestId: 17 }]) {
+    let callback;
+    const c = harness({ GM: { xmlHttpRequest(options) { callback = options; return Promise.resolve(acknowledgement); } } });
+    const pending = c.network.requestJSON(apiURL);
+    await Promise.resolve();
+    callback.onload({ status: 200, responseText: '{"callback":true}', finalUrl: apiURL });
+    assert.equal((await pending).callback, true);
+  }
+  const c = harness({ GM: { xmlHttpRequest() { return Promise.resolve(undefined); } } });
+  assert.equal(await c.network.requestJSON(apiURL), null, 'acknowledgement without a callback reaches the deadline');
+});

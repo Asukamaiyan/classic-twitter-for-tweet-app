@@ -94,14 +94,23 @@
         ? response.responseText : null;
       let request = null;
       if (typeof GM_xmlhttpRequest === 'function') request = GM_xmlhttpRequest;
-      else if (typeof globalThis.GM?.xmlHttpRequest === 'function') request = globalThis.GM.xmlHttpRequest.bind(globalThis.GM);
+      else {
+        // Some managers expose GM as a sandbox binding rather than a property
+        // on globalThis. Losing that API falls through to a CORS-blocked fetch.
+        const gm = typeof GM !== 'undefined' ? GM : globalThis.GM;
+        if (typeof gm?.xmlHttpRequest === 'function') request = gm.xmlHttpRequest.bind(gm);
+      }
       if (request) {
         try {
           handle = request({ method: 'GET', url: target, anonymous: true, redirect: 'error',
             timeout: ctNewsState.timeout, headers: { Accept: 'application/rss+xml, application/xml, text/xml' },
             onload: response => finish(parse(response)), onerror: () => finish(null),
             ontimeout: () => finish(null), onabort: () => finish(null) });
-          if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => finish(parse(response)), () => finish(null));
+          if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => {
+            // A mobile bridge can resolve its request receipt before onload.
+            // Wait for a real response or the bounded callback/timeout instead.
+            if (response?.status != null || typeof response?.responseText === 'string') finish(parse(response));
+          }, () => finish(null));
         } catch { finish(null); }
         return;
       }
@@ -239,7 +248,10 @@
     const world = document.createElement('button');
     world.type = 'button'; world.textContent = ja ? '世界' : 'World';
     world.dataset.ctNewsRegion = 'world';
-    controls.append(japan, world);
+    const retry = document.createElement('button');
+    retry.type = 'button'; retry.textContent = ja ? '再試行' : 'Retry';
+    retry.dataset.ctNewsAction = 'retry'; retry.hidden = true;
+    controls.append(japan, world, retry);
     const status = document.createElement('p');
     status.className = 'ct-news-status';
     status.setAttribute('role', 'status');
@@ -247,10 +259,19 @@
     list.className = 'ct-news-list';
     panel.append(controls, status, list);
     target.container.before(panel);
-    const mount = { ...target, panel, status, list, japan, world, rendered: null, loading: null };
+    const mount = { ...target, panel, status, list, japan, world, retry, rendered: null, loading: null };
     for (const button of [japan, world]) button.addEventListener('click', () => {
       ctNewsState.region = button.dataset.ctNewsRegion;
       try { localStorage.setItem(ctNewsPreferenceKey, ctNewsState.region); } catch {}
+      patchJapaneseNews();
+    });
+    retry.addEventListener('click', () => {
+      if (!ctNewsState.pageActive || document.hidden || ctNewsState.region !== 'jp' ||
+          ctNewsState.mounts.get(mount.container) !== mount || !mount.panel.isConnected) return;
+      const current = ctNewsTargets().find(target => target.container === mount.container && target.topic === mount.topic);
+      if (!current || ctNewsState.pending.has(current.topic)) return;
+      // Explicit retry may bypass the failure delay, never a pending request.
+      ctNewsState.retryAt.delete(current.topic);
       patchJapaneseNews();
     });
     return mount;
@@ -295,6 +316,7 @@
       if (button.getAttribute('aria-pressed') !== value) button.setAttribute('aria-pressed', value);
     }
     if (!japan) {
+      if (!mount.retry.hidden) mount.retry.hidden = true;
       ctNewsUnhide(mount);
       if (!mount.list.hidden) mount.list.hidden = true;
       ctNewsSetText(mount.status, '');
@@ -302,6 +324,7 @@
     }
     const cached = ctNewsState.cache.get(mount.topic);
     if (cached && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) {
+      if (!mount.retry.hidden) mount.retry.hidden = true;
       ctNewsRenderArticles(mount, cached.articles);
       if (mount.list.hidden) mount.list.hidden = false;
       if (!mount.container.classList.contains('ct-news-native-hidden')) mount.container.classList.add('ct-news-native-hidden');
@@ -314,9 +337,11 @@
     ctNewsUnhide(mount);
     if (!mount.list.hidden) mount.list.hidden = true;
     if ((ctNewsState.retryAt.get(mount.topic) || 0) > Date.now()) {
+      if (mount.retry.hidden) mount.retry.hidden = false;
       ctNewsSetText(mount.status, ja ? '日本のニュースを取得できなかったため、世界のニュースを表示しています。' : 'Japanese news is unavailable. Showing world news.');
       return;
     }
+    if (!mount.retry.hidden) mount.retry.hidden = true;
     ctNewsSetText(mount.status, ja ? '日本のニュースを読み込み中…' : 'Loading Japanese news…');
     if (mount.loading === mount.topic) return;
     const topic = mount.topic;

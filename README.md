@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.18.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.18.1** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 全6版をGreasy Forkで6.18.0に更新済み。通常のインストールURLのコードが検証済みファイルと一致することも確認しました。
+**配布状況:** 6.18.1は検証・公開準備中です。Greasy Forkで公開・コード一致を確認済みの版は6.18.0です。
 
 ## 導入・更新
 
@@ -51,7 +51,7 @@
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
 
-6.18.0では、投稿の一部が変わるたびに全画面を調べ直す処理を減らしました。非表示中は一般の画面監視を止め、復帰時に更新します。星の即時表示、日時、日本語化、通知アイコンの個別リンクを維持します。
+6.18.1では、日本ニュースの取得が早く失敗扱いになる通信処理を修正し、取得失敗時の **「再試行」** を追加しました。ニュースなどのタブを切り替えた後も選択と表示を揃え、クラシック表示で元の丸いタブが一瞬戻る問題も修正しました。
 
 ## 主な機能
 
@@ -104,6 +104,8 @@ You need **a browser, a userscript manager, and one English script** from the ta
 **Update:** Press the script’s **Update** button in Stay, then reload tweet.app.
 
 **Enable only one edition. Disable the previous edition when switching.**
+
+Version 6.18.1 fixes premature Japanese news request failures and adds **Retry** after a failed load. Native tab changes reconcile the displayed panel, and classic tabs keep their appearance when Tweet replaces button classes. Release validation and publication are in progress; the verified published version is 6.18.0.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 

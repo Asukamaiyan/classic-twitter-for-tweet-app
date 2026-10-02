@@ -80,7 +80,11 @@
         gap:0!important;
         min-height:46px;
       }
-      .ct-classic-shell .ct-classic-tab {
+      /* React replaces a tab's complete className on every selection. Style
+         direct native buttons through the verified list as well, so the
+         rounded native pill cannot flash before the next reconciliation. */
+      .ct-classic-shell .ct-classic-tab,
+      .ct-classic-shell .ct-classic-tabs-list > button.rounded-full.text-xs {
         padding:11px 12px 8px!important;
         border:0!important;
         border-bottom:3px solid transparent!important;
@@ -90,12 +94,14 @@
         font-size:13px;
         line-height:20px;
       }
-      .ct-classic-shell .ct-classic-tab.bg-sky-500 {
+      .ct-classic-shell .ct-classic-tab.bg-sky-500,
+      .ct-classic-shell .ct-classic-tabs-list > button.rounded-full.text-xs.bg-sky-500 {
         color:var(--ct-classic-blue)!important;
         border-bottom-color:var(--ct-classic-blue)!important;
         font-weight:700;
       }
-      .ct-classic-shell .ct-classic-tab:hover {
+      .ct-classic-shell .ct-classic-tab:hover,
+      .ct-classic-shell .ct-classic-tabs-list > button.rounded-full.text-xs:hover {
         color:var(--ct-classic-blue)!important;
         background:var(--ct-classic-hover)!important;
       }
@@ -166,7 +172,8 @@
       }
       @media (max-width:1023px) {
         .ct-classic-shell .ct-classic-tabs-list { min-height:44px; }
-        .ct-classic-shell .ct-classic-tab {
+        .ct-classic-shell .ct-classic-tab,
+        .ct-classic-shell .ct-classic-tabs-list > button.rounded-full.text-xs {
           padding:10px 11px 7px!important;
           min-height:44px;
         }

@@ -6,7 +6,7 @@ const { JSDOM } = require('jsdom');
 
 const presentation = fs.readFileSync(path.join(__dirname, '../src/presentation.js'), 'utf8');
 const mediaSource = fs.readFileSync(path.join(__dirname, '../src/safari-extras.js'), 'utf8');
-function harness(t, fetchProfile = async () => null, locale = 'ja') {
+function harness(t, fetchProfile = async () => null, locale = 'ja', sandboxManager = null) {
   const dom = new JSDOM(`<!doctype html><body><button id="previous">Open</button><main>
     <div id="profile-heading"><h1>Alice</h1></div><article>
     <img id="one" src="https://storage.googleapis.com/one.jpg">
@@ -24,7 +24,13 @@ function harness(t, fetchProfile = async () => null, locale = 'ja') {
   const requests = [];
   window.GM_xmlhttpRequest = options => { requests.push(options); };
   const localeDeclaration = locale == null ? '' : `const CT_LOCALE = ${JSON.stringify(locale)};`;
-  window.eval(`${localeDeclaration}\n${presentation}\n${mediaSource}\nwindow.qa = { patchProfileFounder, ctShowMediaInfo };`);
+  let managerDeclaration = '';
+  if (sandboxManager) {
+    window.GM_xmlhttpRequest = undefined;
+    window.transportManager = sandboxManager;
+    managerDeclaration = 'const GM = window.transportManager;';
+  }
+  window.eval(`${managerDeclaration} ${localeDeclaration}\n${presentation}\n${mediaSource}\nwindow.qa = { patchProfileFounder, ctShowMediaInfo };`);
   t.after(() => dom.window.close());
   return {
     window, document: window.document, qa: window.qa, requests,
@@ -262,4 +268,26 @@ test('Escape and backdrop dismissal also invalidate pending media responses', as
     assert.equal(f.document.getElementById('ct-media-info-panel'), null, dismissal);
   }
   assert.equal(nativeEscapeEvents, 0, 'Escape must not also dismiss the underlying native UI');
+});
+
+
+test('Safari media metadata supports sandbox GM and delayed callback after bridge acknowledgement', async t => {
+  let options;
+  const manager = { xmlHttpRequest(value) {
+    assert.equal(this, manager);
+    options = value;
+    return Promise.resolve(undefined);
+  } };
+  const f = harness(t, undefined, 'ja', manager);
+  assert.equal(f.window.GM, undefined);
+  const pending = f.show('one');
+  await Promise.resolve();
+  assert.equal(f.value('配信ファイル容量'), '取得中…');
+  assert.equal(options.method, 'HEAD');
+  assert.equal(options.anonymous, true);
+  assert.equal(options.redirect, 'error');
+  options.onload({ status: 200, responseHeaders: 'Content-Length: 2048\r\nContent-Type: image/png' });
+  await pending;
+  assert.equal(f.value('配信ファイル容量'), '2.00 KB');
+  assert.equal(f.value('形式'), 'PNG');
 });

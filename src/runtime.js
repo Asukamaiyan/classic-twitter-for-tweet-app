@@ -520,7 +520,7 @@
   let ctScanConversationPanels = new WeakSet();
   let ctScanConversationPath = location.pathname;
   const ctScanOwnedSelector = '[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel';
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-selected', 'aria-current', 'role', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
 
   function ctScanElement(node) {
     return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
@@ -573,6 +573,44 @@
     return avatar || el.closest('[role="dialog"],[role="tablist"],[role="form"],form,nav,aside,header,footer') || el;
   }
 
+  function ctNativeViewElement(el) {
+    return !!el && !el.closest('article,[id^="ct-"],[data-ct-owned],[data-ct-local-ui],textarea,input,select,[contenteditable],.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],.whitespace-pre-wrap,.break-words,.wrap-break-word,[translate="no"],.notranslate');
+  }
+
+  function ctNativeHomeTabGroup(el) {
+    if (!/^\/feed\/?$/.test(location.pathname) || !ctNativeViewElement(el)) return null;
+    const group = el.closest('div.overflow-x-auto');
+    const header = group?.closest('div.sticky');
+    if (!header?.closest('main') || header.closest('article,[data-ct-local-ui],[data-ct-owned]')) return null;
+    const buttons = [...group.children];
+    return buttons.length >= 2 && buttons.every(button =>
+      button.matches('button.rounded-full.whitespace-nowrap') && !button.querySelector('img,p,[data-user-content]')) ? group : null;
+  }
+
+  function ctNativeViewChanged(mutation) {
+    const el = ctScanElement(mutation.target);
+    if (!ctNativeViewElement(el)) return false;
+    if (mutation.type === 'attributes') {
+      // Switching a view at the same URL affects more than the changed tab:
+      // sibling timelines and locally mounted panels need one reconciliation.
+      if (mutation.attributeName === 'aria-selected') return el.matches('[role="tab"]') &&
+        !!el.closest('[role="tablist"]');
+      if (mutation.attributeName === 'aria-current') return el.matches('a,button') &&
+        !!el.closest('nav,[role="navigation"],header,aside');
+      if (mutation.attributeName === 'role') return ['tab', 'tablist', 'navigation'].includes(mutation.oldValue) ||
+        el.matches('[role="tab"],[role="tablist"],[role="navigation"]');
+      if (mutation.attributeName === 'class') {
+        const group = ctNativeHomeTabGroup(el);
+        if (!group || el.parentElement !== group) return false;
+        const oldClasses = new Set((mutation.oldValue || '').split(/\s+/));
+        const wasSelected = oldClasses.has('bg-sky-500') && oldClasses.has('text-white');
+        const selected = el.classList.contains('bg-sky-500') && el.classList.contains('text-white');
+        return wasSelected !== selected;
+      }
+    }
+    return mutation.type === 'childList' && (el.matches('[role="tablist"]') || !!ctNativeHomeTabGroup(el));
+  }
+
   function ctRememberScanContexts(root) {
     if (typeof ctTimestampDetailContext !== 'function') return;
     if (ctScanConversationPath !== location.pathname) {
@@ -608,7 +646,7 @@
     for (const mutation of mutations) {
       if (!ctMutationChanged(mutation)) continue;
       changed = true;
-      if (mutation.type === 'attributes' && mutation.attributeName === 'data-app-theme') ctQueueScanRoot(document);
+      if ((mutation.type === 'attributes' && mutation.attributeName === 'data-app-theme') || ctNativeViewChanged(mutation)) ctQueueScanRoot(document);
       else if (mutation.type === 'childList' && mutation.addedNodes.length) {
         for (const node of mutation.addedNodes) {
           const el = ctScanElement(node);
@@ -657,7 +695,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.18.0';
+    document.documentElement.dataset.ctActiveVersion = '6.18.1';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({

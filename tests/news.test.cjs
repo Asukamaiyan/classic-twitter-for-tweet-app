@@ -57,8 +57,9 @@ function setup(t, options = {}) {
   if (options.cache) window.sessionStorage.setItem('ct-japanese-news-cache-v1', options.cache);
   if (options.gm) window.GM_xmlhttpRequest = options.gm;
   if (options.modernGM) window.GM = options.modernGM;
+  if (options.lexicalGM) window.fixtureGM = options.lexicalGM;
   if (options.fetch) window.fetch = options.fetch;
-  window.eval(`const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};\n${source}\nwindow.news = { patch: patchJapaneseNews, parse: ctParseJapaneseNews, url: ctNewsURL, load: ctLoadJapaneseNews, request: ctRequestNews, state: ctNewsState, targets: ctNewsTargets };`);
+  window.eval(`const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};\n${options.lexicalGM ? 'const GM = window.fixtureGM;' : ''}\n${source}\nwindow.news = { patch: patchJapaneseNews, parse: ctParseJapaneseNews, url: ctNewsURL, load: ctLoadJapaneseNews, request: ctRequestNews, state: ctNewsState, targets: ctNewsTargets };`);
   const news = window.news;
   news.state.timeout = 30;
   t.after(() => window.close());
@@ -138,6 +139,77 @@ test('supports modern Promise GM transport and rejects redirects/status/errors',
   assert.equal(await news.request(feedURL), null);
 });
 
+test('sandbox-only modern GM is used instead of the cross-origin fetch fallback', async t => {
+  let calls = 0;
+  const gm = { marker: true, xmlHttpRequest(options) {
+    assert.equal(this.marker, true); calls++;
+    return Promise.resolve({ status: 200, responseText: rss(item()), finalUrl: options.url });
+  } };
+  const { news, document, window } = setup(t, {
+    lexicalGM: gm,
+    fetch: () => assert.fail('a sandbox GM binding must not fall back to CORS-blocked fetch')
+  });
+  assert.equal(window.GM, undefined);
+  news.patch(); await flush();
+  assert.equal(calls, 1);
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, '日本のニュース');
+  assert.equal(document.querySelector('.ct-news-article img').src, image);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), true);
+});
+
+test('an empty Promise request receipt waits for its later callback instead of reporting Japanese news failure', async t => {
+  for (const receipt of [undefined, null, {}]) {
+    let callback;
+    const { news, document, clock } = setup(t, { clock: true, modernGM: { xmlHttpRequest(options) {
+      callback = options; return Promise.resolve(receipt);
+    } } });
+    news.patch(); await flush();
+    assert.equal(news.state.pending.size, 1);
+    assert.equal(news.state.retryAt.size, 0);
+    assert.match(document.querySelector('.ct-news-status').textContent, /読み込み中/);
+    assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+    await clock.tick(10);
+    callback.onload({ status: 200, responseText: rss(item('Callback news')), finalUrl: callback.url });
+    await flush();
+    assert.equal(news.state.pending.size, 0);
+    assert.equal(document.querySelector('.ct-news-article h3').textContent, 'Callback news');
+    assert.equal(document.querySelector('.ct-news-article img').src, image);
+    assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), true);
+    assert.equal(clock.timers.size, 1, 'only the next cache expiry remains');
+  }
+});
+
+test('an empty request receipt with no callback still times out and aborts once before backing off', async t => {
+  let calls = 0, aborts = 0;
+  const { news, document, clock } = setup(t, { clock: true, modernGM: { xmlHttpRequest() {
+    calls++; return Object.assign(Promise.resolve(undefined), { abort() { aborts++; } });
+  } } });
+  news.patch(); await flush();
+  await clock.tick(news.state.timeout - 1);
+  assert.equal(news.state.pending.size, 1); assert.equal(aborts, 0);
+  await clock.tick(1);
+  assert.equal(news.state.pending.size, 0); assert.equal(aborts, 1);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+  assert.match(document.querySelector('.ct-news-status').textContent, /世界のニュース/);
+  news.patch(); await clock.tick(news.state.retryDelay - 1); assert.equal(calls, 1);
+  await clock.tick(1); assert.equal(calls, 2);
+});
+
+test('a callback result is retained if the receipt Promise later rejects or returns a different response', async t => {
+  for (const reject of [false, true]) {
+    let settle;
+    const { news } = setup(t, { modernGM: { xmlHttpRequest(options) {
+      const receipt = new Promise((resolve, fail) => { settle = reject ? fail : resolve; });
+      options.onload({ status: 200, responseText: rss(item('First callback')), finalUrl: options.url });
+      return receipt;
+    } } });
+    const result = await news.request(feedURL);
+    settle(reject ? new Error('Late bridge rejection') : { status: 403, responseText: 'Blocked' });
+    await flush();
+    assert.match(result, /First callback/);
+  }
+});
+
 test('hanging GM request is aborted at the deadline and unknown URLs are never fetched', async t => {
   let calls = 0;
   let aborts = 0;
@@ -175,6 +247,77 @@ test('failures back off and empty/malformed feeds do not suppress world news', a
   assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
   assert.match(document.querySelector('.ct-news-status').textContent, /世界のニュース/);
   news.patch(); await news.load('nation'); assert.equal(calls, 1);
+});
+
+for (const locale of ['ja', 'en']) test(`${locale}: explicit Retry recovers a failed feed without waiting or duplicating pending requests`, async t => {
+  let calls = 0, pending;
+  const { news, document, clock } = setup(t, { locale, region: 'jp', clock: true, gm: options => {
+    calls++;
+    if (calls === 1) queueMicrotask(() => options.onerror());
+    else pending = options;
+  } });
+  const native = document.getElementById('native-news');
+  news.patch(); await flush();
+  const retry = document.querySelector('[data-ct-news-action="retry"]');
+  assert.equal(retry.textContent, locale === 'ja' ? '再試行' : 'Retry');
+  assert.equal(retry.hidden, false);
+  assert.equal(native.classList.contains('ct-news-native-hidden'), false);
+  assert.equal(calls, 1);
+  retry.click(); retry.click(); await flush();
+  assert.equal(calls, 2);
+  assert.equal(retry.hidden, true);
+  assert.equal(news.state.pending.size, 1);
+  assert.equal(news.state.retryAt.size, 0);
+  pending.onload({ status: 200, responseText: rss(item('Recovered by Retry')), finalUrl: pending.url });
+  await flush();
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'Recovered by Retry');
+  assert.equal(document.querySelector('.ct-news-article img').src, image);
+  assert.equal(retry.hidden, true);
+  assert.equal(document.getElementById('native-news'), native);
+  assert.equal(native.classList.contains('ct-news-native-hidden'), true);
+  assert.equal(clock.timers.size, 1);
+});
+
+test('retry cannot restart a detached, hidden, backgrounded, World or non-news panel', async t => {
+  for (const change of [
+    f => f.document.querySelector('[data-ct-news-region="world"]').click(),
+    f => select(f.document, 'For you'),
+    f => f.window.history.replaceState({}, '', '/notifications'),
+    f => { f.document.querySelector('main > div').hidden = true; },
+    f => f.document.querySelector('main > div').setAttribute('aria-hidden', 'true'),
+    f => f.clock.setHidden(true),
+    f => f.window.dispatchEvent(new f.window.Event('pagehide')),
+    f => f.document.querySelector('.ct-japanese-news').remove()
+  ]) {
+    let calls = 0;
+    const f = setup(t, { clock: true, gm: options => { calls++; queueMicrotask(() => options.onerror()); } });
+    f.news.patch(); await flush();
+    const retry = f.document.querySelector('[data-ct-news-action="retry"]');
+    change(f); retry.click(); await flush();
+    assert.equal(calls, 1);
+    assert.equal(f.document.getElementById('native-news').classList.contains('ct-news-native-hidden'), false);
+  }
+});
+
+test('retry follows the currently verified topic and an older response cannot replace its headlines or failure', async t => {
+  const callbacks = [];
+  const { news, document, clock } = setup(t, { clock: true, gm: options => callbacks.push(options) });
+  news.patch();
+  select(document, 'Sports'); news.patch();
+  callbacks[1].onerror(); await flush();
+  const retry = document.querySelector('[data-ct-news-action="retry"]');
+  assert.equal(retry.hidden, false);
+  retry.click(); assert.equal(callbacks.length, 3);
+  assert.match(callbacks[2].url, /sports\.xml$/);
+  callbacks[0].onload({ status: 200, responseText: rss(item('Old nation')), finalUrl: callbacks[0].url });
+  await flush();
+  assert.equal(document.querySelectorAll('.ct-news-article').length, 0);
+  assert.equal(document.getElementById('native-news').classList.contains('ct-news-native-hidden'), false);
+  assert.match(document.querySelector('.ct-news-status').textContent, /読み込み中/);
+  callbacks[2].onload({ status: 200, responseText: rss(item('Current sports')), finalUrl: callbacks[2].url });
+  await flush();
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'Current sports');
+  assert.equal(clock.timers.size, 1);
 });
 
 test('Japanese default renders source photos; World restores the same native DOM and event handlers', async t => {
