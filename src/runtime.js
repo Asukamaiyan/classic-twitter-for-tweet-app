@@ -515,25 +515,112 @@
   let ctScanning = false;
   let ctPageActive = true;
   let ctStarted = false;
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
-  const observer = new MutationObserver(mutations => {
-    if (ctScanning || !ctPageActive) return;
-    if (!mutations.some(m => {
-      const el = m.target.nodeType === Node.ELEMENT_NODE ? m.target : m.target.parentElement;
-      if (el?.closest('[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel')) return false;
-      if (m.type === 'attributes') return m.oldValue !== m.target.getAttribute(m.attributeName);
-      if (m.type === 'characterData') return m.oldValue !== m.target.data;
-      if (m.type === 'childList' && m.addedNodes.length && m.removedNodes.length &&
-          [...m.addedNodes, ...m.removedNodes].every(node => node.nodeType === Node.TEXT_NODE)) {
-        return [...m.addedNodes].map(node => node.data).join('') !== [...m.removedNodes].map(node => node.data).join('');
+  let ctScanFull = false;
+  const ctScanRoots = new Set();
+  let ctScanConversationPanels = new WeakSet();
+  let ctScanConversationPath = location.pathname;
+  const ctScanOwnedSelector = '[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel';
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
+
+  function ctScanElement(node) {
+    return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  }
+
+  function ctMutationChanged(mutation) {
+    const el = ctScanElement(mutation.target);
+    if (el?.closest(ctScanOwnedSelector)) return false;
+    if (typeof ctTimestampOwnMutation === 'function' && ctTimestampOwnMutation(mutation)) return false;
+    // The document-start observer already repairs these controls before paint.
+    // Its own labels, classes and vector inserts must not start a second scan.
+    const favorite = el?.closest(`${ctFavoriteButtonSelector},${ctFavoriteCountSelector}`);
+    if (favorite && !favorite.closest(ctFavoriteProtectedSelector) &&
+        document.getElementById('ct-favorite-presentation-style')?.dataset.ctFavoriteWatch === 'true') return false;
+    if (mutation.type === 'attributes') return mutation.oldValue !== mutation.target.getAttribute(mutation.attributeName);
+    if (mutation.type === 'characterData') return mutation.oldValue !== mutation.target.data;
+    const changed = [...mutation.addedNodes, ...mutation.removedNodes];
+    if (!changed.length || changed.every(node => node.nodeType === Node.ELEMENT_NODE && node.matches(ctScanOwnedSelector))) return false;
+    if (mutation.addedNodes.length && mutation.removedNodes.length &&
+        changed.every(node => node.nodeType === Node.TEXT_NODE)) {
+      return [...mutation.addedNodes].map(node => node.data).join('') !== [...mutation.removedNodes].map(node => node.data).join('');
+    }
+    return true;
+  }
+
+  function ctChangedScanRoot(node) {
+    const el = ctScanElement(node);
+    if (!el || el.matches('html,body')) return document;
+    // A card's author, reply header, media and action rows share identity. Keep
+    // that context together rather than scanning unrelated cards in the feed.
+    const article = el.closest('article');
+    if (article) return article;
+    if (typeof ctTimestampDetailContext === 'function') {
+      // A conversation's Back/header, scroll area and reply footer determine
+      // whether its article timestamps can be shown. Remember a verified panel
+      // so invalidating or removing one of those siblings also clears stamps.
+      if (ctScanConversationPath === location.pathname) {
+        for (let parent = el; parent; parent = parent.parentElement) {
+          if (ctScanConversationPanels.has(parent)) return parent;
+        }
       }
-      return true;
-    })) return;
-    ctScheduleScan();
+      const candidate = el.closest('div.animate-fadeIn.flex.flex-col');
+      const post = candidate?.querySelector(':scope > div.min-h-0.flex-1.overflow-y-auto article');
+      if (post && ctTimestampDetailContext(post) === candidate) return candidate;
+    }
+    // Grouped notification avatars live outside articles. Their native Follow
+    // overlay can be replaced independently, while navigation needs the whole
+    // verified avatar wrapper to repair it and retain its own profile link.
+    const avatar = typeof ctAvatarWrapperSelector === 'string' ? el.closest(ctAvatarWrapperSelector) : null;
+    return avatar || el.closest('[role="dialog"],[role="tablist"],[role="form"],form,nav,aside,header,footer') || el;
+  }
+
+  function ctRememberScanContexts(root) {
+    if (typeof ctTimestampDetailContext !== 'function') return;
+    if (ctScanConversationPath !== location.pathname) {
+      ctScanConversationPath = location.pathname;
+      ctScanConversationPanels = new WeakSet();
+    }
+    const articles = new Set(root.querySelectorAll?.('article') || []);
+    const own = root.closest?.('article');
+    if (own) articles.add(own);
+    for (const article of articles) {
+      const panel = ctTimestampDetailContext(article);
+      if (panel?.isConnected) ctScanConversationPanels.add(panel);
+    }
+  }
+
+  function ctQueueScanRoot(root) {
+    if (ctScanFull) return;
+    if (root === document || root?.nodeType === Node.DOCUMENT_NODE || !root?.querySelectorAll) {
+      ctScanFull = true; ctScanRoots.clear(); return;
+    }
+    for (const existing of ctScanRoots) {
+      if (existing === root || existing.contains(root)) return;
+      if (root.contains(existing)) ctScanRoots.delete(existing);
+    }
+    ctScanRoots.add(root);
+    // A large React commit is cheaper and simpler to process once as a page.
+    if (ctScanRoots.size > 12) { ctScanFull = true; ctScanRoots.clear(); }
+  }
+
+  const observer = new MutationObserver(mutations => {
+    if (ctScanning || !ctPageActive || document.hidden) return;
+    let changed = false;
+    for (const mutation of mutations) {
+      if (!ctMutationChanged(mutation)) continue;
+      changed = true;
+      if (mutation.type === 'attributes' && mutation.attributeName === 'data-app-theme') ctQueueScanRoot(document);
+      else if (mutation.type === 'childList' && mutation.addedNodes.length) {
+        for (const node of mutation.addedNodes) {
+          const el = ctScanElement(node);
+          if (el?.isConnected && !el.closest(ctScanOwnedSelector)) ctQueueScanRoot(ctChangedScanRoot(el));
+        }
+      } else ctQueueScanRoot(ctChangedScanRoot(mutation.target));
+    }
+    if (changed) ctScheduleScan(null);
   });
 
   function ctObserve() {
-    if (ctPageActive && document.documentElement) observer.observe(document.documentElement, {
+    if (ctPageActive && !document.hidden && document.documentElement) observer.observe(document.documentElement, {
       childList: true, subtree: true, characterData: true, characterDataOldValue: true,
       attributes: true, attributeOldValue: true, attributeFilter: ctObservedAttributes
     });
@@ -541,15 +628,27 @@
 
   function ctRunScan() {
     ctScanTimer = null;
-    if (ctScanning || !ctPageActive || !document.body) return;
+    if (ctScanning || !ctPageActive || document.hidden || !document.body) return;
+    const roots = ctScanFull || !ctScanRoots.size ? [document] : [...ctScanRoots].filter(root => root.isConnected);
+    ctScanFull = false; ctScanRoots.clear();
     ctScanning = true;
     observer.disconnect();
-    try { scan(document); ctTools?.refresh(); }
+    try {
+      // If every changed node was unmounted before the debounce, a page pass
+      // still lets shared modules release their detached state.
+      for (const root of roots.length ? roots : [document]) {
+        ctRememberScanContexts(root);
+        scan(root);
+      }
+      ctTools?.refresh();
+    }
     finally { ctScanning = false; ctObserve(); }
   }
 
-  function ctScheduleScan() {
-    if (!ctPageActive || ctScanTimer !== null) return;
+  function ctScheduleScan(root = document) {
+    if (!ctPageActive || document.hidden) return;
+    if (root !== null) ctQueueScanRoot(root);
+    if (ctScanTimer !== null) return;
     ctScanTimer = setTimeout(ctRunScan, 100);
   }
 
@@ -558,7 +657,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.17.0';
+    document.documentElement.dataset.ctActiveVersion = '6.18.0';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -611,14 +710,17 @@
       };
     }
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) ctCancelTranslations();
-      else ctScheduleScan();
+      if (document.hidden) {
+        observer.disconnect(); clearTimeout(ctScanTimer); ctScanTimer = null;
+        ctScanFull = false; ctScanRoots.clear(); ctCancelTranslations();
+      } else { ctObserve(); ctScheduleScan(); }
     });
     window.addEventListener('pagehide', () => {
       ctPageActive = false;
       observer.disconnect();
       clearTimeout(ctScanTimer);
       ctScanTimer = null;
+      ctScanFull = false; ctScanRoots.clear();
       ctCancelTranslations();
     });
     window.addEventListener('pageshow', event => {

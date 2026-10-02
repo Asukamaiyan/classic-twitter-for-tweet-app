@@ -31,16 +31,51 @@
     return ctTimestampParse(ctTimestampPostValue(post));
   }
 
+  // Intl formatters are expensive to construct. Share the few native formats
+  // across cards, and recheck the device timezone on minute/visibility changes.
+  const ctTimestampFormatCache = new Map();
+  let ctTimestampFormatZone = null;
+  let ctTimestampFormatCheckedAt = -Infinity;
+  const ctTimestampClockWrites = new WeakMap();
+
+  function ctTimestampOwnMutation(mutation) {
+    if (mutation.type !== 'characterData') return false;
+    const node = mutation.target;
+    const write = ctTimestampClockWrites.get(node);
+    return !!write && node.data === write.value && node.parentElement === write.parent &&
+      ctTimestampNativeValue(write.parent) === write.source;
+  }
+
+  function ctTimestampFormatReset() {
+    ctTimestampFormatCheckedAt = -Infinity;
+  }
+
+  function ctTimestampFormatter(locale, kind) {
+    const now = Date.now();
+    if (ctTimestampFormatZone === null || now < ctTimestampFormatCheckedAt || now - ctTimestampFormatCheckedAt >= 60000) {
+      const zone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (zone !== ctTimestampFormatZone) {
+        ctTimestampFormatCache.clear();
+        ctTimestampFormatZone = zone;
+      }
+      ctTimestampFormatCheckedAt = now;
+    }
+    const japanese = locale === 'ja';
+    const language = japanese ? 'ja-JP' : 'en-US';
+    const key = `${language}:${kind}`;
+    if (!ctTimestampFormatCache.has(key)) {
+      const options = kind === 'time' ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } :
+        { ...(kind === 'date' ? { year: 'numeric' } : {}), month: japanese ? 'long' : 'short', day: 'numeric' };
+      ctTimestampFormatCache.set(key, new Intl.DateTimeFormat(language, options));
+    }
+    return ctTimestampFormatCache.get(key);
+  }
+
   function ctTimestampExactText(value, locale = CT_LOCALE) {
     const date = value instanceof Date ? value : ctTimestampParse(value);
     if (!date || !Number.isFinite(date.getTime())) return '';
-    const language = locale === 'ja' ? 'ja-JP' : 'en-US';
-    const dateText = new Intl.DateTimeFormat(language, {
-      year: 'numeric', month: locale === 'ja' ? 'long' : 'short', day: 'numeric'
-    }).format(date);
-    const timeText = new Intl.DateTimeFormat(language, {
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-    }).format(date);
+    const dateText = ctTimestampFormatter(locale, 'date').format(date);
+    const timeText = ctTimestampFormatter(locale, 'time').format(date);
     return `${dateText} · ${timeText}`;
   }
 
@@ -88,24 +123,31 @@
     ]) {
       if (seconds < limit) return `${Math.floor(seconds / divisor)}${locale === 'ja' ? japanese : english}`;
     }
-    const year = date.getFullYear() !== new Date(now).getFullYear() ? 'numeric' : undefined;
-    return new Intl.DateTimeFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
-      ...(year ? { year } : {}), month: locale === 'ja' ? 'long' : 'short', day: 'numeric'
-    }).format(date);
+    const kind = date.getFullYear() !== new Date(now).getFullYear() ? 'date' : 'month-day';
+    return ctTimestampFormatter(locale, kind).format(date);
   }
 
   function ctTimestampClockState() {
-    return ctTimestampClockState.value ||= { elements: new Set(), timer: null, active: true, installed: false };
+    return ctTimestampClockState.value ||= { elements: new Set(), articles: new WeakMap(), timer: null, dueAt: null, active: true, installed: false };
   }
 
-  function ctTimestampRefreshRelative() {
-    const state = ctTimestampClockState();
+  function ctTimestampStopClock(state) {
     clearTimeout(state.timer);
     state.timer = null;
-    if (!state.active || document.hidden) return;
+    state.dueAt = null;
+  }
+
+  function ctTimestampRefreshRelative(dirtyElements) {
+    const state = ctTimestampClockState();
+    const partial = dirtyElements instanceof Set;
+    if (!partial) ctTimestampStopClock(state);
+    if (!state.active || document.hidden) {
+      ctTimestampStopClock(state);
+      return;
+    }
     const now = Date.now();
     let delay = 60000;
-    for (const el of state.elements) {
+    for (const el of partial ? dirtyElements : state.elements) {
       const value = el.isConnected && ctTimestampNativeValue(el);
       const date = value && ctTimestampParse(value);
       const node = el.firstChild;
@@ -115,28 +157,50 @@
       }
       const text = ctTimestampRelativeText(date, now);
       if (node.nodeValue !== text) {
+        ctTimestampClockWrites.set(node, { value: text, parent: el, source: value });
         node.nodeValue = text;
         if (typeof ctReplyTimeRendered === 'function' && !el.hasAttribute('title')) ctReplyTimeRendered(el, text);
       }
       const age = now - date.getTime();
       if (age >= 0 && age < 604800000) delay = Math.min(delay, 60000 - age % 60000);
     }
-    if (state.elements.size) state.timer = setTimeout(ctTimestampRefreshRelative, Math.max(1000, delay));
+    if (!state.elements.size) {
+      ctTimestampStopClock(state);
+      return;
+    }
+    const dueAt = now + Math.max(1000, delay);
+    // A scoped scan refreshes only changed cards. Keep the already scheduled
+    // global boundary unless a new clock needs an earlier wake-up.
+    if (!state.timer || dueAt < state.dueAt) {
+      ctTimestampStopClock(state);
+      state.dueAt = dueAt;
+      state.timer = setTimeout(ctTimestampRefreshRelative, dueAt - now);
+    }
   }
 
-  function ctTimestampTrackRelative(el) {
+  function ctTimestampTrackRelative(el, article) {
     const state = ctTimestampClockState();
+    const previous = state.articles.get(article);
+    if (previous && previous !== el) state.elements.delete(previous);
+    if (!el) {
+      state.articles.delete(article);
+      return;
+    }
+    state.articles.set(article, el);
     if (!state.installed) {
       state.installed = true;
-      document.addEventListener('visibilitychange', ctTimestampRefreshRelative);
+      document.addEventListener('visibilitychange', () => {
+        ctTimestampFormatReset();
+        ctTimestampRefreshRelative();
+      });
       window.addEventListener('pagehide', () => {
         state.active = false;
-        clearTimeout(state.timer);
-        state.timer = null;
+        ctTimestampStopClock(state);
       });
       window.addEventListener('pageshow', event => {
         if (event.persisted) {
           state.active = true;
+          ctTimestampFormatReset();
           ctTimestampRefreshRelative();
         }
       });
@@ -165,12 +229,14 @@
       if (parent) articles.add(parent);
     }
     scope?.querySelectorAll?.('article').forEach(article => articles.add(article));
+    const clocks = new Set();
     for (const article of articles) {
       if (!article.isConnected) continue;
       const stamps = [...article.querySelectorAll('.ct-detail-post-time')]
         .filter(stamp => stamp.closest('article') === article);
       const creation = ctTimestampCreationNode(article);
-      if (creation) ctTimestampTrackRelative(creation);
+      ctTimestampTrackRelative(creation, article);
+      if (creation) clocks.add(creation);
       const source = ctTimestampDetailContext(article) ? creation : null;
       const value = source && ctTimestampNativeValue(source);
       const date = value && ctTimestampParse(value);
@@ -198,5 +264,5 @@
         if (stamp.nextSibling !== actionRow || stamp.parentElement !== column) column.insertBefore(stamp, actionRow);
       } else if (stamp.parentElement !== column) column.append(stamp);
     }
-    ctTimestampRefreshRelative();
+    ctTimestampRefreshRelative(clocks);
   }

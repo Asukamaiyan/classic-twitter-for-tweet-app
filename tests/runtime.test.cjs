@@ -7,6 +7,9 @@ const { JSDOM } = require('jsdom');
 
 const translation = fs.readFileSync(path.join(__dirname, '../src/translation.js'), 'utf8');
 const runtime = fs.readFileSync(path.join(__dirname, '../src/runtime.js'), 'utf8');
+const timestamps = fs.readFileSync(path.join(__dirname, '../src/timestamps.js'), 'utf8');
+const motion = fs.readFileSync(path.join(__dirname, '../src/motion.js'), 'utf8');
+const navigation = fs.readFileSync(path.join(__dirname, '../src/navigation.js'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../classic-twitter-ja.user.js'), 'utf8');
 const helperNames = new Set(['ctTranslationButtonText', 'ctTranslationControls', 'ctDeclaredLanguage', 'ctLikelyLanguage']);
 const helpers = [];
@@ -36,7 +39,7 @@ function harness(t, html = '', options = {}) {
   let nextID = 0;
   const timers = new Map();
   const intervals = new Map();
-  const stats = { scans: 0, refreshes: 0, installs: 0 };
+  const stats = { scans: 0, refreshes: 0, installs: 0, roots: [] };
   let hidden = false;
   let settings;
   Object.defineProperty(document, 'hidden', { get: () => hidden });
@@ -65,24 +68,37 @@ function harness(t, html = '', options = {}) {
   };
   window.scan = root => {
     stats.scans += 1;
+    stats.roots.push(root);
     options.scan?.(root, window.qa, stats);
   };
-  window.ctCaptureFavoriteClick = () => {};
+  window.ctCaptureFavoriteClick = options.captureFavoriteClick || (() => {});
   window.ctRestoreVisibleFavorites = async () => ({saved:0,unresolved:0});
   window.ctFavoriteHistoryStatus = () => ({pages:0});
   window.ctRunFavoriteHistory = async () => {};
   window.ctStopFavoriteHistory = () => {};
   window.ctRestartFavoriteHistory = async () => {};
+  if (options.navigation) {
+    window.API_ORIGIN = 'https://api.tweet.app';
+    window.ctNetworkState = { authUID: 'fixture-viewer' };
+    window.getAuth = async () => ({ uid: 'fixture-viewer', token: 'fixture-token' });
+    window.requestJSON = async () => { throw new Error('Known native notification handles must not need a lookup'); };
+  }
   window.eval(`
     const KEY = { autoTranslate: 'autoTranslate' };
     const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};
     const clean = value => String(value ?? '').replace(/\\s+/g, ' ').trim();
     ${helpers.join('\n')}
     ${translation}
+    ${options.timestamps ? timestamps : ''}
+    ${options.motion ? motion : ''}
     ${runtime}
+    ${options.navigation ? navigation : ''}
     window.qa = { autoTranslationEnabled, patchAutoTranslation, ctOwnTranslationText,
       ctRememberTranslationChoice, patchFavoriteButtons, articleId, start, ctRunScan, ctScheduleScan,
-      ctPrepareFavoritePresentation, pending: () => ctAutoPending.size };
+      ctPrepareFavoritePresentation, pending: () => ctAutoPending.size,
+      timestampPatch: typeof ctTimestampPatchExactPostTime === 'function' ? ctTimestampPatchExactPostTime : null,
+      patchClassicMotion: typeof patchClassicMotion === 'function' ? patchClassicMotion : null,
+      patchNavigation: typeof patchNavigation === 'function' ? patchNavigation : null };
   `);
   async function flush() { await Promise.resolve(); await Promise.resolve(); }
   async function advance(duration = 0) {
@@ -268,9 +284,10 @@ test('detail-route fallback is limited to the first non-quoted article', t => {
 
 test('observer settles after own scan writes and batches dynamic navigation and native changes', async t => {
   const f = harness(t, '<nav><button id="nav">Home</button></nav><button id="like" data-testid="tweet-like-action" class="text-tl-app-text-muted"></button><div data-ct-owned="true"><span id="owned">Tools</span></div>', {
-    scan(document, qa) {
-      document.getElementById('nav').textContent = 'ホーム';
-      qa.patchFavoriteButtons(document);
+    scan(root, qa) {
+      const nav = root.querySelector('#nav');
+      if (nav) nav.textContent = 'ホーム';
+      qa.patchFavoriteButtons(root);
     }
   });
   f.qa.start(); f.qa.start();
@@ -280,16 +297,16 @@ test('observer settles after own scan writes and batches dynamic navigation and 
   f.document.getElementById('nav').textContent = 'Notifications';
   f.document.getElementById('like').className = 'text-pink-500';
   await f.advance(99); assert.equal(f.stats.scans, 1);
-  await f.advance(1); assert.equal(f.stats.scans, 2);
+  await f.advance(1); assert.equal(f.stats.scans, 3, 'navigation and the action are separate changed roots in one batch');
   assert.equal(f.document.getElementById('like').classList.contains('ct-is-liked'), true);
-  await f.advance(1000); assert.equal(f.stats.scans, 2);
+  await f.advance(1000); assert.equal(f.stats.scans, 3);
   f.document.getElementById('nav').textContent = 'ホーム';
   f.document.getElementById('owned').textContent = 'Settings';
-  await f.advance(1000); assert.equal(f.stats.scans, 2, 'identical native text and owned content do not schedule scans');
+  await f.advance(1000); assert.equal(f.stats.scans, 3, 'identical native text and owned content do not schedule scans');
   f.window.history.pushState({}, '', '/notifications');
   f.window.history.replaceState({}, '', '/settings');
   f.window.dispatchEvent(new f.window.PopStateEvent('popstate'));
-  await f.advance(100); assert.equal(f.stats.scans, 3, 'route changes are debounced');
+  await f.advance(100); assert.equal(f.stats.scans, 4, 'route changes are debounced into one page pass');
   assert.equal(f.stats.refreshes, 3);
 });
 
@@ -731,8 +748,8 @@ for (const locale of ['ja', 'en']) {
 test('a native datetime-only update refreshes the existing time display and settles without an idle scan loop', async t => {
   const f = harness(t, '<main><article><time id="created" datetime="2026-10-02T01:00:00Z">native</time><span id="display"></span></article></main>', {
     route: '/post/time-a',
-    scan(document) {
-      document.getElementById('display').textContent = document.getElementById('created').getAttribute('datetime');
+    scan(root) {
+      root.querySelector('#display').textContent = root.querySelector('#created').getAttribute('datetime');
     }
   });
   f.qa.start(); assert.equal(f.document.getElementById('display').textContent,'2026-10-02T01:00:00Z');
@@ -741,4 +758,261 @@ test('a native datetime-only update refreshes the existing time display and sett
   assert.equal(f.document.getElementById('display').textContent,'2026-10-01T23:00:00Z');
   assert.equal(f.stats.scans,2);
   await f.advance(1000); assert.equal(f.stats.scans,2);
+});
+
+test('one changed card in a 240-card feed visits only that card and coalesces its header/body mutations', async t => {
+  let visited = 0;
+  const html = `<main>${Array.from({ length: 240 }, (_, index) => `<article id="card-${index}"><header><span title="2026-10-02T01:00:00Z">1h</span></header><p class="whitespace-pre-wrap">Post ${index}</p></article>`).join('')}</main>`;
+  const f = harness(t, html, {
+    scan(root) { visited += root.matches?.('article') ? 1 : root.querySelectorAll('article').length; }
+  });
+  f.qa.start(); assert.equal(visited, 240); visited = 0;
+  const card = f.document.getElementById('card-42');
+  card.querySelector('span').title = '2026-10-02T02:00:00Z';
+  for (let index = 0; index < 30; index++) card.querySelector('p').firstChild.data = `Edited ${index}`;
+  await f.advance(100);
+  assert.equal(visited, 1, '240 existing articles must not be revisited for one React card update');
+  assert.equal(f.stats.scans, 2);
+  assert.equal(f.stats.roots[1], card);
+  await f.advance(1000); assert.equal(f.stats.scans, 2, 'no idle follow-up pass');
+});
+
+test('added and replaced feed cards scan their connected subtree instead of the whole timeline', async t => {
+  const f = harness(t, '<main><article id="old"><p>Old</p></article><article id="unchanged"><p>Unchanged</p></article></main>');
+  f.qa.start();
+  f.document.querySelector('main').insertAdjacentHTML('beforeend', '<article id="added"><header>Author</header><p>New</p></article>');
+  await f.advance(100);
+  assert.equal(f.stats.roots[1], f.document.getElementById('added'));
+  f.document.getElementById('old').outerHTML = '<article id="replacement"><p>Replaced</p></article>';
+  await f.advance(100);
+  assert.equal(f.stats.roots[2], f.document.getElementById('replacement'));
+  assert.equal(f.stats.refreshes, 3);
+  f.document.getElementById('replacement').remove();
+  await f.advance(100);
+  assert.equal(f.stats.roots[3], f.document.querySelector('main'), 'removals still allow shared modules to release detached state');
+});
+
+test('nested dirty roots are coalesced, and a large commit uses one bounded page fallback', async t => {
+  const f = harness(t, `<main>${Array.from({ length: 15 }, (_, index) => `<article id="card-${index}"><p>Post ${index}</p></article>`).join('')}</main>`);
+  f.qa.start();
+  const card = f.document.getElementById('card-0');
+  f.qa.ctScheduleScan(card.querySelector('p')); f.qa.ctScheduleScan(card);
+  await f.advance(100);
+  assert.equal(f.stats.scans, 2); assert.equal(f.stats.roots[1], card);
+  for (const article of f.document.querySelectorAll('article')) article.querySelector('p').textContent = 'Updated';
+  await f.advance(100);
+  assert.equal(f.stats.scans, 3, '15 disjoint article mutations are processed in one page pass');
+  assert.equal(f.stats.roots[2], f.document);
+  assert.equal(f.stats.refreshes, 3);
+});
+
+test('route and theme changes promote queued article work to one full pass', async t => {
+  const f = harness(t, '<div id="root-container" data-app-theme="light"><main><article><p>Post</p></article></main></div>');
+  f.qa.start();
+  f.document.querySelector('article p').textContent = 'Changed'; await f.flush();
+  f.window.history.pushState({}, '', '/post/one');
+  await f.advance(100);
+  assert.equal(f.stats.roots[1], f.document); assert.equal(f.stats.scans, 2);
+  f.document.querySelector('article p').textContent = 'Changed again';
+  f.document.getElementById('root-container').dataset.appTheme = 'dark';
+  await f.advance(100);
+  assert.equal(f.stats.roots[2], f.document); assert.equal(f.stats.scans, 3);
+});
+
+test('early favorite repairs do not schedule a second general scan after repeated native action commits', async t => {
+  const f = harness(t, '<main><article><p class="tl-user-text">Like ❤ body</p><button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 1 like"><svg class="lucide-heart"></svg>Like</button><button data-testid="tweet-like-action-count" aria-label="View 1 like">1</button></article></main>');
+  f.qa.ctPrepareFavoritePresentation(); f.qa.start();
+  const button = f.document.querySelector('[data-testid="tweet-like-action"]');
+  const count = f.document.querySelector('[data-testid="tweet-like-action-count"]');
+  for (let index = 0; index < 10; index++) {
+    button.className = index % 2 ? 'text-tl-app-text-muted' : 'text-pink-500';
+    button.title = 'Like'; button.setAttribute('aria-label', `Like, ${index + 2} likes`);
+    button.innerHTML = '<svg class="lucide-heart"></svg>Like';
+    count.textContent = String(index + 2); count.setAttribute('aria-label', `View ${index + 2} likes`);
+    await f.advance(100);
+  }
+  assert.equal(f.stats.scans, 1, '10 action commits use the immediate favorite observer and no general pass');
+  assert.equal(f.timers.size, 0);
+  assert.equal(button.title, 'お気に入り'); assert.equal(button.querySelectorAll('.ct-star').length, 1);
+  assert.equal(count.getAttribute('aria-label'), '11件のお気に入りを表示');
+  assert.equal(f.document.querySelector('.tl-user-text').textContent, 'Like ❤ body');
+});
+
+test('async owned badge/time/panel inserts and removals do not wake the general scan', async t => {
+  const f = harness(t, '<main><article><header>Author</header><p>Post</p></article></main>');
+  f.qa.start();
+  for (const owner of ['official-badges', 'exact-timestamp', 'favorite-star']) {
+    const span = f.document.createElement('span'); span.dataset.ctOwned = owner; span.textContent = owner;
+    f.document.querySelector('article header').append(span); await f.advance(100);
+    span.textContent = 'Updated'; span.remove(); await f.advance(100);
+  }
+  assert.equal(f.stats.scans, 1); assert.equal(f.timers.size, 0);
+  f.document.querySelector('article header').append(' native metadata');
+  await f.advance(100); assert.equal(f.stats.scans, 2, 'native metadata remains eligible');
+});
+
+test('hidden pages cancel pending scans, ignore native changes, and refresh once when visible', async t => {
+  const f = harness(t, '<main><article><p>Post</p></article></main>');
+  f.qa.start();
+  f.document.querySelector('p').textContent = 'Changed before hide'; await f.advance(50);
+  f.hidden(true); assert.equal(f.timers.size, 0);
+  f.document.querySelector('main').innerHTML = '<article><p>Changed while hidden</p></article>';
+  f.qa.ctScheduleScan(); await f.advance(1000);
+  assert.equal(f.stats.scans, 1);
+  f.hidden(false); f.hidden(false); await f.advance(100);
+  assert.equal(f.stats.scans, 2); assert.equal(f.stats.roots[1], f.document);
+  await f.advance(1000); assert.equal(f.stats.scans, 2);
+});
+
+test('hidden and aria-hidden native UI changes are reconsidered and unmounted queued roots are cleaned up', async t => {
+  const f = harness(t, '<main><article hidden aria-hidden="true"><p>Post</p></article></main>');
+  f.qa.start(); const article = f.document.querySelector('article');
+  article.hidden = false; article.setAttribute('aria-hidden', 'false');
+  await f.advance(100);
+  assert.equal(f.stats.scans, 2); assert.equal(f.stats.roots[1], article);
+  f.qa.ctScheduleScan(article); article.remove(); await f.advance(100);
+  assert.equal(f.stats.scans, 3); assert.ok(f.stats.roots[2].isConnected);
+  await f.advance(1000); assert.equal(f.stats.scans, 3);
+});
+
+test('500 registered minute-clock writes do not wake a general scan, while native timestamp changes still do', async t => {
+  const cards = Array.from({ length: 500 }, (_, index) => `<article id="clock-${index}"><div class="flex items-center gap-1 min-w-0"><button class="font-bold truncate">alice</button><span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted hover:underline" title="1970-01-01T00:00:00Z">Just now</span></div><p class="tl-user-text">Clock post ${index}</p></article>`).join('');
+  const f = harness(t, `<main>${cards}</main>`, {
+    timestamps: true,
+    scan(root, qa) { qa.timestampPatch(root); }
+  });
+  f.qa.start();
+  assert.equal(f.stats.scans, 1);
+  assert.equal(f.document.querySelector('span[title]').textContent, 'たった今');
+  await f.advance(50000);
+  assert.equal(f.document.querySelectorAll('span[title]').length, 500);
+  for (const clock of f.document.querySelectorAll('span[title]')) assert.equal(clock.textContent, '1分前');
+  assert.equal(f.stats.scans, 1, 'minute updates must not produce 500 dirty roots or a full-page fallback');
+  const clock = f.document.querySelector('span[title]');
+  clock.firstChild.data = '5h';
+  await f.advance(100);
+  assert.equal(f.stats.scans, 2); assert.equal(f.stats.roots[1], clock.closest('article'));
+  assert.equal(clock.textContent, '1分前', 'a different native label remains eligible for correction');
+  clock.title = '1970-01-01T00:00:59Z';
+  await f.advance(100);
+  assert.equal(f.stats.scans, 3); assert.equal(clock.textContent, 'たった今');
+});
+
+test('immediate favorite repair retains native clicks, capture listeners and the selected-star motion without a general scan', async t => {
+  let captures = 0, nativeClicks = 0;
+  const animations = [];
+  const f = harness(t, '<main><article><p class="tl-user-text">Body ❤</p><button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like"><svg class="lucide-heart"></svg>Like</button></article></main>', {
+    motion: true,
+    captureFavoriteClick(event) { if (event.target.closest('[data-testid="tweet-like-action"]')) captures++; },
+    scan(root, qa) { qa.patchClassicMotion(root, true); qa.patchFavoriteButtons(root); }
+  });
+  f.window.Element.prototype.animate = function (frames, settings) {
+    const animation = { target: this, frames, settings, finished: new Promise(() => {}), cancel() {} };
+    animations.push(animation); return animation;
+  };
+  const button = f.document.querySelector('[data-testid="tweet-like-action"]');
+  button.addEventListener('click', () => {
+    nativeClicks++; button.className = 'text-pink-500'; button.setAttribute('aria-label', 'Unlike');
+  });
+  f.qa.ctPrepareFavoritePresentation(); f.qa.start();
+  button.click(); await f.advance(100);
+  assert.equal(nativeClicks, 1); assert.equal(captures, 1);
+  assert.equal(f.stats.scans, 1);
+  assert.equal(animations.length, 1); assert.equal(animations[0].target, button.querySelector('.ct-star'));
+  assert.equal(animations[0].settings.duration, 280);
+  assert.equal(button.title, 'お気に入りを解除');
+  assert.equal(f.document.querySelector('.tl-user-text').textContent, 'Body ❤');
+  await f.advance(500); assert.equal(f.stats.scans, 1); assert.equal(f.timers.size, 0);
+});
+
+test('notification avatar overlay updates retain the wrapper context and cannot restore the native Follow plus', async t => {
+  const avatar = username => `<div id="avatar-${username}" class="relative inline-flex shrink-0 isolate"><img class="rounded-full object-cover" alt="${username} avatar" src="https://cdn.example/${username}.jpg"><span role="button" tabindex="0" aria-label="Follow @${username}" class="absolute -bottom-0.5 -right-0.5"><svg></svg></span></div>`;
+  const f = harness(t, `<main><div class="border-b"><button id="row" class="w-full flex items-start gap-3"><div>${avatar('alice')}${avatar('bob')}</div><p>Notification preview</p></button></div></main>`, {
+    navigation: true, route: '/notifications',
+    scan(root, qa) { qa.patchNavigation(root); }
+  });
+  let rowClicks = 0;
+  f.document.getElementById('row').addEventListener('click', () => rowClicks++);
+  f.qa.start();
+  const wrapper = f.document.getElementById('avatar-bob');
+  let overlay = wrapper.querySelector('span[role="button"]');
+  const link = wrapper.querySelector('a.ct-notification-profile-link');
+  assert.equal(link.getAttribute('href'), '/user/bob');
+  overlay.className = 'absolute -bottom-0.5 -right-0.5 cursor-pointer';
+  overlay.setAttribute('aria-hidden', 'false'); overlay.tabIndex = 0;
+  await f.advance(100);
+  assert.equal(f.stats.roots[1], wrapper);
+  assert.equal(overlay.classList.contains('ct-avatar-follow-hidden'), true);
+  assert.equal(overlay.getAttribute('aria-hidden'), 'true'); assert.equal(overlay.tabIndex, -1);
+  assert.equal(wrapper.querySelector('a.ct-notification-profile-link'), link, 'the exact profile link is retained');
+  overlay.outerHTML = '<span role="button" tabindex="0" aria-label="Follow @bob" class="absolute -bottom-0.5 -right-0.5"><svg></svg></span>';
+  await f.advance(100); overlay = wrapper.querySelector('span[role="button"]');
+  assert.equal(f.stats.roots[2], wrapper);
+  assert.equal(overlay.classList.contains('ct-avatar-follow-hidden'), true);
+  assert.equal(overlay.getAttribute('aria-hidden'), 'true'); assert.equal(overlay.tabIndex, -1);
+  link.dispatchEvent(new f.window.MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+  assert.equal(rowClicks, 0, 'individual avatar navigation still bypasses the representative notification');
+  assert.equal(wrapper.querySelector('a.ct-notification-profile-link').getAttribute('href'), '/user/bob');
+  assert.equal(f.document.getElementById('avatar-alice').querySelector('a').getAttribute('href'), '/user/alice');
+  await f.advance(1000); assert.equal(f.stats.scans, 3, 'repairs settle without a follow-up scan loop');
+});
+
+function conversationFixture() {
+  const article = id => `<article id="${id}"><div class="flex items-center gap-1 min-w-0"><button class="font-bold truncate">alice</button><span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted hover:underline" title="1970-01-01T00:00:00Z">Just now</span></div><p class="tl-user-text">Conversation post ${id}</p><div><button data-testid="tweet-like-action">Like</button></div></article>`;
+  return `<main><div id="conversation" class="animate-fadeIn flex flex-col"><div id="conversation-header" class="shrink-0"><div class="sticky"><button id="back" aria-label="Back"></button></div></div><div id="conversation-scroll" class="min-h-0 flex-1 overflow-y-auto">${article('parent')}${article('reply')}</div><div id="conversation-footer" class="shrink-0 z-20 border-t"><div role="form"><textarea id="reply-input"></textarea></div></div></div></main>`;
+}
+
+for (const mode of ['back-label', 'reply-input-removal', 'footer-removal', 'header-removal', 'scroll-class', 'panel-class']) {
+  test(`conversation ${mode} updates invalidate and restore all stamps through the verified shared panel`, async t => {
+    const f = harness(t, conversationFixture(), {
+      timestamps: true, route: '/post/parent',
+      scan(root, qa) { qa.timestampPatch(root); }
+    });
+    f.qa.start();
+    const panel = f.document.getElementById('conversation');
+    const back = f.document.getElementById('back');
+    const input = f.document.getElementById('reply-input');
+    const footer = f.document.getElementById('conversation-footer');
+    const header = f.document.getElementById('conversation-header');
+    const scroll = f.document.getElementById('conversation-scroll');
+    assert.equal(f.document.querySelectorAll('.ct-detail-post-time').length, 2);
+    if (mode === 'back-label') back.setAttribute('aria-label', 'Other action');
+    if (mode === 'reply-input-removal') input.remove();
+    if (mode === 'footer-removal') footer.remove();
+    if (mode === 'header-removal') header.remove();
+    if (mode === 'scroll-class') scroll.classList.remove('overflow-y-auto');
+    if (mode === 'panel-class') panel.classList.remove('animate-fadeIn');
+    await f.advance(100);
+    assert.equal(f.stats.roots[1], panel, 'invalidating siblings must revisit their native conversation articles');
+    assert.equal(f.document.querySelectorAll('.ct-detail-post-time').length, 0, 'a lost strict detail context removes every stale stamp');
+    if (mode === 'back-label') back.setAttribute('aria-label', 'Back');
+    if (mode === 'reply-input-removal') footer.querySelector('[role="form"]').append(input);
+    if (mode === 'footer-removal') panel.append(footer);
+    if (mode === 'header-removal') panel.prepend(header);
+    if (mode === 'scroll-class') scroll.classList.add('overflow-y-auto');
+    if (mode === 'panel-class') panel.classList.add('animate-fadeIn');
+    await f.advance(100);
+    assert.equal(f.stats.roots[2], panel);
+    assert.equal(f.document.querySelectorAll('.ct-detail-post-time').length, 2);
+    const source = f.document.querySelector('#reply span[title]');
+    source.title = '1970-01-01T00:00:01Z'; await f.advance(100);
+    assert.equal(f.stats.roots[3], source.closest('article'), 'ordinary article changes keep their narrow card scope');
+    await f.advance(1000); assert.equal(f.stats.scans, 4, 'shared repairs settle without an idle loop');
+  });
+}
+
+test('a newly valid conversation is recognized, while an unverified similar container is not promoted', async t => {
+  const f = harness(t, conversationFixture(), {
+    timestamps: true, route: '/post/parent',
+    scan(root, qa) { qa.timestampPatch(root); }
+  });
+  f.document.getElementById('back').setAttribute('aria-label', 'Other action');
+  const generic = f.document.createElement('span'); generic.id = 'generic'; generic.title = 'Original';
+  f.document.getElementById('conversation-footer').append(generic);
+  f.qa.start(); assert.equal(f.document.querySelectorAll('.ct-detail-post-time').length, 0);
+  generic.title = 'Changed'; await f.advance(100);
+  assert.equal(f.stats.roots[1], generic, 'matching outer flex classes alone cannot widen a generic UI update');
+  f.document.getElementById('back').setAttribute('aria-label', 'Back'); await f.advance(100);
+  assert.equal(f.stats.roots[2], f.document.getElementById('conversation'));
+  assert.equal(f.document.querySelectorAll('.ct-detail-post-time').length, 2, 'positive detail context is detected even without a previous stamp');
 });

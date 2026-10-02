@@ -21,7 +21,7 @@
     return bounds.height > 0 && bounds.width > 0 && bounds.bottom > 0 && bounds.top < innerHeight;
   }
 
-  function ctReplyTimeCandidate(el) {
+  function ctReplyTimeContext(el) {
     if (!el?.matches('span.text-tl-app-text-muted.shrink-0:not([title])') || el.closest('button,a,[role="button"],blockquote,[aria-label^="Quoted post"]')) return null;
     const article = el.closest('article');
     const inline = article?.closest('[id^="inline-replies-"]');
@@ -29,6 +29,21 @@
     const panel = !inline && article ? ctTimestampDetailContext(article) : null;
     const container = inline || panel?.querySelector(':scope > div.min-h-0.flex-1.overflow-y-auto');
     const parentId = inlineId || (panel ? location.pathname.match(/^\/(?:post|posts)\/([A-Za-z0-9_-]{1,160})\/?$/)?.[1] : null);
+    return article && container && parentId ? { article, container, panel, inline: !!inline, parentId } : null;
+  }
+
+  function ctReplyTimeCanCheck(el, context) {
+    const record = ctReplyTimeContainers.get(context.container);
+    if (!record || record.uid !== ctReplyTimeUID() || record.path !== location.pathname + location.search || record.parentId !== context.parentId) return true;
+    // A complete response is only for the original nodes and each gets one
+    // identity attempt. An edited unknown node cannot later inherit cached data.
+    return record.elements.has(el) && !record.usedElements.has(el) &&
+      (!!record.pending || !!record.posts && Date.now() - record.at < 60000);
+  }
+
+  function ctReplyTimeCandidate(el, context) {
+    if (!context) return null;
+    const { article, container, panel, inline, parentId } = context;
     const header = el.parentElement;
     const author = header?.querySelector(':scope > button.font-bold.truncate');
     const separator = el.previousElementSibling;
@@ -43,7 +58,7 @@
     if (!native || native.translated || native.parentId && native.parentId !== parentId ||
         typeof native.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(native.username) ||
         typeof native.text !== 'string' || native.text !== body.textContent) return null;
-    return { el, article, container, panel, inline: !!inline, parentId, body, author, username: native.username.toLowerCase(),
+    return { el, article, container, panel, inline, parentId, body, author, username: native.username.toLowerCase(),
       text: body.textContent, authorLabel: author.getAttribute('aria-label') || '', authorText: author.textContent,
       initialText: el.textContent, observedAt: Date.now(), uid: ctReplyTimeUID(), path: location.pathname + location.search };
   }
@@ -144,8 +159,9 @@
     if (record.pending) await record.pending;
     if (!record.posts || Date.now() - record.at >= 60000 || ctReplyTimeContainers.get(container) !== record) return;
     let changed = false;
-    for (const candidate of candidates) if (record.elements.has(candidate.el) && !record.usedElements.has(candidate.el) && ctReplyTimeBind(candidate, record.posts)) {
-      record.usedElements.add(candidate.el); changed = true;
+    for (const candidate of candidates) if (record.elements.has(candidate.el) && !record.usedElements.has(candidate.el) && ctReplyTimeVisible(candidate.article)) {
+      record.usedElements.add(candidate.el);
+      if (ctReplyTimeBind(candidate, record.posts)) changed = true;
     }
     if (changed && typeof ctScheduleScan === 'function') ctScheduleScan();
   }
@@ -160,7 +176,9 @@
     for (const el of elements) {
       if (count >= 20) break;
       if (ctReplyTimeSource(el)) continue;
-      const candidate = ctReplyTimeCandidate(el);
+      const context = ctReplyTimeContext(el);
+      if (!context || !ctReplyTimeCanCheck(el, context)) continue;
+      const candidate = ctReplyTimeCandidate(el, context);
       if (!candidate || !ctReplyTimeVisible(candidate.article)) continue;
       if (!groups.has(candidate.container)) {
         if (groups.size >= 4) continue;

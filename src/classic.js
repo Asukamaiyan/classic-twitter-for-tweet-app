@@ -194,6 +194,50 @@
     return true;
   }
 
+  function ctClassicMarkArticles(articles, mark) {
+    for (const article of articles) {
+      if (article.closest(ctClassicExcluded) || !article.classList.contains('py-3')) continue;
+      // The current client renders this paragraph even for media-only Tweets.
+      const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')]
+        .find(element => ctClassicOwn(element, article));
+      const actions = [...article.querySelectorAll('[data-testid="tweet-action-bar"]')]
+        .find(element => ctClassicOwn(element, article) &&
+          ['tweet-like-action', 'tweet-open-comment-action', 'tweet-repost-action'].every(id =>
+            [...element.querySelectorAll(`[data-testid="${id}"]`)]
+              .some(control => control.tagName === 'BUTTON' && ctClassicOwn(control, article))));
+      if (!body || !actions) continue;
+      const author = [...article.querySelectorAll('button.font-bold.truncate')]
+        .find(element => ctClassicOwn(element, article));
+      if (!author) continue;
+      const row = [...article.children].find(element => element.classList.contains('flex') &&
+        element.classList.contains('items-start') && element.classList.contains('gap-3'));
+      const avatar = row?.firstElementChild;
+      const profile = avatar?.matches('button[aria-label^="View @"]') ? avatar :
+        avatar?.querySelector(':scope > button[aria-label^="View @"]');
+      if (!profile || !ctClassicOwn(profile, article)) continue;
+      const wrapper = profile.firstElementChild;
+      const visuals = wrapper?.matches('div.relative.inline-flex.shrink-0.isolate') ? wrapper.children : profile.children;
+      const visual = [...visuals].find(element =>
+        element.classList.contains('rounded-full') && (element.tagName === 'IMG' || element.getAttribute('role') === 'img'));
+      if (!visual) continue;
+      mark(article, 'ct-classic-tweet');
+      mark(actions, 'ct-classic-actions');
+      mark(profile, 'ct-classic-avatar');
+      mark(visual, 'ct-classic-avatar');
+      const favorite = [...actions.querySelectorAll('[data-testid="tweet-like-action"]')]
+        .find(element => ctClassicOwn(element, article));
+      const group = favorite?.parentElement;
+      const count = group?.children[1];
+      if (group?.parentElement === actions && group.firstElementChild === favorite &&
+          ['group', 'flex', 'items-center', 'gap-0.5'].every(name => group.classList.contains(name)) &&
+          group.children.length <= 2 && (!count || (count.children.length === 0 &&
+            /^[\d,.]+$/.test(count.textContent.trim()) &&
+            (count.matches('span.text-xs.tabular-nums') || count.matches('button[data-testid="tweet-like-action-count"]'))))) {
+        mark(group, 'ct-classic-favorite-group');
+      }
+    }
+  }
+
   function ctClassicDesired(shell) {
     const wanted = new Map();
     const mark = (element, name) => {
@@ -312,47 +356,7 @@
         (row === form || row.parentElement === form), [32, 40]);
     }
 
-    for (const article of main.querySelectorAll('article')) {
-      if (article.closest(ctClassicExcluded) || !article.classList.contains('py-3')) continue;
-      // The current client renders this paragraph even for media-only Tweets.
-      const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')]
-        .find(element => ctClassicOwn(element, article));
-      const actions = [...article.querySelectorAll('[data-testid="tweet-action-bar"]')]
-        .find(element => ctClassicOwn(element, article) &&
-          ['tweet-like-action', 'tweet-open-comment-action', 'tweet-repost-action'].every(id =>
-            [...element.querySelectorAll(`[data-testid="${id}"]`)]
-              .some(control => control.tagName === 'BUTTON' && ctClassicOwn(control, article))));
-      if (!body || !actions) continue;
-      const author = [...article.querySelectorAll('button.font-bold.truncate')]
-        .find(element => ctClassicOwn(element, article));
-      if (!author) continue;
-      const row = [...article.children].find(element => element.classList.contains('flex') &&
-        element.classList.contains('items-start') && element.classList.contains('gap-3'));
-      const avatar = row?.firstElementChild;
-      const profile = avatar?.matches('button[aria-label^="View @"]') ? avatar :
-        avatar?.querySelector(':scope > button[aria-label^="View @"]');
-      if (!profile || !ctClassicOwn(profile, article)) continue;
-      const wrapper = profile.firstElementChild;
-      const visuals = wrapper?.matches('div.relative.inline-flex.shrink-0.isolate') ? wrapper.children : profile.children;
-      const visual = [...visuals].find(element =>
-        element.classList.contains('rounded-full') && (element.tagName === 'IMG' || element.getAttribute('role') === 'img'));
-      if (!visual) continue;
-      mark(article, 'ct-classic-tweet');
-      mark(actions, 'ct-classic-actions');
-      mark(profile, 'ct-classic-avatar');
-      mark(visual, 'ct-classic-avatar');
-      const favorite = [...actions.querySelectorAll('[data-testid="tweet-like-action"]')]
-        .find(element => ctClassicOwn(element, article));
-      const group = favorite?.parentElement;
-      const count = group?.children[1];
-      if (group?.parentElement === actions && group.firstElementChild === favorite &&
-          ['group', 'flex', 'items-center', 'gap-0.5'].every(name => group.classList.contains(name)) &&
-          group.children.length <= 2 && (!count || (count.children.length === 0 &&
-            /^[\d,.]+$/.test(count.textContent.trim()) &&
-            (count.matches('span.text-xs.tabular-nums') || count.matches('button[data-testid="tweet-like-action-count"]'))))) {
-        mark(group, 'ct-classic-favorite-group');
-      }
-    }
+    ctClassicMarkArticles(main.querySelectorAll('article'), mark);
     return wanted;
   }
 
@@ -381,31 +385,55 @@
       state = { marked: new Map(), style: null };
       ctClassicAppearanceStates.set(doc, state);
     }
+    const shell = doc.getElementById('root-container');
+    const scope = root?.nodeType === 1 ? root.closest('article') : null;
+    const main = state.main;
+    // A native card update cannot alter the surrounding layout. Keep its
+    // markers current without traversing every older card in the timeline.
+    const partial = enabled && state.enabled === enabled && scope?.isConnected &&
+      shell === state.shell && shell?.getAttribute('data-app-theme') === state.theme &&
+      main?.isConnected && main.classList.contains('lg:col-span-6') &&
+      main.classList.contains('bg-tl-app-card') && main.parentElement?.classList.contains('lg:grid-cols-12') &&
+      main.closest('#root-container') === shell && main.contains(scope) && !main.closest(ctClassicExcluded);
     const wanted = new Map();
-    if (enabled) {
+    if (partial) {
+      ctClassicMarkArticles([scope, ...scope.querySelectorAll('article')], (element, name) => {
+        if (!element || element.closest(ctClassicExcluded)) return;
+        if (!wanted.has(element)) wanted.set(element, new Set());
+        wanted.get(element).add(name);
+      });
+    } else if (enabled) {
       const shell = doc.querySelector('#root-container[data-app-theme="light"],#root-container[data-app-theme="dark"]');
       if (shell && !shell.closest(ctClassicExcluded)) {
         for (const [element, names] of ctClassicDesired(shell)) wanted.set(element, names);
       }
     }
+    if (!partial) {
+      state.shell = shell;
+      state.theme = shell?.getAttribute('data-app-theme');
+      state.main = [...wanted].find(([, names]) => names.has('ct-classic-timeline'))?.[0] || null;
+      state.enabled = enabled;
+    }
     if (wanted.size && !ctClassicStyle(doc, state)) wanted.clear();
     for (const [element, record] of state.marked) {
+      if (partial && element.isConnected && record.article !== scope && !scope.contains(element)) continue;
       ctClassicRemoveClasses(element, record, wanted.get(element));
       if (!record.added.size) state.marked.delete(element);
     }
     for (const [element, names] of wanted) {
       let record = state.marked.get(element);
+      if (record) record.article = element.closest('article');
       for (const name of names) {
         if (element.classList.contains(name)) continue;
         if (!record) {
-          record = { originalClass: element.getAttribute('class'), added: new Set() };
+          record = { originalClass: element.getAttribute('class'), added: new Set(), article: element.closest('article') };
           state.marked.set(element, record);
         }
         element.classList.add(name);
         record.added.add(name);
       }
     }
-    if (!wanted.size && state.style) {
+    if (!partial && !wanted.size && state.style) {
       state.style.remove();
       state.style = null;
     }
