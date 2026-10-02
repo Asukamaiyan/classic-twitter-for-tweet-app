@@ -3447,7 +3447,21 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
         const button = article.querySelector('button[data-testid="tweet-like-action"]');
         const candidate = ctFavoriteCandidate(article);
-        const snapshot = candidate && await ctResolveFavorite(candidate, auth.uid, deadline);
+        let snapshot = candidate && await ctResolveFavorite(candidate, auth.uid, deadline);
+        if (snapshot && Date.now() < deadline) {
+          // A loaded button may still be an optimistic Like. Recovery must
+          // confirm current server state rather than retain a later rollback.
+          const json = await requestJSON(API_ORIGIN + '/api/posts/' + encodeURIComponent(snapshot.id),
+            {Authorization:`Bearer ${auth.token}`});
+          const post = json?.post;
+          if (!json || json.success === false || json.error || post?.id !== snapshot.id || post.hasLiked !== true ||
+              post.isDeleted || post.status === 'MUTED' || post.isRepost || post.originalPostId ||
+              post.authorUsername?.toLowerCase() !== snapshot.username.toLowerCase() || typeof post.text !== 'string') snapshot = null;
+          else snapshot = {...snapshot,text:post.text,createdAt:post.createdAt ?? post.created_at,
+            media:ctProfileMediaAssets(post),avatar:ctProfileURL(post.authorAvatar) || snapshot.avatar};
+        } else snapshot = null;
+        const current = await getAuth();
+        if (current?.uid !== auth.uid) throw new Error('account-changed');
         if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
         if (snapshot && button.isConnected && ctIsLiked(button)) {
           if (saveFavorite(snapshot, auth.uid) !== false) saved++;

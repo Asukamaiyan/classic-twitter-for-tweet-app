@@ -138,8 +138,14 @@ test('translated main card keeps exact author/ISO identity and saves API origina
 });
 test('explicit loaded-Favorites restoration saves only native liked cards and sends no engagement', async t => {
   const f=harness(t);const main=f.doc.createElement('main');f.article.before(main);main.append(f.article);
-  f.button.setAttribute('aria-pressed','true');f.response={posts:[f.post()]};
+  f.button.setAttribute('aria-pressed','true');f.response={posts:[f.post()],post:{...f.post(),hasLiked:true}};
   const result=await f.w.qa.ctRestoreVisibleFavorites();assert.equal(result.saved,1);assert.equal(result.unresolved,0);
   assert.equal(f.saves.length,1);assert.match(f.requests[0],/\/users\/alice\/posts/);
   f.button.setAttribute('aria-pressed','false');await f.w.qa.ctRestoreVisibleFavorites();assert.equal(f.saves.length,1);
+});
+test('loaded-Favorites recovery rejects an optimistic Like that the fresh detail response does not confirm', async t => {
+  const f=harness(t);const main=f.doc.createElement('main');f.article.before(main);main.append(f.article);
+  f.button.setAttribute('aria-pressed','true');f.response={posts:[f.post()],post:{...f.post(),hasLiked:false}};
+  const result=await f.w.qa.ctRestoreVisibleFavorites();assert.equal(result.saved,0);assert.equal(result.unresolved,1);
+  assert.equal(f.saves.length,0);assert.match(f.requests.at(-1),/\/api\/posts\/post-a$/);
 });
