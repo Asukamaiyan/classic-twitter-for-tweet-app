@@ -14,7 +14,7 @@
 
 **未検証:** 実サービスへの6.17.0の管理アプリ経由の適用、Safari＋Stay／Android Firefox実機。スマホ幅の確認はChrome上の再現画面です。全ての過去返信を取得する機能ではなく、50件を超える未完了応答や翻訳・曖昧な一致は対象外です。
 
-**配布:** 公開確認中。検証結果・再現画面・照合資料は `outputs/release-6.17.0` に保存しています。
+**配布:** GitHub [PR #15](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/15)で6.17.0を更新。Greasy Forkの全6版で掲載バージョン6.17.0と導入・更新案内を確認。既存ID・名前・namespace・権限・限定公開設定を保持しました。通常のインストールURLからの取得は全6本HTTP 200／6.17.0で、Greasy Fork追加のdownloadURL/updateURLと改行・末尾空白だけを除き、ローカルコードと全6版一致。独立照合結果は `outputs/release-6.17.0/public-verification.json`、掲載画面は同フォルダの `release.jpg` に保存しました。
 
 ---
 
