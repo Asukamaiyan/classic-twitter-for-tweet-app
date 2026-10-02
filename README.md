@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.14.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.15.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 日本語・英語の全6版をGreasy Forkで6.14.0へ更新済みです。
+**配布状況:** 6.15.0を検証中です。Greasy Forkの掲載済み版は6.14.0です。
 
 ## 導入・更新
 
@@ -60,7 +60,11 @@
 
 便利ツールの「クラシック表示」をオフにすると、ハート・いいね表記・元の色や形に戻ります。日本語化と便利機能は引き続き利用できます。
 
-お気に入りはこのブラウザ内でログインアカウント別に保存し、ミュート一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。端末間の同期はなく、サイトデータを消すと失われます。読み込み済みの過去のお気に入りは「便利ツール」→「読み込み済みのお気に入りを復元」で保存できます（1回40件まで）。写真・動画欄で確認したお気に入りも復元します。全履歴を取得するAPIは確認できていません。
+過去のお気に入りは **「便利ツール」→「過去の投稿から探す」**。おすすめ・フォロー中を過去へ順に確認し、1回100ページまで。画面を開いたまま使い、**「一時停止」「続きから探す」**で再開できます。サーバーで現在のお気に入り状態を確認して保存しますが、サービスが返すタイムラインの範囲なので、全履歴の取得は保証できません。今の画面の分だけなら「読み込み済みのお気に入りを復元」（1回40件まで）も使えます。
+
+プロフィールの **「お気に入り」** では、本文・作者の検索、写真／動画の絞り込み、保存順／投稿日時順、50件ずつの表示、**JSONバックアップ・取り込み**ができます。保存データはアカウント別。同じアカウントの別ブラウザへはJSONで手動移行できます。取り込みはTweet上の星・いいね状態を変更しません。500件を超えた古い保存を自動削除する制限を撤廃しました。ブラウザの保存容量を超えた場合は一時保持になるので、閉じる前にバックアップしてください。
+
+お気に入りはミュート一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。自動同期はなく、サイトデータを消すと失われます。
 
 画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。実機Android＋Tampermonkey、Safari＋Stayでの導入・操作は未検証です。
 
@@ -98,7 +102,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 
-Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Physical Android/Tampermonkey and Safari/Stay acceptance remain unverified.
+Use Tools → Search older posts to recover currently confirmed Favorites through older For you/Following pages (up to 100 pages per run; pause/continue while the tab is visible). This covers returned timelines and cannot guarantee your entire history. On your profile, search/filter/sort saved Favorites and save/import a same-account JSON backup. There is no 500-record eviction; storage failures require a backup before closing. Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync automatically across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Physical Android/Tampermonkey and Safari/Stay acceptance remain unverified.
 
 ## 開発
 

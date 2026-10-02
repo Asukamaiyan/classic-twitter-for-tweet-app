@@ -70,3 +70,10 @@ Native polls and `tl-user-text` are structural localization boundaries. Static l
 日本語化はnative返信ヘッダー、親プレビュー、翻訳メタデータ、aside見出し、badge assetを識別してから行う。Reactが管理するテキストノードを保持する。作者と時刻の間に拡張バッジが挿入されても、確認済みの補助要素だけを許して時刻を認識する。
 
 Mediaの2つのGETは並行開始し、それぞれUID・route・sequenceを照合して表示する。既存行は取り外さず差分で更新する。完全なミュート確認と成功したMediaだけを30秒キャッシュし、明示更新・アカウント変更・native mute操作で破棄する。復元機能は便利ツールの説明と独立ボタンにまとめ、処理中・部分復元・通信失敗を既存status欄に表示する。過去全履歴を示す表示にはしない。
+
+
+## 6.15.0 Favorites archive and recovery
+
+Keep historical recovery in Tools with a visible progress/status, Pause, Continue and Restart. Network work is explicit, paced, foreground-only and resumable per UID. Fresh post details verify hasLiked and canonical original IDs; feed coverage is described accurately.
+
+Use an inline, wrapping archive toolbar in the own-profile Favorites panel: text/author search, media selector, date order, JSON backup/import. Reuse the toolbar and existing media rows to retain IME, focus and playback; render progressive 50-row batches. Retain all stored records until actual quota, preserve temporary memory and offer backup before closing. Imports merge only the same UID, validate the entire bounded schema, and keep existing snapshots first.

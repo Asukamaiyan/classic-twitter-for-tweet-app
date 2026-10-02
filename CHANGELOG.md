@@ -1,5 +1,11 @@
 # Changelog
 
+## All distributions v6.15.0 — 2026-10-02
+
+- Explicit resumable recovery checks older For you and Following pages, then verifies each liked candidate through fresh post detail. Pause on cancellation, backgrounding, account change, failed response or storage error; do not advertise feed coverage as complete outgoing-like history.
+- Remove silent 500-record Favorites eviction. Display saved records 50 at a time, with local text/author search, photo/video filters and saved/post-date sorting.
+- Add same-account JSON Favorites backup and merge import. Preserve existing records, muted hiding, drafts, media nodes, input composition and account boundaries. Storage quota retains temporary memory and prompts backup.
+
 ## All distributions v6.14.0 — 2026-10-02
 
 - Japanese reply and parent-preview timestamps now use 分前／時間前／日前 and Japanese month/day labels. Profile Joined preserves Tweet’s supplied month/year and reads 「年月からTweetを利用しています」.

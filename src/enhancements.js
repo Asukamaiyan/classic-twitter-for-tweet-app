@@ -1,12 +1,12 @@
 /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
   const copy = ja ? {
     tools: '便利ツール', title: '便利ツール', close: '閉じる',
     appearance: '昔のTwitterの表示', classic: 'クラシック表示を使う', classicHelp: '青いナビゲーションと星のお気に入り。オフにするとハート・いいね表記・Tweet標準の色や形に戻ります。日本語化と便利機能はそのまま使えます。動きを減らす端末設定にも対応します。',
-    scope: 'このブラウザ内でのみ保存されます。同じブラウザの別アカウントにも適用されます。',
+    scope: '表示設定・キーワード・保存検索・保存投稿は、このブラウザ内で共有します。お気に入りの履歴はログインアカウント別です。',
     filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
     words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
     save: 'フィルターを保存', saved: '設定を保存しました。', searches: '保存した検索',
@@ -31,6 +31,11 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     restoreHelp: '今の画面で読み込んだお気に入り済みのツイートを、このブラウザに保存します（1回40件まで）。過去の全履歴は取得できません。',
     restoreResult: (saved, unresolved) => `${saved}件を保存しました。${unresolved ? ` ${unresolved}件は特定できませんでした。詳細画面か原文を開いて再度お試しください。` : ''}`,
     restoreError: 'お気に入りを確認できませんでした。ログイン状態と通信を確認して、もう一度お試しください。',
+    history: '過去のお気に入りを探す', historyStart: '過去の投稿から探す', historyContinue: '続きから探す', historyStop: '一時停止', historyRestart: '最初から探し直す',
+    historyHelp: 'おすすめ・フォロー中の過去ページを順に確認します。画面を開いたまま使い、1回100ページまで。取得できるタイムラインの範囲で復元するため、全お気に入りを保証するものではありません。保存済みのお気に入りはプロフィールで検索・バックアップできます。',
+    historyProgress: (s) => `${s.pages || 0}ページ・${s.scanned || 0}件を確認／${s.recovered || 0}件を追加。${s.busy ? '確認中…' : s.done ? '取得できるタイムラインの終端まで確認しました。' : s.paused ? '一時停止中です。' : ''}`,
+    historyError: '通信・ログイン・保存状態を確認し、続きから再試行してください。',
+    historyErrors: {'sign-in':'Tweetにログインしてから開始してください。','account-changed':'アカウントが変わったため停止しました。','response':'投稿を確認できませんでした。少し待って続きからお試しください。','cursor':'次のページを確認できませんでした。最初から探し直してください。','network':'通信できませんでした。少し待って続きからお試しください。','checkpoint':'続きの位置を保存できませんでした。','storage':'保存容量に達しました。プロフィールのお気に入りでJSONバックアップしてください。'},
 
     bookmarks: '保存した投稿', bookmarkLabel: '投稿のメモ（任意）', bookmarkSave: 'この投稿を保存',
     bookmarkHelp: '投稿の詳細画面を開くと保存できます。最大 50 件。削除された投稿や非公開の投稿は閲覧できない場合があります。',
@@ -40,7 +45,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   } : {
     tools: 'Tools', title: 'Tools', close: 'Close',
     appearance: 'Classic Twitter appearance', classic: 'Use classic appearance', classicHelp: 'Blue navigation and star favorites. Turn off to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available. Respects your reduced motion preference.',
-    scope: 'Saved only in this browser. Applies to other accounts in the same browser, too.',
+    scope: 'Appearance, keywords, saved searches and saved links are shared within this browser. Favorites history is saved separately for each signed-in account.',
     filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
     words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
     save: 'Save filters', saved: 'Settings saved.', searches: 'Saved searches',
@@ -65,6 +70,11 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     restoreHelp: 'Save already-favorited Tweets loaded on this screen in this browser (up to 40 per run). This cannot retrieve your entire past history.',
     restoreResult: (saved, unresolved) => `Saved ${saved}. ${unresolved ? `${unresolved} could not be identified. Open the detail page or original text and try again.` : ''}`,
     restoreError: 'Could not check Favorites. Check your sign-in and connection, then try again.',
+    history: 'Find older Favorites', historyStart: 'Search older posts', historyContinue: 'Continue searching', historyStop: 'Pause', historyRestart: 'Search again from the start',
+    historyHelp: 'Checks older For you and Following pages in order, up to 100 pages per run while this tab is visible. Recovery covers the timelines the service returns and cannot guarantee your entire Favorites history. Search and back up saved Favorites on your profile.',
+    historyProgress: (s) => `Checked ${s.pages || 0} pages / ${s.scanned || 0} posts; added ${s.recovered || 0}. ${s.busy ? 'Checking…' : s.done ? 'Reached the end of the timelines returned by the service.' : s.paused ? 'Paused.' : ''}`,
+    historyError: 'Check your connection, sign-in and storage, then continue to retry.',
+    historyErrors: {'sign-in':'Sign in to Tweet before starting.','account-changed':'Stopped because the account changed.','response':'Could not check posts. Wait a little, then continue.','cursor':'Could not verify the next page. Search again from the start.','network':'Connection failed. Wait a little, then continue.','checkpoint':'Could not save the resume position.','storage':'Browser storage is full. Back up Favorites as JSON on your profile.'},
 
     bookmarks: 'Saved posts', bookmarkLabel: 'Note for this post (optional)', bookmarkSave: 'Save this post',
     bookmarkHelp: 'Open a post’s detail page to save it. Up to 50 posts. Deleted or private posts may be unavailable later.',
@@ -289,6 +299,36 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
       refreshTranslation();
     }
     body.append(automatic);
+  }
+
+  let refreshFavoriteHistory = () => {};
+  if (typeof getFavoriteHistoryStatus === 'function' && typeof runFavoriteHistory === 'function' &&
+      typeof stopFavoriteHistory === 'function' && typeof restartFavoriteHistory === 'function') {
+    const section = element('section');
+    const status = element('p', '', {id:'ct-history-status',role:'status','aria-live':'polite',class:'ct-local-note'});
+    const run = element('button', copy.historyStart, {type:'button',id:'ct-history-run','aria-describedby':'ct-history-help'});
+    const stop = element('button', copy.historyStop, {type:'button',id:'ct-history-stop'});
+    const restart = element('button', copy.historyRestart, {type:'button',id:'ct-history-restart'});
+    refreshFavoriteHistory = () => {
+      const state = getFavoriteHistoryStatus() || {};
+      run.disabled = !!state.busy || !!state.done;
+      run.textContent = state.pages ? copy.historyContinue : copy.historyStart;
+      stop.disabled = !state.busy; restart.disabled = !!state.busy;
+      const issue = state.error || state.warning;
+      status.textContent = copy.historyProgress(state) + (issue ? ` ${copy.historyErrors[issue] || copy.historyError}` : '');
+    };
+    const invoke = async callback => {
+      try { const pending = callback(); refreshFavoriteHistory(); await pending; }
+      catch { announce(copy.historyError, true); }
+      finally { refreshFavoriteHistory(); }
+    };
+    run.addEventListener('click', () => invoke(runFavoriteHistory));
+    stop.addEventListener('click', () => invoke(stopFavoriteHistory));
+    restart.addEventListener('click', () => invoke(restartFavoriteHistory));
+    section.append(element('h3',copy.history),element('p',copy.historyHelp,{id:'ct-history-help',class:'ct-local-note'}),run,stop,restart,status);
+    body.append(section);
+    window.addEventListener('ct-favorite-history-change', refreshFavoriteHistory);
+    refreshFavoriteHistory();
   }
 
   if (typeof restoreVisibleFavorites === 'function') {
@@ -651,6 +691,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     clearTimeout(searchRetryTimer);
     document.removeEventListener('input', onSearchUserInput, true);
     window.removeEventListener('storage', onStorage);
+    window.removeEventListener('ct-favorite-history-change', refreshFavoriteHistory);
     window.removeEventListener('popstate', refresh);
     viewport?.removeEventListener('resize', queueViewport);
     viewport?.removeEventListener('scroll', queueViewport);

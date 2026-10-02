@@ -558,7 +558,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.14.0';
+    document.documentElement.dataset.ctActiveVersion = '6.15.0';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -569,6 +569,10 @@
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
       restoreVisibleFavorites: ctRestoreVisibleFavorites,
+      getFavoriteHistoryStatus: ctFavoriteHistoryStatus,
+      runFavoriteHistory: ctRunFavoriteHistory,
+      stopFavoriteHistory: ctStopFavoriteHistory,
+      restartFavoriteHistory: ctRestartFavoriteHistory,
       getClassicAppearance: classicAppearanceEnabled,
       setClassicAppearance: enabled => {
         if (!saveJSON('ct-classic-appearance-v1', enabled === true)) throw new Error('Storage unavailable');
