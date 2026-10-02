@@ -7,6 +7,70 @@
   const ctBadgeImageStates = new WeakMap();
   const ctBadgeRequests = new WeakMap();
 
+  function ctBadgeLabel(kind) {
+    const labels = { founder: '創設メンバー', fighter: 'ファイター', centurion: 'センチュリオン',
+      'team-member': '運営メンバー', ambassador: 'Tweetアンバサダー', wing: 'ウィング', press: 'プレス' };
+    return typeof CT_LOCALE !== 'undefined' && CT_LOCALE === 'ja' ? labels[kind] || '' : ctOfficialBadgeKinds[kind] || '';
+  }
+
+  function ctBadgeJapaneseDescription(value, kinds) {
+    if (typeof CT_LOCALE === 'undefined' || CT_LOCALE !== 'ja' || typeof value !== 'string') return null;
+    const names = value.split(' + ');
+    const entries = Object.entries(ctOfficialBadgeKinds);
+    const selected = names.map(name => entries.find(([, label]) => label === name)?.[0]);
+    // Accept complete, known role combinations backed by the current artwork.
+    // Display names, custom descriptions and numbered membership labels stay intact.
+    return selected.length <= 7 && selected.every(kind => kind && kinds.includes(kind)) &&
+      new Set(selected).size === selected.length ? selected.map(ctBadgeLabel).join(' + ') : null;
+  }
+
+  function ctBadgeDescriptionProtected(el) {
+    return !!el.closest('[data-ct-owned],[data-ct-local-ui],[data-user-content],.tl-user-text,' +
+      '[data-testid="tweet-text"],[data-testid="profile-bio"],[translate="no"],.notranslate,' +
+      '[contenteditable]:not([contenteditable="false"]),.whitespace-pre-wrap,.break-words,.wrap-break-word');
+  }
+
+  function ctPatchNativeBadgeDescriptions(images, root) {
+    if (typeof CT_LOCALE === 'undefined' || CT_LOCALE !== 'ja') return;
+    const wrappers = new Set();
+    const tooltips = new Set();
+    for (const img of images) {
+      if (!img.matches('img.shrink-0.select-none') || !ctBadgeAsset(img.getAttribute('src')) || ctBadgeDescriptionProtected(img)) continue;
+      const wrapper = img.closest('span.relative.inline-flex.shrink-0.items-center.align-middle,' +
+        'button.relative.inline-flex.shrink-0.items-center.align-middle');
+      if (wrapper) wrappers.add(wrapper);
+      const tooltip = img.closest('[role="tooltip"].fixed.pointer-events-none');
+      if (tooltip) tooltips.add(tooltip);
+    }
+    const changedTooltip = root.closest?.('[role="tooltip"].fixed.pointer-events-none');
+    if (changedTooltip) tooltips.add(changedTooltip);
+    for (const wrapper of wrappers) {
+      if (ctBadgeDescriptionProtected(wrapper)) continue;
+      const kinds = [...wrapper.querySelectorAll('img.shrink-0.select-none')]
+        .map(img => ctBadgeAsset(img.getAttribute('src'))?.kind).filter(Boolean);
+      for (const attr of ['aria-label', 'title']) {
+        const value = wrapper.getAttribute(attr);
+        const out = ctBadgeJapaneseDescription(value, kinds);
+        if (out && value !== out) wrapper.setAttribute(attr, out);
+      }
+    }
+    for (const tooltip of tooltips) {
+      if (ctBadgeDescriptionProtected(tooltip)) continue;
+      const box = tooltip.firstElementChild;
+      const artwork = box?.firstElementChild;
+      const label = artwork?.nextElementSibling;
+      if (!box?.matches('div.bg-tl-app-card.border.flex.flex-col.items-center') ||
+          !artwork?.matches('span.inline-flex.flex-wrap.justify-center') ||
+          !label?.matches('span.font-bold.text-tl-app-text.text-center.leading-tight') ||
+          label.children.length || label.childNodes.length !== 1 || label.firstChild.nodeType !== Node.TEXT_NODE ||
+          !artwork.children.length || [...artwork.children].some(img => !img.matches('img.shrink-0.select-none') ||
+            !ctBadgeAsset(img.getAttribute('src')))) continue;
+      const kinds = [...artwork.children].map(img => ctBadgeAsset(img.getAttribute('src')).kind);
+      const out = ctBadgeJapaneseDescription(label.firstChild.nodeValue, kinds);
+      if (out && label.firstChild.nodeValue !== out) label.firstChild.nodeValue = out;
+    }
+  }
+
   function ctBadgeAsset(value) {
     try {
       const url = new URL(value, location.origin);
@@ -139,7 +203,7 @@
     group.setAttribute('role', 'img');
     const labelKinds = kinds.filter(kind => !(kind === 'founder' && kinds.includes('fighter')) &&
       !(kind === 'fighter' && kinds.includes('centurion')));
-    group.setAttribute('aria-label', labelKinds.map(kind => ctOfficialBadgeKinds[kind]).join(' + '));
+    group.setAttribute('aria-label', labelKinds.map(ctBadgeLabel).join(' + '));
     group.title = group.getAttribute('aria-label');
     group.replaceChildren(...kinds.map(kind => {
       const img = document.createElement('img');
@@ -177,9 +241,11 @@
   }
 
   function patchOfficialBadges(root = document) {
-    const images = [...(root.querySelectorAll?.('img[src]') || [])];
-    if (root.matches?.('img[src]')) images.push(root);
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const images = [...(host.querySelectorAll?.('img[src]') || [])];
+    if (host.matches?.('img[src]')) images.push(host);
     images.forEach(ctUpgradeBadgeImage);
+    ctPatchNativeBadgeDescriptions(images, host);
     const scopes = new Set(root.querySelectorAll?.('article,[role="dialog"][aria-label="Account menu"]') || []);
     if (root.matches?.('article,[role="dialog"][aria-label="Account menu"]')) scopes.add(root);
     const parent = root.closest?.('article,[role="dialog"][aria-label="Account menu"]');

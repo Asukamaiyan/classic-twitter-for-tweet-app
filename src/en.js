@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.13.0
+// @version      6.14.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -962,5 +962,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.13.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.14.0 loaded');
 })();

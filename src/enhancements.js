@@ -1,5 +1,5 @@
 /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -27,6 +27,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     deviceUnsupported: 'このブラウザでは端末内翻訳を利用できません。Safari／Stayとスマートフォンではサイトの翻訳をご利用ください。',
     sourceLanguage: '翻訳する投稿の言語', prepareModel: 'モデルを準備', preparingModel: '準備中…',
     translationStatus: '翻訳の状態',
+    favorites: 'お気に入りの復元', restoreFavorites: '読み込み済みのお気に入りを復元', restoringFavorites: '確認中…',
+    restoreHelp: '今の画面で読み込んだお気に入り済みのツイートを、このブラウザに保存します（1回40件まで）。過去の全履歴は取得できません。',
+    restoreResult: (saved, unresolved) => `${saved}件を保存しました。${unresolved ? ` ${unresolved}件は特定できませんでした。詳細画面か原文を開いて再度お試しください。` : ''}`,
+    restoreError: 'お気に入りを確認できませんでした。ログイン状態と通信を確認して、もう一度お試しください。',
 
     bookmarks: '保存した投稿', bookmarkLabel: '投稿のメモ（任意）', bookmarkSave: 'この投稿を保存',
     bookmarkHelp: '投稿の詳細画面を開くと保存できます。最大 50 件。削除された投稿や非公開の投稿は閲覧できない場合があります。',
@@ -57,6 +61,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     deviceUnsupported: 'On-device translation is unavailable here. Use site translation in Safari/Stay and on mobile.',
     sourceLanguage: 'Language of posts to translate', prepareModel: 'Prepare model', preparingModel: 'Preparing…',
     translationStatus: 'Translation status',
+    favorites: 'Restore Favorites', restoreFavorites: 'Restore loaded Favorites', restoringFavorites: 'Checking…',
+    restoreHelp: 'Save already-favorited Tweets loaded on this screen in this browser (up to 40 per run). This cannot retrieve your entire past history.',
+    restoreResult: (saved, unresolved) => `Saved ${saved}. ${unresolved ? `${unresolved} could not be identified. Open the detail page or original text and try again.` : ''}`,
+    restoreError: 'Could not check Favorites. Check your sign-in and connection, then try again.',
 
     bookmarks: 'Saved posts', bookmarkLabel: 'Note for this post (optional)', bookmarkSave: 'Save this post',
     bookmarkHelp: 'Open a post’s detail page to save it. Up to 50 posts. Deleted or private posts may be unavailable later.',
@@ -281,6 +289,21 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
       refreshTranslation();
     }
     body.append(automatic);
+  }
+
+  if (typeof restoreVisibleFavorites === 'function') {
+    const section = element('section');
+    const restore = element('button', copy.restoreFavorites, {type:'button',id:'ct-restore-favorites','aria-describedby':'ct-restore-favorites-help'});
+    restore.addEventListener('click', async () => {
+      restore.disabled = true; restore.textContent = copy.restoringFavorites;
+      try {
+        const result = await restoreVisibleFavorites();
+        if (result) announce(copy.restoreResult(result.saved, result.unresolved));
+      } catch { announce(copy.restoreError, true); }
+      finally { restore.disabled = false; restore.textContent = copy.restoreFavorites; }
+    });
+    section.append(element('h3',copy.favorites),element('p',copy.restoreHelp,{id:'ct-restore-favorites-help',class:'ct-local-note'}),restore);
+    body.append(section);
   }
 
   const filterSection = element('section');

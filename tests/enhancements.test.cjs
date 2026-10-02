@@ -54,6 +54,17 @@ test('filters are opt-in and tools are keyboard-accessible', t => {
   assert.equal(document.activeElement, toggle);
 });
 
+test('Favorites restoration is explicit and reports partial recovery or a retryable failure', async t => {
+  let called=0,fail=false;
+  const {document}=setup(t,{options:{restoreVisibleFavorites:async()=>{called++;if(fail) throw new Error('offline');return {saved:3,unresolved:1};}}});
+  const button=document.getElementById('ct-restore-favorites');assert.equal(called,0);
+  button.click();await new Promise(resolve=>setImmediate(resolve));
+  assert.match(document.getElementById('ct-local-tools-status').textContent,/Saved 3.*1 could not be identified/);
+  assert.equal(button.disabled,false);fail=true;button.click();await new Promise(resolve=>setImmediate(resolve));
+  assert.match(document.getElementById('ct-local-tools-status').textContent,/Could not check Favorites/);
+  assert.equal(button.disabled,false);
+});
+
 test('save feedback stays outside the scrolling form body and inputs reference visible help', t => {
   const { document, window } = setup(t);
   const panel = document.getElementById('ct-local-tools-panel');

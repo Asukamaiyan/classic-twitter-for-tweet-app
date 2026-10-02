@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.13.0
+// @version      6.14.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -243,6 +243,8 @@
     ['Loading profile...', 'プロフィールを読み込み中…'],
     ['Loading posts...', 'ツイートを読み込み中…'],
     ['Loading more posts...', 'ツイートをさらに読み込み中…'],
+    ['Loading replies...', '返信を読み込み中…'],
+    ['This post is no longer available', 'このツイートは表示できません'],
     ['Loading followers...', 'フォロワーを読み込み中…'],
     ['Loading following...', 'フォロー中のユーザーを読み込み中…'],
     ['Loading more', 'さらに読み込み中…'],
@@ -336,6 +338,7 @@
 
     // Translation / profile copy
     ['Translate', '翻訳する'],
+    ['Translating', '翻訳中'],
     ['Translated', '翻訳済み'],
     ["Couldn’t translate. Try again.", '翻訳できませんでした。もう一度お試しください。'],
     ['Manage your public profile, photo, and bio.', 'プロフィール、写真、自己紹介を編集できます'],
@@ -876,7 +879,7 @@ if (/^just\s+now$/i.test(t)) {
     }
 
     if ((m = t.match(/^Joined\s+(.+)$/i))) {
-      return `${m[1]}からTwitterを利用しています`;
+      return `${m[1]}からTweetを利用しています`;
     }
 
     if ((m = t.match(/^(\d+)\s+codes?\s+remaining$/i))) {
@@ -884,7 +887,7 @@ if (/^just\s+now$/i.test(t)) {
     }
 
     if ((m = t.match(/^参加した人数\s+(.+)$/))) {
-      return `${m[1]}からTwitterを利用しています`;
+      return `${m[1]}からTweetを利用しています`;
     }
 
     if ((m = t.match(/^([\d,.]+[KMB]?)\s+Following$/i))) {
@@ -1107,6 +1110,85 @@ if (/^just\s+now$/i.test(t)) {
       Number.isFinite(Date.parse(title));
   }
 
+  function isNativeReplyTimestamp(el) {
+    if (!el?.matches('span.text-tl-app-text-muted.shrink-0') ||
+        el.hasAttribute('title') || !el.closest('article') ||
+        el.closest('button,a,[role="button"]')) return false;
+    // Inline replies omit the main tweet's ISO title. Their timestamp has a
+    // fixed position between the author separator and the native action menu.
+    const header = el.parentElement;
+    const separator = el.previousElementSibling;
+    const author = header?.firstElementChild;
+    const separatorIndex = [...(header?.children || [])].indexOf(separator);
+    const decorations = [...(header?.children || [])].slice(1, separatorIndex);
+    return !!header?.matches('div.flex.items-center.gap-1.min-w-0') &&
+      separatorIndex >= 1 && decorations.every(marker =>
+        marker.matches('span.ct-official-badges[data-ct-owned][role="img"]') && marker.children.length &&
+        [...marker.children].every(img => img.matches('img') &&
+          /^https:\/\/app\.tweet\.app\/assets\/(?:founder|fighter|centurion|team-member|ambassador|wing|press)-badge-(?:36|96)\.png$/.test(img.getAttribute('src') || '')) ||
+        marker.matches('span.ct-founder') && !marker.children.length && /^#\d{5,}$/.test(clean(marker.textContent)) &&
+          marker.getAttribute('title') === `Founder Number ${clean(marker.textContent)}`) &&
+      !!author?.matches('button.font-bold.truncate.hover\\:underline') &&
+      !!separator?.matches('span.text-tl-app-text-muted') && clean(separator.textContent) === '·' &&
+      !!header.querySelector(':scope > div.flex.items-center.shrink-0.ml-auto') &&
+      !!header.nextElementSibling?.matches('p.tl-user-text.whitespace-pre-wrap');
+  }
+
+  function isNativeReplyOptionsButton(el) {
+    return !!el?.matches('button.p-2.rounded-full.text-tl-app-text-muted') && !!el.closest('article') &&
+      !!el.parentElement?.matches('div.relative') &&
+      !!el.querySelector(':scope > svg.lucide-ellipsis-vertical[width="18"][height="18"]');
+  }
+
+  function nativeLocalizationParentPostPreview(el) {
+    const button = el?.closest('button.flex.w-full.items-start.gap-3.px-4.pt-3.pb-2.text-left');
+    if (!button?.parentElement?.matches('div.border-b.border-tl-app-border') ||
+        button !== button.parentElement.firstElementChild ||
+        !button.nextElementSibling?.matches('article')) return null;
+    const body = button.querySelector(':scope > div.min-w-0.flex-1');
+    const header = body?.firstElementChild;
+    return header?.matches('div.flex.min-w-0.flex-wrap.items-center.gap-1.leading-4') &&
+      header.firstElementChild?.matches('span.font-semibold.truncate') &&
+      header.children[1]?.matches('span.text-tl-app-text-muted.truncate') &&
+      /^@[A-Za-z0-9_.-]+$/.test(clean(header.children[1].textContent)) ? { button, body, header } : null;
+  }
+
+  function isNativeParentPostTimestamp(el) {
+    const preview = nativeLocalizationParentPostPreview(el);
+    return !!preview && el.matches('span.shrink-0.text-tl-app-text-muted') && !el.hasAttribute('title') &&
+      el.parentElement === preview.header && el === preview.header.lastElementChild &&
+      el.previousElementSibling?.matches('span.text-tl-app-text-muted') &&
+      clean(el.previousElementSibling.textContent) === '·';
+  }
+
+  function isNativeTranslationMetadata(el) {
+    if (!el?.matches('p.text-tl-app-text-muted[aria-live="polite"]') || !el.closest('article') ||
+        !el.parentElement?.matches('div.mt-0\\.5') ||
+        !el.querySelector(':scope > span.select-none')) return false;
+    return [...el.children].some(child => child.matches('button.text-sky-500,button.text-tl-app-text-muted') &&
+      /^(?:Show translation|Show original|Translating…|翻訳を表示|原文を表示|翻訳中…)$/.test(clean(child.textContent)));
+  }
+
+  function nativeLocalizationMonthNumber(value) {
+    const month = value.toLowerCase().replace(/\.$/, '');
+    return ['january', 'february', 'march', 'april', 'may', 'june',
+      'july', 'august', 'september', 'october', 'november', 'december'].findIndex(name =>
+      name === month || name.slice(0, 3) === month || name === 'september' && month === 'sept') + 1;
+  }
+
+  function nativeTimestampJapaneseText(el, text) {
+    if (!isNativeLocalizationTimestamp(el) && !isNativeReplyTimestamp(el) && !isNativeParentPostTimestamp(el) &&
+        !isNativeNotificationTimestamp(el)) return null;
+    const relative = text.match(/^(\d+)([smhd])$/);
+    if (relative) return relative[1] + { s: '秒前', m: '分前', h: '時間前', d: '日前' }[relative[2]];
+    // The native relative-time formatter uses an English month after a week.
+    const date = text.match(/^([A-Za-z]+\.?) (\d{1,2})$/);
+    const month = date && nativeLocalizationMonthNumber(date[1]);
+    const day = date && Number(date[2]);
+    return month && day >= 1 && day <= [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?
+      `${month}月${day}日` : null;
+  }
+
   function isNativeEditedIndicator(el) {
     if (!el?.matches('span.text-tl-app-text-muted[title]') ||
         !el.closest('article') || el.closest('button,a,[role="button"]') ||
@@ -1130,7 +1212,7 @@ if (/^just\s+now$/i.test(t)) {
     const parent = el.parentElement;
     const strong = el.firstElementChild;
     if (/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname) &&
-        strong?.matches('strong.font-extrabold.text-tl-app-text') && /^[\d,]+$/.test(clean(strong.textContent)) &&
+        strong?.matches('strong.font-extrabold.text-tl-app-text') && /^[\d,.]+[KMB]?$/.test(clean(strong.textContent)) &&
         parent?.querySelector(':scope > button')) return true;
     return !!el.closest('aside') && el.classList.contains('mt-0.5') && parent?.matches('button.group') &&
       parent.children.length === 2 && parent.lastElementChild === el &&
@@ -1249,6 +1331,11 @@ if (/^just\s+now$/i.test(t)) {
     if (isProtectedLocalizationElement(el)) return false;
     if (localizationNotificationAction(node) || isNativeNotificationTimestamp(el)) return true;
     if (localizationNotificationRow(el)) return false;
+    if (isNativeParentPostTimestamp(el)) return true;
+    if (nativeLocalizationParentPostPreview(el) && el.matches('p.italic.leading-5.text-tl-app-text-muted') &&
+        clean(node.nodeValue) === 'This post is no longer available') return true;
+    if (isNativeTranslationMetadata(el) && node === el.firstChild &&
+        /^(?:Translated|Translated from .{1,80})$/.test(clean(node.nodeValue))) return true;
     if (isNativeLocalizationPollUI(el)) return true;
     if (nativeLocalizationAccountMenu(el)) return node === el.firstChild &&
       /^(?:Report|Mute unavailable|(?:Mute|Unmute) @[A-Za-z0-9_.-]+)$/.test(clean(node.nodeValue));
@@ -1269,6 +1356,9 @@ if (/^just\s+now$/i.test(t)) {
     const control = el.closest('button,[role="button"],[role="tab"],[role="menuitem"],summary');
     if (control) {
       if (control.querySelector('img') || /@[A-Za-z0-9_.-]/.test(clean(control.textContent))) return false;
+      if (text === 'Translating' && el === control && control.matches('button.text-tl-app-text-muted[aria-busy="true"]') &&
+          control.parentElement?.matches('p.text-tl-app-text-muted[aria-live="polite"]') &&
+          control.parentElement.parentElement?.matches('div.mt-0\\.5') && control.closest('article')) return true;
       // User cards are buttons too. Paragraphs and styled names inside those
       // buttons are data, not labels. Real notification actions are handled above.
       const paragraph = el.closest('p');
@@ -1276,7 +1366,7 @@ if (/^just\s+now$/i.test(t)) {
       if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Favorite|Favorites|Favorited|Unfavorite|お気に入り|お気に入り済み|お気に入りを解除|いいね|いいね済み|いいねを取り消す|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
       return true;
     }
-    if (isNativeLocalizationTimestamp(el) || isNativeEditedIndicator(el)) return true;
+    if (isNativeLocalizationTimestamp(el) || isNativeReplyTimestamp(el) || isNativeEditedIndicator(el)) return true;
     if (el.closest('[role="status"],[role="alert"]')) return true;
     if (el.closest('article')) return false;
     if (el.closest('label,legend')) return true;
@@ -1287,6 +1377,9 @@ if (/^just\s+now$/i.test(t)) {
       // Profile headings contain display names; all other static headings are
       // still restricted to exact dictionary entries by translateTextNode.
       if (/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname) && heading.tagName !== 'H1' &&
+          !(heading.matches('aside h3.font-semibold.text-tl-app-text.shrink-0') &&
+            heading.parentElement?.matches('div.bg-tl-app-card.border.border-tl-app-border') &&
+            /^(?:Who to follow|Trends for you|おすすめユーザー|おすすめのトレンド)$/.test(text)) &&
           !(location.pathname.replace(/\/$/, '') === '/profile' && heading.matches('h2.truncate') &&
             heading.closest('.sticky') && /^(?:Feed|プロフィール)$/.test(text)) &&
           !(heading.matches('h3.text-xs.font-bold.uppercase.tracking-wider') &&
@@ -1396,7 +1489,8 @@ if (/^just\s+now$/i.test(t)) {
         const likers = el.matches('[data-testid="tweet-like-action-count"]') &&
           value?.match(/^View (\d+) likes?$/);
         const choice = nativeLocalizationPoll(el)?.compose && value?.match(/^Remove choice (\d+)$/);
-        const out = choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
+        const out = value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
+          choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
           likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value);
         if (out && value !== out) ctRememberLocalization(el, attr, out);
@@ -1411,14 +1505,15 @@ if (/^just\s+now$/i.test(t)) {
     // Dynamic replacements belong to their specific UI contexts. In particular,
     // never parse actor names or dates from arbitrary text that resembles a UI.
     const el = node.parentElement;
-    const relative = (isNativeLocalizationTimestamp(el) || isNativeNotificationTimestamp(el)) && text.match(/^(\d+)([smhd])$/);
+    const timestamp = nativeTimestampJapaneseText(el, text);
+    const sourceLanguage = isNativeTranslationMetadata(el) && node === el.firstChild && text.match(/^Translated from (.{1,80})$/);
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
-    const units = { s: '秒前', m: '分前', h: '時間前', d: '日前' };
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
-    let out = nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || (relative ? relative[1] + units[relative[2]] :
-      remaining ? `${remaining[1]}個のコードが残っています` :
+    let out = nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+      (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
+      (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
-      isNativeTweetCount(el) && /^([\d,]+) tweets?$/i.test(text) ? `${text.match(/^([\d,]+)/)[1]}件のツイート` :
+      isNativeTweetCount(el) && /^([\d,.]+[KMB]?) tweets?$/i.test(text) ? `${text.match(/^([\d,.]+[KMB]?)/)[1]}件のツイート` :
       isNativeTweetCount(el) && /^Tweets?$/i.test(text) ? 'ツイート' :
       /^\/profile\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
         el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text) ||
@@ -2124,15 +2219,33 @@ if (/^just\s+now$/i.test(t)) {
 
   function patchProfileJoinedDate(root = document) {
     if (!/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname)) return;
+    const metadata = new Set();
     for (const node of localizationScopeNodes(root)) {
       const el = node.parentElement;
       if (isProtectedLocalizationElement(el) || el.closest('article')) continue;
       // The profile metadata uses a calendar icon. Location/bio/name strings
       // resembling "Joined ..." must never be interpreted as metadata.
-      if (!el.matches('span.inline-flex') || !el.querySelector('svg.lucide-calendar')) continue;
-      const text = clean(node.nodeValue);
-      if (/^(?:Joined|参加した人数)$/i.test(text)) replaceLocalizationText(node, '登録日:');
-      else if (/^Joined\s+/i.test(text)) replaceLocalizationText(node, text.replace(/^Joined\s+/i, '登録日: '));
+      if (el.matches('span.inline-flex') && el.querySelector(':scope > svg.lucide-calendar') &&
+          [...el.children].every(child => child.matches('svg.lucide-calendar'))) metadata.add(el);
+    }
+    for (const el of metadata) {
+      // React renders Joined, a spacer and the localized month as separate
+      // nodes. Keep every node and the calendar icon for subsequent renders.
+      const nodes = [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE);
+      const text = clean(nodes.map(node => node.nodeValue).join(''))
+        .replace(/^(?:Joined|登録日\s*[:：]|参加した人数)\s*/i, '')
+        .replace(/から(?:Tweet|Twitter)を利用しています$/, '');
+      const english = text.match(/^([A-Za-z]+\.?)\s+(\d{4})$/);
+      const japanese = text.match(/^(\d{4})年\s*(\d{1,2})月$/);
+      const numeric = text.match(/^(\d{4})[/-](\d{1,2})$/) || text.match(/^(\d{1,2})[/.](\d{4})$/);
+      const year = english ? Number(english[2]) : japanese ? Number(japanese[1]) :
+        numeric ? Number(numeric[1].length === 4 ? numeric[1] : numeric[2]) : 0;
+      const month = english ? nativeLocalizationMonthNumber(english[1]) : japanese ? Number(japanese[2]) :
+        numeric ? Number(numeric[1].length === 4 ? numeric[2] : numeric[1]) : 0;
+      if (year < 1000 || month < 1 || month > 12) continue;
+      const output = `${year}年${month}月からTweetを利用しています`;
+      const last = nodes[nodes.length - 1];
+      for (const node of nodes) ctRememberLocalization(node, null, node === last ? output : '');
     }
   }
 
@@ -2234,6 +2347,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.13.0 loaded'
+    '🐦 Classic Twitter JP v6.14.0 loaded'
   );
 })();
