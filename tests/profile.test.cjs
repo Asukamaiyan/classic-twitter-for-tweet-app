@@ -601,7 +601,7 @@ test('Media restores confirmed older Favorites without requiring images and pres
   assert.equal(h.api.load()[0].savedAt, 123); const before = JSON.stringify(h.api.load());
   await h.api.media(true); assert.equal(JSON.stringify(h.api.load()), before);
   await h.select('favorites'); assert.deepEqual(favoriteRows(h), ['existing', 'older-liked', 'liked-reply']);
-  assert.match(h.document.getElementById('ct-favorites-panel').textContent, /not a complete history/);
+  assert.match(h.document.getElementById('ct-favorites-panel').textContent, /entire past history cannot be retrieved/);
 });
 
 test('read restoration rejects unconfirmed, deleted, muted, reposted, foreign or stale-account data', async t => {
