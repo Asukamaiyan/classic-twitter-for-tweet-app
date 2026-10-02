@@ -39,7 +39,7 @@ function harness(t, options = {}) {
   };
   window.eval(`const CT_LOCALE='${options.locale || 'en'}'; const KEY={favorites:'legacy.favorites'}; const API_ORIGIN='https://api.tweet.app'; let favoritesActive=false; let ctPageActive=true; ${source}
     window.profile={patch:patchFavoriteProfileTab, close:closeFavoritesPanel, render:renderFavoritesPanel, media:ctProfileLoadMedia, mutes:ctProfileLoadFavoriteMutes, state:ctProfileState,
-    save:ctProfileSaveFavorite, remove:ctProfileRemoveFavorite, load:ctProfileLoadFavorites, import:ctProfileImportFavorites, assets:ctProfileMediaAssets,
+    save:ctProfileSaveFavorite, remove:ctProfileRemoveFavorite, remember:ctProfileRememberLikedPosts, load:ctProfileLoadFavorites, import:ctProfileImportFavorites, assets:ctProfileMediaAssets,
     context:ctProfileContext, viewerClose:ctProfileCloseViewer, setActive:value=>{ctPageActive=value;}};`);
   return { window, document: window.document, api: window.profile, calls,
     pages: value => { pages = value; }, replies: value => { userReplies = value; }, muted: value => { mutedPages = value; }, override: value => { override = value; },
@@ -198,6 +198,48 @@ test('React timeline replacement is recognized and only the new verified sibling
   h.api.close(); assert.equal(next.hasAttribute('data-ct-profile-timeline-hidden'), false);
 });
 
+function nativeReplyEditor(document) {
+  const wrapper = document.createElement('div'); wrapper.className = 'relative';
+  const textarea = document.createElement('textarea');
+  for (const [key, value] of Object.entries({ name: 'compose-text', maxlength: '280', inputmode: 'text', rows: '1', autocomplete: 'off', 'data-form-type': 'other' })) textarea.setAttribute(key, value);
+  textarea.className = 'relative z-[1] bg-transparent whitespace-pre-wrap break-words [overflow-wrap:anywhere] w-full resize-none text-[0.9375rem] leading-5 text-tl-app-text placeholder:text-tl-app-text-muted outline-none py-1.5';
+  textarea.placeholder = 'Post your reply'; wrapper.append(textarea); return { wrapper, textarea };
+}
+
+test('native inline reply drafts keep profile tabs available and survive Media and Favorites tab switches', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('saved'));
+  const timeline = h.document.getElementById('native-timeline'); const article = timeline.querySelector('article');
+  article.querySelector('button').setAttribute('data-testid', 'tweet-like-action');
+  const { wrapper, textarea } = nativeReplyEditor(h.document); article.append(wrapper);
+  textarea.value = 'Unsaved reply Home Like Edited'; textarea.setSelectionRange(8, 13);
+  let inputEvents = 0; textarea.addEventListener('input', () => inputEvents++);
+  h.api.patch(); assert.ok(h.document.getElementById('ct-media-tab')); assert.ok(h.document.getElementById('ct-favorites-tab'));
+  await h.select('media'); assert.equal(timeline.hasAttribute('data-ct-profile-timeline-hidden'), true);
+  await h.select('favorites'); assert.equal(h.document.querySelector('textarea'), textarea);
+  h.document.querySelector('[role=tab][aria-label=Replies]').click();
+  assert.equal(timeline.hasAttribute('data-ct-profile-timeline-hidden'), false);
+  assert.equal(h.document.querySelector('textarea'), textarea); assert.equal(textarea.value, 'Unsaved reply Home Like Edited');
+  assert.equal(textarea.selectionStart, 8); assert.equal(textarea.selectionEnd, 13);
+  textarea.dispatchEvent(new h.window.Event('input', { bubbles: true })); assert.equal(inputEvents, 1);
+});
+
+test('unknown inputs, forms and unverified reply editors still leave the native timeline visible', async t => {
+  const variants = [
+    (h, article) => { const input = h.document.createElement('input'); article.append(input); },
+    (h, article) => { article.append(h.document.createElement('form')); },
+    (h, article) => { const form = h.document.createElement('div'); form.setAttribute('role', 'form'); article.append(form); },
+    (h, article) => { const { wrapper, textarea } = nativeReplyEditor(h.document); textarea.name = 'unverified'; article.append(wrapper); },
+    (h, article) => { const { wrapper } = nativeReplyEditor(h.document); h.document.getElementById('native-timeline').append(wrapper); },
+    (h, article) => { const { wrapper } = nativeReplyEditor(h.document); article.append(wrapper); article.querySelector('button').removeAttribute('data-testid'); }
+  ];
+  for (const add of variants) {
+    const h = harness(t); await h.ready(); const timeline = h.document.getElementById('native-timeline'); const article = timeline.querySelector('article');
+    article.querySelector('button').setAttribute('data-testid', 'tweet-like-action'); add(h, article); h.api.patch();
+    assert.equal(h.document.getElementById('ct-media-tab'), null); assert.equal(h.document.getElementById('ct-favorites-tab'), null);
+    assert.equal(timeline.hasAttribute('data-ct-profile-timeline-hidden'), false);
+  }
+});
+
 test('hidden pages and page-inactive state pause Media requests while native controls stay available', async t => {
   const h = harness(t); await h.ready(); h.document.getElementById('ct-media-tab').click(); await new Promise(resolve => setTimeout(resolve, 0));
   h.calls.length = 0; Object.defineProperty(h.document, 'hidden', { configurable: true, value: true }); await h.api.media(true); assert.equal(h.calls.length, 0);
@@ -210,6 +252,7 @@ test('failed Refresh on completed history can retry from the first page without 
   const h = harness(t); await h.ready(); h.pages([{ posts: [post('before')], nextCursor: null }]); await h.select('media');
   h.override(endpoint => endpoint.pathname.endsWith('/posts') ? null : undefined); await h.api.media(true);
   assert.ok(h.document.querySelector('[data-ct-profile-post=before]')); assert.equal(h.api.state.media.done, true);
+  assert.equal(h.api.state.mediaCache.has('uid-viewer:viewer'), false);
   assert.equal(h.api.state.media.retryRefresh, true); const calls = h.calls.length;
   h.override(null); h.pages([{ posts: [post('after')], nextCursor: null }]); await h.api.media();
   assert.ok(h.calls.length > calls); assert.equal(h.document.querySelector('[data-ct-profile-post=before]'), null);
@@ -317,6 +360,55 @@ test('reply media is checked once, refreshed explicitly, and capped at the lates
   await h.api.media(true); assert.equal(h.calls.filter(url => url.endsWith('/replies')).length, 2);
 });
 
+test('ready Tweet media is displayed while replies are pending and keeps existing images, videos and focus', async t => {
+  const h = harness(t); await h.ready(); let release;
+  h.pages([{ posts: [post('ready-photo'), post('ready-video', [{ media_type: 'video', public_url: 'https://media.example/ready.mp4' }])], nextCursor: null }]);
+  h.override(endpoint => endpoint.pathname.endsWith('/replies') ? new Promise(resolve => { release = resolve; }) : undefined);
+  await h.select('media');
+  const row = h.document.querySelector('[data-ct-profile-post=ready-photo]');
+  const image = row.querySelector('img'); const gallery = row.querySelector('.ct-profile-gallery');
+  gallery.scrollLeft = 47;
+  const video = h.document.querySelector('video'); video.currentTime = 12;
+  const link = row.querySelector('.ct-profile-post-link'); link.focus();
+  const removedRows = [];
+  const observer = new h.window.MutationObserver(records => {
+    for (const record of records) for (const node of record.removedNodes) if (node.matches?.('.ct-profile-row')) removedRows.push(node);
+  });
+  observer.observe(h.document.getElementById('ct-media-panel'), { childList: true });
+  assert.equal(h.api.state.media.busy, true); assert.equal(h.api.state.media.repliesChecked, false);
+  release({ replies: [{ post: post('later-reply', undefined, { parentId: 'parent' }) }] }); await tick();
+  assert.ok(h.document.querySelector('[data-ct-profile-post=later-reply]'));
+  assert.equal(h.document.querySelector('[data-ct-profile-post=ready-photo]'), row);
+  assert.equal(row.querySelector('img'), image); assert.equal(gallery.scrollLeft, 47);
+  assert.equal(h.document.querySelector('video'), video); assert.equal(video.currentTime, 12);
+  observer.disconnect(); assert.deepEqual(removedRows, []);
+  assert.equal(h.document.activeElement, link); assert.equal(h.api.state.media.busy, false);
+});
+
+test('ready reply media is displayed before slow Tweets and failed Tweets remain retryable', async t => {
+  const h = harness(t); await h.ready(); let release;
+  h.replies([{ post: post('ready-reply', undefined, { parentId: 'parent' }) }]);
+  h.override(endpoint => endpoint.pathname.endsWith('/posts') ? new Promise(resolve => { release = resolve; }) : undefined);
+  await h.select('media');
+  const row = h.document.querySelector('[data-ct-profile-post=ready-reply]');
+  assert.ok(row); assert.equal(h.api.state.media.busy, true);
+  release(null); await tick();
+  assert.equal(h.document.querySelector('[data-ct-profile-post=ready-reply]'), row);
+  assert.match(h.api.state.media.error, /Tweet photos and videos could not be loaded/);
+  h.override(null); h.pages([{ posts: [post('retried-photo')], nextCursor: null }]); await h.api.media();
+  assert.ok(h.document.querySelector('[data-ct-profile-post=retried-photo]')); assert.equal(h.api.state.media.error, '');
+});
+
+test('a rejected replies request does not discard ready photos or prevent a later retry', async t => {
+  const h = harness(t); await h.ready(); h.pages([{ posts: [post('kept-photo')], nextCursor: null }]);
+  h.override(endpoint => endpoint.pathname.endsWith('/replies') ? Promise.reject(new Error('network')) : undefined);
+  await h.select('media'); assert.ok(h.document.querySelector('[data-ct-profile-post=kept-photo]'));
+  assert.match(h.api.state.media.error, /Reply photos and videos/); const posts = h.calls.filter(url => url.includes('/posts?')).length;
+  h.override(null); h.replies([{ post: post('retried-reply', undefined, { parentId: 'parent' }) }]); await h.api.media();
+  assert.ok(h.document.querySelector('[data-ct-profile-post=retried-reply]')); assert.equal(h.api.state.media.error, '');
+  assert.equal(h.calls.filter(url => url.includes('/posts?')).length, posts);
+});
+
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const mutedUser = username => ({ userId: 'uid-' + username.toLowerCase(), username, displayName: username, avatarUrl: 'https://images.example/avatar.jpg' });
 function favoriteRows(h) { return [...h.document.querySelectorAll('#ct-favorites-panel [data-ct-profile-post]')].map(row => row.dataset.ctProfilePost); }
@@ -373,7 +465,7 @@ test('bad mute records and invalid or repeating cursors never turn an incomplete
   assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 2); assert.equal(h.api.state.favoriteMutes.done, false); assert.deepEqual(favoriteRows(h), []);
 });
 
-test('refreshing and returning to Favorites check native mutes anew and clear previously displayed snapshots while waiting', async t => {
+test('explicit Favorite refresh clears snapshots while waiting and recent complete mute checks are reused briefly', async t => {
   const h = harness(t); await h.ready(); h.api.save(item('saved')); await h.select('favorites'); assert.deepEqual(favoriteRows(h), ['saved']);
   let release; h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { release = resolve; }) : undefined);
   favoriteControl(h, 'Refresh view').click(); assert.deepEqual(favoriteRows(h), []); await tick();
@@ -381,6 +473,9 @@ test('refreshing and returning to Favorites check native mutes anew and clear pr
   assert.equal(h.api.load().length, 1);
   h.override(null); h.muted([{ success: true, users: [], nextCursor: null }]); h.document.querySelector('[role=tab][aria-label=Tweets]').click();
   const before = h.calls.filter(url => url.startsWith('/api/users/muted')).length; await h.select('favorites');
+  assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, before); assert.deepEqual(favoriteRows(h), []);
+  h.api.state.muteCache.get('uid-viewer').at = Date.now() - 30001;
+  h.document.querySelector('[role=tab][aria-label=Tweets]').click(); await h.select('favorites');
   assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, before + 1); assert.deepEqual(favoriteRows(h), ['saved']);
 });
 
@@ -450,4 +545,81 @@ test('saves, removals and import during mute checking stay hidden until the curr
   assert.deepEqual(favoriteRows(h), ['saved-visible', 'legacy-visible']); assert.equal(h.api.load().length, 4);
   assert.equal(h.window.localStorage.getItem('legacy.favorites:owner'), 'uid-viewer');
   assert.equal(h.api.load().some(row => row.id === 'remove-me'), false);
+});
+
+test('returning to a recent profile reuses verified Media while expired or failed caches are rechecked', async t => {
+  const h = harness(t); await h.ready(); h.pages([{ posts: [post('cached-photo')], nextCursor: '1' }]); await h.select('media');
+  const before = h.calls.filter(url => /\/(?:posts|replies)/.test(url)).length;
+  h.route('/feed', 'viewer'); h.api.patch(); h.route('/profile', 'viewer'); await h.ready(); await h.select('media');
+  assert.ok(h.document.querySelector('[data-ct-profile-post=cached-photo]'));
+  assert.equal(h.calls.filter(url => /\/(?:posts|replies)/.test(url)).length, before);
+  h.api.state.mediaCache.get('uid-viewer:viewer').at = Date.now() - 30001;
+  h.route('/feed', 'viewer'); h.api.patch(); h.route('/profile', 'viewer'); await h.ready();
+  h.override(endpoint => endpoint.pathname.endsWith('/posts') ? null : undefined); await h.select('media');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=cached-photo]'), null); assert.match(h.api.state.media.error, /could not be loaded/);
+  assert.equal(h.api.state.mediaCache.has('uid-viewer:viewer'), false);
+  h.route('/feed', 'viewer'); h.api.patch(); h.route('/profile', 'viewer'); await h.ready();
+  h.override(null); h.pages([{ posts: [post('after-failure')], nextCursor: null }]); await h.select('media');
+  assert.ok(h.document.querySelector('[data-ct-profile-post=after-failure]'));
+});
+
+test('verified native mute actions invalidate short-lived caches without altering saved Favorites', async t => {
+  const h = harness(t); await h.ready(); h.pages([{ posts: [post('photo')], nextCursor: null }]); await h.select('media');
+  h.api.save(item('saved')); await h.select('favorites'); const stored = h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer');
+  assert.equal(h.api.state.muteCache.size, 1); assert.equal(h.api.state.mediaCache.size, 1);
+  const protectedButton = h.document.createElement('button'); protectedButton.innerHTML = '<svg class="lucide-volume-x"></svg><span class="min-w-0 truncate" title="Mute user">Mute user</span>';
+  const userContent = h.document.createElement('div'); userContent.dataset.userContent = ''; userContent.append(protectedButton); h.document.querySelector('article').append(userContent);
+  protectedButton.click(); assert.equal(h.api.state.muteCache.size, 1);
+  const button = h.document.createElement('button'); button.innerHTML = '<svg class="lucide-volume-x"></svg><span class="min-w-0 truncate" title="Mute user">Mute user</span>';
+  h.document.querySelector('article').append(button); button.click();
+  assert.equal(h.api.state.muteCache.size, 0); assert.equal(h.api.state.mediaCache.size, 0); assert.deepEqual(favoriteRows(h), []);
+  assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), stored);
+  h.muted([{ success: true, users: [mutedUser('alice')], nextCursor: null }]); await h.api.mutes(); assert.deepEqual(favoriteRows(h), []);
+});
+
+test('native profile and settings unmute controls invalidate cache while ordinary labels do not', async t => {
+  const h = harness(t); await h.ready(); await h.select('favorites');
+  const normal = h.document.createElement('button'); normal.textContent = 'Mute user'; h.document.body.append(normal); normal.click(); assert.equal(h.api.state.muteCache.size, 1);
+  const menu = h.document.createElement('div'); menu.setAttribute('role', 'menu');
+  menu.innerHTML = '<button role="menuitem"><svg class="lucide-volume-2"></svg><span class="min-w-0 truncate" title="Unmute @alice">Unmute @alice</span></button>';
+  h.document.body.append(menu); menu.querySelector('button').click(); assert.equal(h.api.state.muteCache.size, 0);
+  await h.api.mutes(); assert.equal(h.api.state.muteCache.size, 1);
+  const report = h.document.createElement('div'); report.setAttribute('role', 'dialog'); report.setAttribute('aria-modal', 'true'); report.setAttribute('aria-label', 'Report @alice'); report.className = 'bg-tl-app-card border';
+  report.innerHTML = '<h3 class="text-sm font-bold text-tl-app-text">Thank you</h3><button class="w-full rounded-full border" aria-busy="false">Mute @alice</button>';
+  h.document.body.append(report); report.querySelector('button').click(); assert.equal(h.api.state.muteCache.size, 0);
+  await h.api.mutes(); assert.equal(h.api.state.muteCache.size, 1);
+  h.window.history.replaceState({}, '', '/settings');
+  const unmute = h.document.createElement('button'); unmute.setAttribute('aria-label', 'Unmute @alice'); unmute.textContent = 'Unmute'; h.document.body.append(unmute); unmute.click();
+  assert.equal(h.api.state.muteCache.size, 0);
+});
+
+test('Media restores confirmed older Favorites without requiring images and preserves existing order and saved times', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('existing', { savedAt: 123, text: 'Old snapshot' }));
+  h.pages([{ posts: [post('older-liked', [], { hasLiked: true }), post('existing', [], { hasLiked: true })], nextCursor: null }]);
+  h.replies([{ post: post('liked-reply', [], { hasLiked: true, parentId: 'parent' }) }]); await h.select('media');
+  assert.deepEqual(Array.from(h.api.load(), row => row.id), ['existing', 'older-liked', 'liked-reply']);
+  assert.equal(h.api.load()[0].savedAt, 123); const before = JSON.stringify(h.api.load());
+  await h.api.media(true); assert.equal(JSON.stringify(h.api.load()), before);
+  await h.select('favorites'); assert.deepEqual(favoriteRows(h), ['existing', 'older-liked', 'liked-reply']);
+  assert.match(h.document.getElementById('ct-favorites-panel').textContent, /not a complete history/);
+});
+
+test('read restoration rejects unconfirmed, deleted, muted, reposted, foreign or stale-account data', async t => {
+  const h = harness(t); await h.ready();
+  const rejected = [post('not-liked'), post('false-liked', [], { hasLiked: false }), post('truthy', [], { hasLiked: 1 }),
+    post('deleted', [], { hasLiked: true, isDeleted: true }), post('muted', [], { hasLiked: true, status: 'MUTED' }),
+    post('repost', [], { hasLiked: true, isRepost: true }), post('original', [], { hasLiked: true, originalPostId: 'origin' }),
+    post('foreign', [], { hasLiked: true, authorUsername: 'alice' }), post('invalid', [], { hasLiked: true, authorUsername: 'bad handle' }),
+    post('missing-text', [], { hasLiked: true, text: null })];
+  assert.equal(h.api.remember(rejected, 'uid-viewer', 'viewer'), 0); assert.equal(h.api.load().length, 0);
+  assert.equal(h.api.remember([post('wrong-uid', [], { hasLiked: true })], 'uid-other', 'viewer'), 0);
+  h.api.save(item('kept')); h.api.remember([post('kept', [], { hasLiked: false })], 'uid-viewer', 'viewer'); assert.equal(h.api.load()[0].id, 'kept');
+});
+
+test('an old hasLiked read cannot revive a newer native Unlike, but a confirmed new Favorite can', async t => {
+  const h = harness(t); await h.ready(); const liked = post('removed', [], { hasLiked: true });
+  h.api.remember([liked], 'uid-viewer', 'viewer'); assert.equal(h.api.load().length, 1);
+  h.api.remove('removed', 'uid-viewer'); h.api.remember([liked], 'uid-viewer', 'viewer'); assert.equal(h.api.load().length, 0);
+  h.api.save(item('removed', { username: 'viewer' }), 'uid-viewer'); h.api.remember([liked], 'uid-viewer', 'viewer'); assert.equal(h.api.load().length, 1);
+  h.setAuth({ uid: 'uid-other', token: 'token-other' }); assert.equal(h.api.remember([liked], 'uid-viewer', 'viewer'), 0); assert.equal(h.api.load().length, 0);
 });

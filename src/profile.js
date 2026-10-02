@@ -4,7 +4,8 @@
     path: '', user: '', uid: null, authSeen: undefined, accountUser: '', active: '', tablist: null,
     timeline: null, panel: null, sequence: 0, identityBusy: false, identityRetry: 0,
     nativeSelection: new Map(), tabsBound: new WeakSet(), rendered: '', media: null, favoriteMutes: null,
-    storageBound: false, storageError: false, memory: new Map(), dirtyMemory: new Set(), viewer: null
+    storageBound: false, storageError: false, memory: new Map(), dirtyMemory: new Set(), viewer: null,
+    rowItems: new WeakMap(), muteCache: new Map(), mediaCache: new Map(), favoriteRemovals: new Map()
   };
   function ctProfileText(ja, en) { return CT_LOCALE === 'ja' ? ja : en; }
   function ctProfileId(value) {
@@ -75,11 +76,44 @@
   }
   function ctProfileSaveFavorite(item, expectedUid = ctProfileUID()) {
     if (!ctProfileId(item?.id) || !expectedUid || expectedUid !== ctProfileUID()) return false;
+    ctProfileState.favoriteRemovals.get(expectedUid)?.delete(item.id);
     return ctProfileWriteFavorites(expectedUid, [item, ...ctProfileLoadFavorites().filter(row => row.id !== item.id)].slice(0, 500));
   }
   function ctProfileRemoveFavorite(id, expectedUid = ctProfileUID()) {
     if (!ctProfileId(id) || !expectedUid || expectedUid !== ctProfileUID()) return false;
+    if (!ctProfileState.favoriteRemovals.has(expectedUid)) ctProfileState.favoriteRemovals.set(expectedUid, new Set());
+    const removed = ctProfileState.favoriteRemovals.get(expectedUid);
+    removed.add(id);
+    while (removed.size > 1000) removed.delete(removed.values().next().value);
     return ctProfileWriteFavorites(expectedUid, ctProfileLoadFavorites().filter(row => row.id !== id));
+  }
+  function ctProfileRememberLikedPosts(posts, expectedUid, expectedUser = null) {
+    if (!Array.isArray(posts) || !ctProfileId(expectedUid) || expectedUid !== ctProfileUID()) return 0;
+    const expectedHandle = expectedUser === null ? null : ctProfileHandle(expectedUser);
+    if (expectedUser !== null && !expectedHandle) return 0;
+    const previous = ctProfileLoadFavorites();
+    const known = new Map(previous.map(item => [item.id, item]));
+    const recovered = new Map();
+    const removed = ctProfileState.favoriteRemovals.get(expectedUid);
+    for (const post of posts.slice(0, 1000)) {
+      const username = ctProfileHandle(post?.authorUsername);
+      if (post?.hasLiked !== true || !ctProfileId(post.id) || !username ||
+          (expectedHandle && username !== expectedHandle) || post.isDeleted || post.status === 'MUTED' ||
+          post.isRepost || post.originalPostId || post.repostedBy || removed?.has(post.id) || typeof post.text !== 'string') continue;
+      const createdAt = post.createdAt ?? post.created_at;
+      recovered.set(post.id, { id: post.id, username,
+        name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : username,
+        avatar: ctProfileURL(post.authorAvatar), text: post.text.slice(0, 10000),
+        createdAt: typeof createdAt === 'string' && Number.isFinite(Date.parse(createdAt)) ? createdAt : '',
+        savedAt: known.get(post.id)?.savedAt ?? Date.now(), media: ctProfileMediaAssets(post) });
+    }
+    if (!recovered.size || expectedUid !== ctProfileUID()) return 0;
+    // Reading an old cache must not undo a newer native Unlike. Existing saved
+    // timestamps and row order remain stable when the same post is read again.
+    const items = previous.map(item => recovered.get(item.id) || item);
+    for (const [id, item] of recovered) if (!known.has(id)) items.push(item);
+    if (JSON.stringify(ctProfileFavoriteItems(items)) !== JSON.stringify(previous)) ctProfileWriteFavorites(expectedUid, items);
+    return [...recovered.keys()].filter(id => !known.has(id)).length;
   }
   function ctProfileLegacyFavorites() {
     try {
@@ -102,6 +136,14 @@
       ctProfileState.storageError = false;
     } catch { ctProfileState.storageError = true; }
     renderFavoritesPanel();
+  }
+  function ctProfileNativeReplyEditor(el, timeline) {
+    if (!el?.matches('textarea[name="compose-text"][maxlength="280"][inputmode="text"][rows="1"][autocomplete="off"][data-form-type="other"]') ||
+        !el.matches('.relative.bg-transparent.whitespace-pre-wrap.break-words.w-full.resize-none.text-tl-app-text.outline-none') ||
+        !el.parentElement?.matches('div.relative') || el.closest('[data-ct-owned],[data-ct-local-ui],[data-user-content],[contenteditable]')) return false;
+    const article = el.closest('article');
+    return !!article && timeline.contains(article) &&
+      [...article.querySelectorAll('button[data-testid="tweet-like-action"]')].some(button => button.closest('article') === article);
   }
   function ctProfileContext() {
     if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) return null;
@@ -131,9 +173,11 @@
       let timeline = tablist.nextElementSibling;
       while (timeline?.matches('[data-ct-profile-panel]')) timeline = timeline.nextElementSibling;
       // Current profile component renders one direct DIV for the active native
-      // timeline. Never hide an unknown container, header, form or tab control.
+      // timeline. Native inline reply editors can appear within its Tweets;
+      // hiding the timeline must retain their original nodes and draft values.
+      // Unknown forms, inputs and editor structures still fail open.
       if (!timeline?.matches('div') || timeline.matches('[role],[data-ct-owned],[data-ct-local-ui]') ||
-          timeline.querySelector('input,textarea,[role="form"]')) continue;
+          [...timeline.querySelectorAll('input,textarea,form,[role="form"]')].some(el => !ctProfileNativeReplyEditor(el, timeline))) continue;
       return { path: location.pathname, user, main, tablist, timeline, nativeTabs };
     }
     return null;
@@ -265,6 +309,33 @@
       if (event.key === ctProfileFavoriteKey(ctProfileUID() || '') || event.key === KEY.favorites + ':owner') renderFavoritesPanel();
     });
     window.addEventListener('pagehide', ctProfileCloseViewer);
+    document.addEventListener('click', event => {
+      const button = event.target.closest?.('button');
+      if (!button || button.disabled || button.closest('[data-ct-owned],[data-ct-local-ui],[data-user-content],.tl-user-text,.whitespace-pre-wrap,.break-words,[contenteditable]')) return;
+      const label = button.getAttribute('aria-label') || '';
+      const title = button.querySelector(':scope > span.min-w-0.truncate')?.getAttribute('title') || '';
+      const menuMute = button.querySelector(':scope > svg.lucide-volume-x,:scope > svg.lucide-volume-2') &&
+        /^(?:Mute user|Unmute user|ミュートする|ミュートを解除|(?:Mute|Unmute) @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+をミュート|@[A-Za-z0-9_.-]+のミュートを解除)$/.test(title) &&
+        (button.matches('[role="menuitem"]') || button.closest('article'));
+      const settingsUnmute = /^\/(?:settings)\/?$/.test(location.pathname) &&
+        /^(?:Unmute @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+のミュートを解除)$/.test(label) &&
+        /^(?:Unmute|ミュートを解除)$/.test(button.textContent.trim());
+      const report = button.closest('[role="dialog"][aria-modal="true"].bg-tl-app-card.border');
+      const reportMute = report && /^(?:Report @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+を報告)$/.test(report.getAttribute('aria-label') || '') &&
+        report.querySelector('h3.text-sm.font-bold.text-tl-app-text') && button.matches('button.w-full.rounded-full.border[aria-busy]') &&
+        /^(?:Mute @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+をミュート)$/.test(button.textContent.trim());
+      if (!menuMute && !settingsUnmute && !reportMute) return;
+      // A native mute action changes visibility. Discard only short-lived
+      // read caches; never alter the user's saved Favorites.
+      ctProfileState.muteCache.clear();
+      ctProfileState.mediaCache.clear();
+      ctProfileState.sequence++;
+      ctProfileState.favoriteMutes = null;
+      ctProfileState.media = null;
+      ctProfileState.rendered = '';
+      if (ctProfileState.active === 'favorites') renderFavoritesPanel();
+      else if (ctProfileState.active === 'media') ctProfileRenderMedia();
+    }, true);
   }
   async function ctProfileEnsureIdentity(context) {
     if (ctProfileState.identityBusy || Date.now() < ctProfileState.identityRetry) return;
@@ -322,6 +393,8 @@
       ctProfileState.authSeen = knownUid; ctProfileState.identityRetry = 0;
     }
     if (ctProfileState.uid && ctProfileState.uid !== knownUid) {
+      ctProfileState.muteCache.clear();
+      ctProfileState.mediaCache.clear();
       ctProfileReset(); ctProfileState.uid = null; ctProfileState.accountUser = ''; ctProfileState.identityRetry = 0;
     }
     if (ctProfileState.path !== context.path || ctProfileState.user !== context.user || ctProfileState.tablist !== context.tablist) {
@@ -403,6 +476,7 @@
   }
   function ctProfileRow(item) {
     const row = document.createElement('div'); row.className = 'ct-profile-row'; row.dataset.ctProfilePost = item.id;
+    ctProfileState.rowItems.set(row, JSON.stringify(item));
     if (item.avatar) {
       const avatarLink = document.createElement('a'); avatarLink.href = '/user/' + encodeURIComponent(item.username);
       const avatar = document.createElement('img'); avatar.className = 'ct-profile-avatar'; avatar.src = item.avatar;
@@ -447,12 +521,36 @@
     const link = document.createElement('a'); link.className = 'ct-profile-post-link'; link.href = item.href;
     link.textContent = ctProfileText('元のツイートを開く', 'Open original Tweet'); main.append(link); row.append(main); return row;
   }
+  function ctProfileExistingRows(panel) {
+    return new Map([...panel.querySelectorAll(':scope > .ct-profile-row[data-ct-profile-post]')]
+      .map(row => [row.dataset.ctProfilePost, row]));
+  }
+  function ctProfileReuseRow(item, rows) {
+    const row = rows.get(item.id);
+    return row && ctProfileState.rowItems.get(row) === JSON.stringify(item) ? row : ctProfileRow(item);
+  }
+  function ctProfileReplaceContent(panel, content, focused) {
+    const retained = new Set(content);
+    for (const node of [...panel.childNodes]) if (!retained.has(node)) node.remove();
+    let next = panel.firstChild;
+    for (const node of content) {
+      if (node === next) next = next.nextSibling;
+      else panel.insertBefore(node, next);
+    }
+    if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  }
   function ctProfileFavoriteMuteState() {
     const uid = ctProfileUID();
     if (!ctProfileState.favoriteMutes || ctProfileState.favoriteMutes.uid !== uid ||
         ctProfileState.favoriteMutes.path !== ctProfileState.path || ctProfileState.favoriteMutes.user !== ctProfileState.user) {
+      const cached = uid && ctProfileState.muteCache.get(uid);
+      const recent = cached && Date.now() - cached.at < 30000;
       ctProfileState.favoriteMutes = { uid, path: ctProfileState.path, user: ctProfileState.user,
         handles: new Set(), cursors: new Set(), cursor: null, pages: 0, busy: false, done: false, error: '' };
+      if (recent) {
+        ctProfileState.favoriteMutes.handles = new Set(cached.handles);
+        ctProfileState.favoriteMutes.done = true;
+      } else if (cached) ctProfileState.muteCache.delete(uid);
     }
     return ctProfileState.favoriteMutes;
   }
@@ -468,6 +566,7 @@
     if (state.busy || (!refresh && state.done)) return;
     if (refresh) {
       ctProfileCloseViewer(); ctProfileState.sequence++;
+      ctProfileState.muteCache.delete(ctProfileUID());
       ctProfileState.favoriteMutes = null; state = ctProfileFavoriteMuteState();
     }
     const sequence = ctProfileState.sequence;
@@ -502,6 +601,10 @@
         if (cursor) state.cursors.add(cursor);
         state.cursor = next; state.pages++; state.done = !next;
       }
+      if (state.done && ctProfileFavoriteMuteCurrent(state, sequence) && active()) {
+        ctProfileState.muteCache.set(state.uid, { at: Date.now(), handles: [...state.handles] });
+        while (ctProfileState.muteCache.size > 4) ctProfileState.muteCache.delete(ctProfileState.muteCache.keys().next().value);
+      }
     } catch {
       if (ctProfileFavoriteMuteCurrent(state, sequence)) state.error = ctProfileText(
         'ミュート一覧を確認できませんでした。保存した投稿を表示する前に、再試行してください。',
@@ -525,36 +628,38 @@
       muted.busy, muted.done, muted.error, muted.pages, [...muted.handles]]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
-    const content = document.createDocumentFragment();
-    content.append(ctProfileStatus(ctProfileText('このブラウザで保存したお気に入りです。過去の全履歴や他の人のお気に入りは取得できません。', 'Favorites saved in this browser. Complete older history and other users’ Favorites are unavailable.')));
+    const rows = ctProfileExistingRows(panel);
+    const focused = panel.contains(document.activeElement) ? document.activeElement : null;
+    const content = [];
+    content.push(ctProfileStatus(ctProfileText('このブラウザに保存したお気に入りです。読み込み済みの投稿から復元します。過去の全履歴は取得できません。', 'Favorites saved in this browser. Restores Favorites from loaded posts; the entire past history cannot be retrieved.')));
     const controls = ctProfileStatus('');
     const update = ctProfileControl(ctProfileText('表示を更新', 'Refresh view'), () => ctProfileLoadFavoriteMutes(true));
-    update.disabled = muted.busy; controls.append(update); content.append(controls);
+    update.disabled = muted.busy; controls.append(update); content.push(controls);
     if (legacy.length) {
       const migration = ctProfileStatus(ctProfileText('以前の保存データがあります。使用中のアカウントのものか確認して取り込めます。', 'Older saved data is available. Import it if it belongs to this account.'));
-      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.append(migration);
+      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.push(migration);
     }
-    if (ctProfileState.storageError) content.append(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。保存設定を確認してください。', 'Browser storage is unavailable. Check your storage settings.')));
+    if (ctProfileState.storageError) content.push(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。保存設定を確認してください。', 'Browser storage is unavailable. Check your storage settings.')));
     if (!muted.done) {
       const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート一覧を確認中…', 'Checking muted accounts…') :
         muted.error || ctProfileText('ミュート一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted accounts have been checked.'));
       waiting.setAttribute('role', 'status');
       if (!muted.busy) waiting.append(document.createElement('br'), ctProfileControl(
         muted.error ? ctProfileText('再試行', 'Try again') : ctProfileText('続きを確認', 'Continue checking'), () => ctProfileLoadFavoriteMutes()));
-      content.append(waiting);
+      content.push(waiting);
     } else {
       const visible = items.filter(item => item.username && !muted.handles.has(item.username));
-      if (visible.length < items.length) content.append(ctProfileStatus(ctProfileText(
+      if (visible.length < items.length) content.push(ctProfileStatus(ctProfileText(
         `ミュートした作者や作者を確認できない投稿${items.length - visible.length}件を非表示にしています。保存データは保持しています。`,
         `${items.length - visible.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`)));
       if (!visible.length) {
         const empty = document.createElement('p'); empty.className = 'ct-profile-empty';
         empty.textContent = items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
           ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.');
-        content.append(empty);
-      } else for (const item of visible) content.append(ctProfileRow(item));
+        content.push(empty);
+      } else for (const item of visible) content.push(ctProfileReuseRow(item, rows));
     }
-    panel.replaceChildren(content);
+    ctProfileReplaceContent(panel, content, focused);
   }
   function ctProfileMediaState() {
     const uid = ctProfileUID();
@@ -562,6 +667,10 @@
       ctProfileState.media = { user: ctProfileState.user, uid, items: [], postItems: [], replyItems: [],
         scanned: 0, replyScanned: 0, cursor: null, started: false, postsStarted: false, repliesChecked: false,
         busy: false, error: '', postError: '', replyError: '', done: false, retryRefresh: false, replyLimited: false };
+      const cached = uid && ctProfileState.mediaCache.get(uid + ':' + ctProfileState.user);
+      if (cached && Date.now() - cached.at < 30000) ctProfileState.media = { ...cached.state,
+        items: [...cached.state.items], postItems: [...cached.state.postItems], replyItems: [...cached.state.replyItems], busy: false };
+      else if (cached) ctProfileState.mediaCache.delete(uid + ':' + ctProfileState.user);
     }
     if (uid && !ctProfileState.media.uid) ctProfileState.media.uid = uid;
     return ctProfileState.media;
@@ -582,6 +691,7 @@
     const state = ctProfileMediaState();
     refresh = refresh || (state.postError && state.retryRefresh);
     if (state.busy || (!refresh && state.started && state.done && !state.error)) return;
+    if (refresh && state.uid) ctProfileState.mediaCache.delete(state.uid + ':' + state.user);
     const loadPosts = refresh || !state.postsStarted || !!state.postError || (!state.done && !state.replyError);
     const loadReplies = refresh || !state.repliesChecked || !!state.replyError;
     state.busy = true; state.error = ''; const sequence = ctProfileState.sequence;
@@ -599,18 +709,25 @@
       const headers = { Authorization: `Bearer ${auth.token}` };
       // Only the native posts route has a verified cursor. The native replies
       // route returns wrappers without pagination; display its newest 100 safely.
-      const [postsJSON, repliesJSON] = await Promise.all([
-        loadPosts ? requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/posts?' + query, headers) : null,
-        loadReplies ? requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/replies', headers) : null
-      ]);
-      const current = await getAuth(); const context = ctProfileContext();
-      if (sequence !== ctProfileState.sequence || location.pathname !== path || !context || context.user !== user || current?.uid !== auth.uid) return;
-      state.started = true;
-      if (loadPosts) {
+      const currentRequest = () => sequence === ctProfileState.sequence && ctProfileState.media === state &&
+        location.pathname === path && ctProfileState.path === path && ctProfileState.user === user &&
+        ctProfileUID() === auth.uid && ctProfileContext()?.user === user;
+      const publish = () => {
+        state.items = [...new Map([...state.postItems, ...state.replyItems].map(item => [item.id, item])).values()]
+          .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+        state.error = [state.postError, state.replyError].filter(Boolean).join(' ');
+        ctProfileRenderMedia();
+      };
+      const posts = async () => {
+        if (!loadPosts) return;
+        const postsJSON = await requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/posts?' + query, headers).catch(() => null);
+        const current = await getAuth();
+        if (!currentRequest() || current?.uid !== auth.uid) return;
         if (!postsJSON || postsJSON.success === false || postsJSON.error || !Array.isArray(postsJSON.posts) || postsJSON.posts.length > 100) {
           state.postError = ctProfileText('ツイートの写真・動画を取得できませんでした。もう一度お試しください。', 'Tweet photos and videos could not be loaded. Try again.');
           state.retryRefresh = !!refresh;
         } else {
+          ctProfileRememberLikedPosts(postsJSON.posts, auth.uid, user);
           const items = postsJSON.posts.map(post => ctProfilePostItem(post, user)).filter(Boolean);
           state.postItems = [...new Map([...(refresh ? [] : state.postItems), ...items].map(item => [item.id, item])).values()];
           state.scanned = (refresh ? 0 : state.scanned) + postsJSON.posts.length;
@@ -618,8 +735,13 @@
           state.cursor = next && next !== cursor ? next : null;
           state.done = !state.cursor; state.postsStarted = true; state.postError = ''; state.retryRefresh = false;
         }
-      }
-      if (loadReplies) {
+        publish();
+      };
+      const replies = async () => {
+        if (!loadReplies) return;
+        const repliesJSON = await requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/replies', headers).catch(() => null);
+        const current = await getAuth();
+        if (!currentRequest() || current?.uid !== auth.uid) return;
         if (!repliesJSON || repliesJSON.success === false || repliesJSON.error || !Array.isArray(repliesJSON.replies)) {
           state.replyError = ctProfileText('返信の写真・動画を取得できませんでした。再試行すると返信を再確認します。', 'Reply photos and videos could not be loaded. Try again to recheck replies.');
         } else {
@@ -627,14 +749,23 @@
             ctProfileId(post?.id) && ctProfileHandle(post.authorUsername) === user)
             .sort((a, b) => (Date.parse(b.createdAt ?? b.created_at) || 0) - (Date.parse(a.createdAt ?? a.created_at) || 0));
           const checked = replies.slice(0, 100);
+          ctProfileRememberLikedPosts(checked, auth.uid, user);
           state.replyItems = checked.map(post => ctProfilePostItem(post, user)).filter(Boolean);
           state.replyScanned = checked.length; state.replyLimited = replies.length > 100;
           state.repliesChecked = true; state.replyError = '';
         }
+        publish();
+      };
+      // Independent streams start together, but each publishes as soon as its
+      // response is checked. Slow replies no longer hold back ready photos.
+      await Promise.all([posts(), replies()]);
+      if (currentRequest()) {
+        state.started = true;
+        if (!state.error) {
+          ctProfileState.mediaCache.set(auth.uid + ':' + user, { at: Date.now(), state: { ...state, busy: false } });
+          while (ctProfileState.mediaCache.size > 8) ctProfileState.mediaCache.delete(ctProfileState.mediaCache.keys().next().value);
+        }
       }
-      state.items = [...new Map([...state.postItems, ...state.replyItems].map(item => [item.id, item])).values()]
-        .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
-      state.error = [state.postError, state.replyError].filter(Boolean).join(' ');
     } catch {
       if (sequence === ctProfileState.sequence) {
         state.postError = ctProfileText('写真・動画を取得できませんでした。ログイン状態を確認して、もう一度お試しください。', 'Photos and videos could not be loaded. Check your sign-in and try again.');
@@ -656,26 +787,28 @@
     const signature = JSON.stringify(['media', state.uid, state.items, state.scanned, state.replyScanned, state.busy, state.error, state.done, state.replyLimited]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
-    const content = document.createDocumentFragment();
+    const rows = ctProfileExistingRows(ctProfileState.panel);
+    const focused = ctProfileState.panel.contains(document.activeElement) ? document.activeElement : null;
+    const content = [];
     const note = ctProfileStatus(ctProfileText(`投稿${state.scanned}件・返信${state.replyScanned}件を確認 · 写真・動画`, `${state.scanned} posts and ${state.replyScanned} replies checked · Photos and videos`));
     const scope = document.createElement('div');
     scope.textContent = ctProfileText('返信は最新100件まで含みます。以前のツイートは下から読み込めます。', 'Includes up to the latest 100 replies. Load older Tweets below.');
     note.append(scope, document.createElement('br'), ctProfileControl(ctProfileText('更新', 'Refresh'), () => ctProfileLoadMedia(true)));
-    note.querySelector('button').disabled = state.busy; content.append(note);
-    for (const item of state.items) content.append(ctProfileRow(item));
+    note.querySelector('button').disabled = state.busy; content.push(note);
+    for (const item of state.items) content.push(ctProfileReuseRow(item, rows));
     if (!state.items.length) {
       const empty = document.createElement('p'); empty.className = 'ct-profile-empty'; empty.setAttribute('role', 'status');
       empty.textContent = state.busy ? ctProfileText('写真・動画を読み込み中…', 'Loading photos and videos…') :
         state.done && !state.error ? ctProfileText('写真・動画のあるツイートはありません。', 'No Tweets with photos or videos.') :
           ctProfileText('ここまでの投稿には写真・動画がありません。以前の投稿を確認できます。', 'No photos or videos in the posts checked so far. You can check older posts.');
-      content.append(empty);
+      content.push(empty);
     }
-    if (state.error) content.append(ctProfileStatus(state.error));
+    if (state.error) content.push(ctProfileStatus(state.error));
     if (!state.done || state.error) {
       const footer = ctProfileStatus('');
       const next = ctProfileControl(state.busy ? ctProfileText('読み込み中…', 'Loading…') :
         state.error ? ctProfileText('再試行', 'Try again') : ctProfileText('以前の投稿を確認', 'Check older posts'), () => ctProfileLoadMedia());
-      next.disabled = state.busy; footer.append(next); content.append(footer);
+      next.disabled = state.busy; footer.append(next); content.push(footer);
     }
-    ctProfileState.panel.replaceChildren(content);
+    ctProfileReplaceContent(ctProfileState.panel, content, focused);
   }

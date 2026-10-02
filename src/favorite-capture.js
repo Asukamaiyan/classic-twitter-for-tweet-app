@@ -4,6 +4,32 @@
   const ctFavoriteCaptures = new WeakMap();
   const ctFavoritePostCache = new Map();
   const ctFavoriteStateWatchers = new WeakMap();
+  let ctFavoriteRestoreBusy = false;
+
+  function ctFavoriteReplyParent(article) {
+    const container = article.closest('[id^="inline-replies-"]');
+    const inline = container?.id.match(/^inline-replies-([A-Za-z0-9_-]{1,160})$/)?.[1];
+    return inline || null;
+  }
+
+  function ctFavoriteRelativeTimeMatches(text, createdAt, observedAt) {
+    const created = Date.parse(createdAt);
+    if (!Number.isFinite(created)) return false;
+    const value = text.trim();
+    const short = /^(\d+)([mhd])$/.exec(value);
+    const japanese = /^(\d+)(分|時間|日)前$/.exec(value);
+    const units = {m:60000,h:3600000,d:86400000,'分':60000,'時間':3600000,'日':86400000};
+    const match = short || japanese;
+    if (match) {
+      const unit = units[match[2]], age = observedAt - created;
+      // The card may have been rendered shortly before the click. Allow two
+      // minutes of render age, while still requiring one unique author/body ID.
+      return age >= Number(match[1]) * unit && age < (Number(match[1]) + 1) * unit + 120000;
+    }
+    if (/^(Just now|たった今|今)$/.test(value)) return observedAt - created >= 0 && observedAt - created < 180000;
+    // A month/day label carries no year and cannot identify an older reply.
+    return false;
+  }
 
   function ctWatchFavoriteRollback(button, snapshot, uid, generation, liked) {
     let currentLiked = liked;
@@ -39,14 +65,25 @@
     const username = validUser(articleAuthor(article));
     const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[aria-live]'));
-    if (!username || !body || !timestamp) return null;
+    const replyTime = [...article.querySelectorAll('span.text-tl-app-text-muted.shrink-0')].find(el =>
+      el.closest('article') === article && el.previousElementSibling?.textContent.trim() === '·' &&
+      el.parentElement.querySelector(':scope > button.font-bold.truncate') &&
+      el.parentElement.querySelector('button > svg.lucide-ellipsis-vertical'));
+    const parentId = ctFavoriteReplyParent(article);
+    if (!username || !body || (!timestamp && !replyTime)) return null;
+    const translated = [...article.querySelectorAll('button')].some(el => el.closest('article') === article &&
+      /^(Show original|原文を表示)$/i.test(el.textContent.trim()));
+    // A translated reply has no exact ISO time or original body in the DOM.
+    // Do not infer its identity from the translated text.
+    if (!timestamp && translated) return null;
     const author = [...article.querySelectorAll('button.truncate.font-bold')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote'));
     return { username, name: author?.textContent || username, text: body.textContent,
-      avatar: articleAvatar(article), createdAt: timestamp.title, savedAt: Date.now() };
+      avatar: articleAvatar(article), createdAt: timestamp?.title || '', savedAt: Date.now(),
+      relativeText: replyTime?.textContent || '', observedAt: Date.now(), parentId, translated };
   }
 
-  async function ctFavoriteAuthorPosts(username, auth) {
+  async function ctFavoriteAuthorPosts(username, auth, deadline = Infinity) {
     const key = auth.uid + ':' + username.toLowerCase();
     const previous = ctFavoritePostCache.get(key);
     if (previous?.pending) return previous.pending;
@@ -55,6 +92,7 @@
     record.pending = (async () => {
       let cursor = null;
       for (let page = 0; page < 3; page++) {
+        if (Date.now() >= deadline) { record.expired = true; break; }
         const query = new URLSearchParams({ limit: '50' });
         if (cursor) query.set('cursor', cursor);
         const json = await requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(username) + '/posts?' + query,
@@ -70,27 +108,84 @@
     ctFavoritePostCache.set(key, record);
     while (ctFavoritePostCache.size > 40) ctFavoritePostCache.delete(ctFavoritePostCache.keys().next().value);
     try { return await record.pending; }
-    finally { record.pending = null; record.at = Date.now(); }
+    finally {
+      record.pending = null; record.at = Date.now();
+      if (record.expired && ctFavoritePostCache.get(key) === record) ctFavoritePostCache.delete(key);
+    }
   }
 
-  async function ctResolveFavorite(candidate, uid) {
+  async function ctFavoriteReplyPosts(candidate, auth, deadline = Infinity) {
+    const base = candidate.parentId ? '/api/posts/' + encodeURIComponent(candidate.parentId) + '/replies' :
+      '/api/users/' + encodeURIComponent(candidate.username) + '/replies';
+    // Relative-time identities must use fresh, complete responses. Reusing an
+    // old list could mistake a newly added duplicate reply for an earlier one.
+    const posts = [];
+    let cursor = null;
+    for (let page = 0; page < (candidate.parentId ? 3 : 1); page++) {
+      if (Date.now() >= deadline) return null;
+      const query = new URLSearchParams({limit:'50'});
+      if (cursor) query.set('cursor',cursor);
+      const json = await requestJSON(API_ORIGIN + base + (candidate.parentId ? '?' + query : ''),
+        {Authorization:`Bearer ${auth.token}`});
+      if (!json || json.success === false || json.error || !Array.isArray(json.replies) || json.replies.length > 1000) return null;
+      posts.push(...json.replies.map(row => candidate.parentId ? row : row?.post).filter(Boolean));
+      const next = json.nextCursor ?? null;
+      if (next === null) return posts;
+      if (!candidate.parentId || typeof next !== 'string' || !next || next.length > 2000 || next === cursor) return null;
+      cursor = next;
+    }
+    return null;
+  }
+
+  async function ctResolveFavorite(candidate, uid, deadline = Infinity) {
     if (!candidate || !uid) return null;
     const auth = await getAuth();
     if (!auth?.token || auth.uid !== uid) return null;
     if (candidate.id) return candidate;
-    const posts = await ctFavoriteAuthorPosts(candidate.username, auth);
+    const posts = candidate.relativeText && !candidate.createdAt ? await ctFavoriteReplyPosts(candidate, auth, deadline) :
+      await ctFavoriteAuthorPosts(candidate.username, auth, deadline);
     const current = await getAuth();
-    if (current?.uid !== uid) return null;
+    if (current?.uid !== uid || !Array.isArray(posts)) return null;
     const matches = posts.filter(post => typeof post.id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(post.id) &&
       !post.isDeleted && !post.originalPostId && !post.isRepost &&
+      post.status !== 'MUTED' &&
       post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&
-      Date.parse(post.createdAt ?? post.created_at) === Date.parse(candidate.createdAt) &&
-      typeof post.text === 'string' && post.text === candidate.text);
+      (candidate.createdAt ? Date.parse(post.createdAt ?? post.created_at) === Date.parse(candidate.createdAt) :
+        ctFavoriteRelativeTimeMatches(candidate.relativeText, post.createdAt ?? post.created_at, candidate.observedAt)) &&
+      typeof post.text === 'string' && (candidate.translated || post.text === candidate.text));
     const unique = [...new Map(matches.map(post => [post.id, post])).values()];
     if (unique.length !== 1) return null;
-    return { ...candidate, id: unique[0].id, href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
+    return { ...candidate, id: unique[0].id, text: unique[0].text, createdAt: unique[0].createdAt ?? unique[0].created_at,
+      href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
       avatar: ctProfileURL(unique[0].authorAvatar) || candidate.avatar,
       media: ctProfileMediaAssets(unique[0]) };
+  }
+
+  async function ctRestoreVisibleFavorites() {
+    if (ctFavoriteRestoreBusy) return null;
+    ctFavoriteRestoreBusy = true;
+    let saved = 0, unresolved = 0;
+    try {
+      const auth = await getAuth();
+      if (!auth?.token || !auth.uid) throw new Error('sign-in');
+      const deadline = Date.now() + 45000;
+      const cards = [...document.querySelectorAll('main article')].filter(article => {
+        const button = article.querySelector('button[data-testid="tweet-like-action"]');
+        return button && !article.closest('[data-ct-owned],[data-ct-local-ui],[aria-hidden="true"]') && ctIsLiked(button);
+      }).slice(0,40);
+      for (const [index, article] of cards.entries()) {
+        if (Date.now() >= deadline) { unresolved += cards.length - index; break; }
+        if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
+        const button = article.querySelector('button[data-testid="tweet-like-action"]');
+        const candidate = ctFavoriteCandidate(article);
+        const snapshot = candidate && await ctResolveFavorite(candidate, auth.uid, deadline);
+        if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
+        if (snapshot && button.isConnected && ctIsLiked(button)) {
+          if (saveFavorite(snapshot, auth.uid) !== false) saved++;
+        } else unresolved++;
+      }
+      return {saved,unresolved};
+    } finally { ctFavoriteRestoreBusy = false; }
   }
 
   function ctCaptureFavoriteClick(event) {

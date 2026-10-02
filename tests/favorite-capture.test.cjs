@@ -30,7 +30,7 @@ function harness(t) {
   w.ctProfileURL = value => /^https:\/\//.test(value || '') ? value : '';
   w.eval(`const API_ORIGIN='https://api.tweet.app'; const ctNetworkState={authUID:'account-a'};
     let favoritesActive=false; ${source}; window.identity=ctNetworkState;
-    window.qa={ctFavoriteCandidate,ctResolveFavorite,ctCaptureFavoriteClick};`);
+    window.qa={ctFavoriteCandidate,ctResolveFavorite,ctCaptureFavoriteClick,ctRestoreVisibleFavorites,ctFavoriteRelativeTimeMatches};`);
   f.article = f.doc.querySelector('article');
   f.button = f.doc.querySelector('[data-testid]');
   f.candidate = () => w.qa.ctFavoriteCandidate(f.article);
@@ -89,4 +89,57 @@ test('a late native rollback reconciles the local snapshot without extra engagem
   f.button.setAttribute('aria-pressed','false'); await Promise.resolve(); await Promise.resolve();
   assert.equal(f.removals.length,1); assert.equal(f.removals[0].id,'post-a');
   assert.equal(f.requests.length,1);
+});
+
+function replyFixture(f, text='My reply') {
+  f.article.outerHTML = `<div id="inline-replies-parent-a"><article><div class="flex items-center">
+    <button class="font-bold truncate">Alice</button><span>·</span><span class="text-tl-app-text-muted shrink-0">2h</span>
+    <div><button aria-label="Reply options"><svg class="lucide-ellipsis-vertical"></svg></button></div></div>
+    <p class="whitespace-pre-wrap break-words">${text}</p><button data-testid="tweet-like-action" aria-pressed="false"></button></article></div>`;
+  f.article=f.doc.querySelector('article');f.button=f.doc.querySelector('[data-testid]');
+}
+test('inline reply favorite resolves the exact parent route and relative time without an ISO title', async t => {
+  const f=harness(t);replyFixture(f);const time=new Date(Date.now()-2.5*3600000).toISOString();
+  f.response={success:true,replies:[{...f.post('reply-a'),text:'My reply',createdAt:time}]};
+  const candidate=f.candidate();assert.equal(candidate.parentId,'parent-a');
+  const item=await f.w.qa.ctResolveFavorite(candidate,'account-a');
+  assert.equal(item.id,'reply-a');assert.equal(item.createdAt,time);
+  assert.match(f.requests[0],/\/posts\/parent-a\/replies\?limit=50$/);
+});
+test('reply identity rejects a duplicate body, wrong author/time and translated text', async t => {
+  const f=harness(t);replyFixture(f);const createdAt=new Date(Date.now()-2.5*3600000).toISOString();
+  f.response={replies:[{...f.post('a'),text:'My reply',createdAt},{...f.post('b'),text:'My reply',createdAt}]};
+  assert.equal(await f.w.qa.ctResolveFavorite(f.candidate(),'account-a'),null);
+  f.article.insertAdjacentHTML('beforeend','<button>Show original</button>');assert.equal(f.candidate(),null);
+  assert.equal(f.w.qa.ctFavoriteRelativeTimeMatches('2h',date,Date.parse(date)+9*3600000),false);
+  assert.equal(f.w.qa.ctFavoriteRelativeTimeMatches('2時間前',createdAt,Date.now()),true);
+});
+test('profile replies use wrapper.post and never the parent post as a reply candidate', async t => {
+  const f=harness(t);replyFixture(f);f.article.parentElement.id='';
+  const createdAt=new Date(Date.now()-2.5*3600000).toISOString();
+  f.response={replies:[{post:{...f.post('reply-a'),text:'My reply',createdAt},parentPost:f.post('parent-a')}]};
+  assert.equal((await f.w.qa.ctResolveFavorite(f.candidate(),'account-a')).id,'reply-a');
+  assert.match(f.requests[0],/\/users\/alice\/replies$/);
+});
+test('relative reply identification rejects incomplete pages and date-only identities and never reuses a stale list', async t => {
+  const f=harness(t);replyFixture(f);const createdAt=new Date(Date.now()-2.5*3600000).toISOString();
+  f.w.requestJSON=async url=>{f.requests.push(url);return {replies:[{...f.post('a'),text:'My reply',createdAt}],nextCursor:'page-'+f.requests.length};};
+  assert.equal(await f.w.qa.ctResolveFavorite(f.candidate(),'account-a'),null);assert.equal(f.requests.length,3);
+  f.w.requestJSON=async url=>{f.requests.push(url);return {replies:[{...f.post('a'),text:'My reply',createdAt}]};};
+  assert.equal((await f.w.qa.ctResolveFavorite(f.candidate(),'account-a')).id,'a');
+  f.w.requestJSON=async url=>{f.requests.push(url);return {replies:[{...f.post('a'),text:'My reply',createdAt},{...f.post('b'),text:'My reply',createdAt}]};};
+  assert.equal(await f.w.qa.ctResolveFavorite(f.candidate(),'account-a'),null);
+  assert.equal(f.w.qa.ctFavoriteRelativeTimeMatches('Sep 30',date,Date.now()),false);
+});
+test('translated main card keeps exact author/ISO identity and saves API original text', async t => {
+  const f=harness(t);f.article.querySelector('p').textContent='翻訳文';
+  f.article.insertAdjacentHTML('beforeend','<button>原文を表示</button>');f.response={posts:[f.post()]};
+  assert.equal((await f.w.qa.ctResolveFavorite(f.candidate(),'account-a')).text,'My post');
+});
+test('explicit loaded-Favorites restoration saves only native liked cards and sends no engagement', async t => {
+  const f=harness(t);const main=f.doc.createElement('main');f.article.before(main);main.append(f.article);
+  f.button.setAttribute('aria-pressed','true');f.response={posts:[f.post()]};
+  const result=await f.w.qa.ctRestoreVisibleFavorites();assert.equal(result.saved,1);assert.equal(result.unresolved,0);
+  assert.equal(f.saves.length,1);assert.match(f.requests[0],/\/users\/alice\/posts/);
+  f.button.setAttribute('aria-pressed','false');await f.w.qa.ctRestoreVisibleFavorites();assert.equal(f.saves.length,1);
 });

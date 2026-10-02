@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.13.0
+// @version      6.14.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -302,7 +302,7 @@
   }
 
   /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -330,6 +330,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     deviceUnsupported: 'このブラウザでは端末内翻訳を利用できません。Safari／Stayとスマートフォンではサイトの翻訳をご利用ください。',
     sourceLanguage: '翻訳する投稿の言語', prepareModel: 'モデルを準備', preparingModel: '準備中…',
     translationStatus: '翻訳の状態',
+    favorites: 'お気に入りの復元', restoreFavorites: '読み込み済みのお気に入りを復元', restoringFavorites: '確認中…',
+    restoreHelp: '今の画面で読み込んだお気に入り済みのツイートを、このブラウザに保存します（1回40件まで）。過去の全履歴は取得できません。',
+    restoreResult: (saved, unresolved) => `${saved}件を保存しました。${unresolved ? ` ${unresolved}件は特定できませんでした。詳細画面か原文を開いて再度お試しください。` : ''}`,
+    restoreError: 'お気に入りを確認できませんでした。ログイン状態と通信を確認して、もう一度お試しください。',
 
     bookmarks: '保存した投稿', bookmarkLabel: '投稿のメモ（任意）', bookmarkSave: 'この投稿を保存',
     bookmarkHelp: '投稿の詳細画面を開くと保存できます。最大 50 件。削除された投稿や非公開の投稿は閲覧できない場合があります。',
@@ -360,6 +364,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     deviceUnsupported: 'On-device translation is unavailable here. Use site translation in Safari/Stay and on mobile.',
     sourceLanguage: 'Language of posts to translate', prepareModel: 'Prepare model', preparingModel: 'Preparing…',
     translationStatus: 'Translation status',
+    favorites: 'Restore Favorites', restoreFavorites: 'Restore loaded Favorites', restoringFavorites: 'Checking…',
+    restoreHelp: 'Save already-favorited Tweets loaded on this screen in this browser (up to 40 per run). This cannot retrieve your entire past history.',
+    restoreResult: (saved, unresolved) => `Saved ${saved}. ${unresolved ? `${unresolved} could not be identified. Open the detail page or original text and try again.` : ''}`,
+    restoreError: 'Could not check Favorites. Check your sign-in and connection, then try again.',
 
     bookmarks: 'Saved posts', bookmarkLabel: 'Note for this post (optional)', bookmarkSave: 'Save this post',
     bookmarkHelp: 'Open a post’s detail page to save it. Up to 50 posts. Deleted or private posts may be unavailable later.',
@@ -584,6 +592,21 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
       refreshTranslation();
     }
     body.append(automatic);
+  }
+
+  if (typeof restoreVisibleFavorites === 'function') {
+    const section = element('section');
+    const restore = element('button', copy.restoreFavorites, {type:'button',id:'ct-restore-favorites','aria-describedby':'ct-restore-favorites-help'});
+    restore.addEventListener('click', async () => {
+      restore.disabled = true; restore.textContent = copy.restoringFavorites;
+      try {
+        const result = await restoreVisibleFavorites();
+        if (result) announce(copy.restoreResult(result.saved, result.unresolved));
+      } catch { announce(copy.restoreError, true); }
+      finally { restore.disabled = false; restore.textContent = copy.restoreFavorites; }
+    });
+    section.append(element('h3',copy.favorites),element('p',copy.restoreHelp,{id:'ct-restore-favorites-help',class:'ct-local-note'}),restore);
+    body.append(section);
   }
 
   const filterSection = element('section');
@@ -2277,7 +2300,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.13.0';
+    document.documentElement.dataset.ctActiveVersion = '6.14.0';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -2287,6 +2310,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
+      restoreVisibleFavorites: ctRestoreVisibleFavorites,
       getClassicAppearance: classicAppearanceEnabled,
       setClassicAppearance: enabled => {
         if (!saveJSON('ct-classic-appearance-v1', enabled === true)) throw new Error('Storage unavailable');
@@ -2434,7 +2458,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     path: '', user: '', uid: null, authSeen: undefined, accountUser: '', active: '', tablist: null,
     timeline: null, panel: null, sequence: 0, identityBusy: false, identityRetry: 0,
     nativeSelection: new Map(), tabsBound: new WeakSet(), rendered: '', media: null, favoriteMutes: null,
-    storageBound: false, storageError: false, memory: new Map(), dirtyMemory: new Set(), viewer: null
+    storageBound: false, storageError: false, memory: new Map(), dirtyMemory: new Set(), viewer: null,
+    rowItems: new WeakMap(), muteCache: new Map(), mediaCache: new Map(), favoriteRemovals: new Map()
   };
   function ctProfileText(ja, en) { return CT_LOCALE === 'ja' ? ja : en; }
   function ctProfileId(value) {
@@ -2505,11 +2530,44 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctProfileSaveFavorite(item, expectedUid = ctProfileUID()) {
     if (!ctProfileId(item?.id) || !expectedUid || expectedUid !== ctProfileUID()) return false;
+    ctProfileState.favoriteRemovals.get(expectedUid)?.delete(item.id);
     return ctProfileWriteFavorites(expectedUid, [item, ...ctProfileLoadFavorites().filter(row => row.id !== item.id)].slice(0, 500));
   }
   function ctProfileRemoveFavorite(id, expectedUid = ctProfileUID()) {
     if (!ctProfileId(id) || !expectedUid || expectedUid !== ctProfileUID()) return false;
+    if (!ctProfileState.favoriteRemovals.has(expectedUid)) ctProfileState.favoriteRemovals.set(expectedUid, new Set());
+    const removed = ctProfileState.favoriteRemovals.get(expectedUid);
+    removed.add(id);
+    while (removed.size > 1000) removed.delete(removed.values().next().value);
     return ctProfileWriteFavorites(expectedUid, ctProfileLoadFavorites().filter(row => row.id !== id));
+  }
+  function ctProfileRememberLikedPosts(posts, expectedUid, expectedUser = null) {
+    if (!Array.isArray(posts) || !ctProfileId(expectedUid) || expectedUid !== ctProfileUID()) return 0;
+    const expectedHandle = expectedUser === null ? null : ctProfileHandle(expectedUser);
+    if (expectedUser !== null && !expectedHandle) return 0;
+    const previous = ctProfileLoadFavorites();
+    const known = new Map(previous.map(item => [item.id, item]));
+    const recovered = new Map();
+    const removed = ctProfileState.favoriteRemovals.get(expectedUid);
+    for (const post of posts.slice(0, 1000)) {
+      const username = ctProfileHandle(post?.authorUsername);
+      if (post?.hasLiked !== true || !ctProfileId(post.id) || !username ||
+          (expectedHandle && username !== expectedHandle) || post.isDeleted || post.status === 'MUTED' ||
+          post.isRepost || post.originalPostId || post.repostedBy || removed?.has(post.id) || typeof post.text !== 'string') continue;
+      const createdAt = post.createdAt ?? post.created_at;
+      recovered.set(post.id, { id: post.id, username,
+        name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : username,
+        avatar: ctProfileURL(post.authorAvatar), text: post.text.slice(0, 10000),
+        createdAt: typeof createdAt === 'string' && Number.isFinite(Date.parse(createdAt)) ? createdAt : '',
+        savedAt: known.get(post.id)?.savedAt ?? Date.now(), media: ctProfileMediaAssets(post) });
+    }
+    if (!recovered.size || expectedUid !== ctProfileUID()) return 0;
+    // Reading an old cache must not undo a newer native Unlike. Existing saved
+    // timestamps and row order remain stable when the same post is read again.
+    const items = previous.map(item => recovered.get(item.id) || item);
+    for (const [id, item] of recovered) if (!known.has(id)) items.push(item);
+    if (JSON.stringify(ctProfileFavoriteItems(items)) !== JSON.stringify(previous)) ctProfileWriteFavorites(expectedUid, items);
+    return [...recovered.keys()].filter(id => !known.has(id)).length;
   }
   function ctProfileLegacyFavorites() {
     try {
@@ -2532,6 +2590,14 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       ctProfileState.storageError = false;
     } catch { ctProfileState.storageError = true; }
     renderFavoritesPanel();
+  }
+  function ctProfileNativeReplyEditor(el, timeline) {
+    if (!el?.matches('textarea[name="compose-text"][maxlength="280"][inputmode="text"][rows="1"][autocomplete="off"][data-form-type="other"]') ||
+        !el.matches('.relative.bg-transparent.whitespace-pre-wrap.break-words.w-full.resize-none.text-tl-app-text.outline-none') ||
+        !el.parentElement?.matches('div.relative') || el.closest('[data-ct-owned],[data-ct-local-ui],[data-user-content],[contenteditable]')) return false;
+    const article = el.closest('article');
+    return !!article && timeline.contains(article) &&
+      [...article.querySelectorAll('button[data-testid="tweet-like-action"]')].some(button => button.closest('article') === article);
   }
   function ctProfileContext() {
     if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) return null;
@@ -2561,9 +2627,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       let timeline = tablist.nextElementSibling;
       while (timeline?.matches('[data-ct-profile-panel]')) timeline = timeline.nextElementSibling;
       // Current profile component renders one direct DIV for the active native
-      // timeline. Never hide an unknown container, header, form or tab control.
+      // timeline. Native inline reply editors can appear within its Tweets;
+      // hiding the timeline must retain their original nodes and draft values.
+      // Unknown forms, inputs and editor structures still fail open.
       if (!timeline?.matches('div') || timeline.matches('[role],[data-ct-owned],[data-ct-local-ui]') ||
-          timeline.querySelector('input,textarea,[role="form"]')) continue;
+          [...timeline.querySelectorAll('input,textarea,form,[role="form"]')].some(el => !ctProfileNativeReplyEditor(el, timeline))) continue;
       return { path: location.pathname, user, main, tablist, timeline, nativeTabs };
     }
     return null;
@@ -2695,6 +2763,33 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (event.key === ctProfileFavoriteKey(ctProfileUID() || '') || event.key === KEY.favorites + ':owner') renderFavoritesPanel();
     });
     window.addEventListener('pagehide', ctProfileCloseViewer);
+    document.addEventListener('click', event => {
+      const button = event.target.closest?.('button');
+      if (!button || button.disabled || button.closest('[data-ct-owned],[data-ct-local-ui],[data-user-content],.tl-user-text,.whitespace-pre-wrap,.break-words,[contenteditable]')) return;
+      const label = button.getAttribute('aria-label') || '';
+      const title = button.querySelector(':scope > span.min-w-0.truncate')?.getAttribute('title') || '';
+      const menuMute = button.querySelector(':scope > svg.lucide-volume-x,:scope > svg.lucide-volume-2') &&
+        /^(?:Mute user|Unmute user|ミュートする|ミュートを解除|(?:Mute|Unmute) @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+をミュート|@[A-Za-z0-9_.-]+のミュートを解除)$/.test(title) &&
+        (button.matches('[role="menuitem"]') || button.closest('article'));
+      const settingsUnmute = /^\/(?:settings)\/?$/.test(location.pathname) &&
+        /^(?:Unmute @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+のミュートを解除)$/.test(label) &&
+        /^(?:Unmute|ミュートを解除)$/.test(button.textContent.trim());
+      const report = button.closest('[role="dialog"][aria-modal="true"].bg-tl-app-card.border');
+      const reportMute = report && /^(?:Report @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+を報告)$/.test(report.getAttribute('aria-label') || '') &&
+        report.querySelector('h3.text-sm.font-bold.text-tl-app-text') && button.matches('button.w-full.rounded-full.border[aria-busy]') &&
+        /^(?:Mute @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+をミュート)$/.test(button.textContent.trim());
+      if (!menuMute && !settingsUnmute && !reportMute) return;
+      // A native mute action changes visibility. Discard only short-lived
+      // read caches; never alter the user's saved Favorites.
+      ctProfileState.muteCache.clear();
+      ctProfileState.mediaCache.clear();
+      ctProfileState.sequence++;
+      ctProfileState.favoriteMutes = null;
+      ctProfileState.media = null;
+      ctProfileState.rendered = '';
+      if (ctProfileState.active === 'favorites') renderFavoritesPanel();
+      else if (ctProfileState.active === 'media') ctProfileRenderMedia();
+    }, true);
   }
   async function ctProfileEnsureIdentity(context) {
     if (ctProfileState.identityBusy || Date.now() < ctProfileState.identityRetry) return;
@@ -2752,6 +2847,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       ctProfileState.authSeen = knownUid; ctProfileState.identityRetry = 0;
     }
     if (ctProfileState.uid && ctProfileState.uid !== knownUid) {
+      ctProfileState.muteCache.clear();
+      ctProfileState.mediaCache.clear();
       ctProfileReset(); ctProfileState.uid = null; ctProfileState.accountUser = ''; ctProfileState.identityRetry = 0;
     }
     if (ctProfileState.path !== context.path || ctProfileState.user !== context.user || ctProfileState.tablist !== context.tablist) {
@@ -2833,6 +2930,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctProfileRow(item) {
     const row = document.createElement('div'); row.className = 'ct-profile-row'; row.dataset.ctProfilePost = item.id;
+    ctProfileState.rowItems.set(row, JSON.stringify(item));
     if (item.avatar) {
       const avatarLink = document.createElement('a'); avatarLink.href = '/user/' + encodeURIComponent(item.username);
       const avatar = document.createElement('img'); avatar.className = 'ct-profile-avatar'; avatar.src = item.avatar;
@@ -2877,12 +2975,36 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const link = document.createElement('a'); link.className = 'ct-profile-post-link'; link.href = item.href;
     link.textContent = ctProfileText('元のツイートを開く', 'Open original Tweet'); main.append(link); row.append(main); return row;
   }
+  function ctProfileExistingRows(panel) {
+    return new Map([...panel.querySelectorAll(':scope > .ct-profile-row[data-ct-profile-post]')]
+      .map(row => [row.dataset.ctProfilePost, row]));
+  }
+  function ctProfileReuseRow(item, rows) {
+    const row = rows.get(item.id);
+    return row && ctProfileState.rowItems.get(row) === JSON.stringify(item) ? row : ctProfileRow(item);
+  }
+  function ctProfileReplaceContent(panel, content, focused) {
+    const retained = new Set(content);
+    for (const node of [...panel.childNodes]) if (!retained.has(node)) node.remove();
+    let next = panel.firstChild;
+    for (const node of content) {
+      if (node === next) next = next.nextSibling;
+      else panel.insertBefore(node, next);
+    }
+    if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  }
   function ctProfileFavoriteMuteState() {
     const uid = ctProfileUID();
     if (!ctProfileState.favoriteMutes || ctProfileState.favoriteMutes.uid !== uid ||
         ctProfileState.favoriteMutes.path !== ctProfileState.path || ctProfileState.favoriteMutes.user !== ctProfileState.user) {
+      const cached = uid && ctProfileState.muteCache.get(uid);
+      const recent = cached && Date.now() - cached.at < 30000;
       ctProfileState.favoriteMutes = { uid, path: ctProfileState.path, user: ctProfileState.user,
         handles: new Set(), cursors: new Set(), cursor: null, pages: 0, busy: false, done: false, error: '' };
+      if (recent) {
+        ctProfileState.favoriteMutes.handles = new Set(cached.handles);
+        ctProfileState.favoriteMutes.done = true;
+      } else if (cached) ctProfileState.muteCache.delete(uid);
     }
     return ctProfileState.favoriteMutes;
   }
@@ -2898,6 +3020,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (state.busy || (!refresh && state.done)) return;
     if (refresh) {
       ctProfileCloseViewer(); ctProfileState.sequence++;
+      ctProfileState.muteCache.delete(ctProfileUID());
       ctProfileState.favoriteMutes = null; state = ctProfileFavoriteMuteState();
     }
     const sequence = ctProfileState.sequence;
@@ -2932,6 +3055,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         if (cursor) state.cursors.add(cursor);
         state.cursor = next; state.pages++; state.done = !next;
       }
+      if (state.done && ctProfileFavoriteMuteCurrent(state, sequence) && active()) {
+        ctProfileState.muteCache.set(state.uid, { at: Date.now(), handles: [...state.handles] });
+        while (ctProfileState.muteCache.size > 4) ctProfileState.muteCache.delete(ctProfileState.muteCache.keys().next().value);
+      }
     } catch {
       if (ctProfileFavoriteMuteCurrent(state, sequence)) state.error = ctProfileText(
         'ミュート一覧を確認できませんでした。保存した投稿を表示する前に、再試行してください。',
@@ -2955,36 +3082,38 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       muted.busy, muted.done, muted.error, muted.pages, [...muted.handles]]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
-    const content = document.createDocumentFragment();
-    content.append(ctProfileStatus(ctProfileText('このブラウザで保存したお気に入りです。過去の全履歴や他の人のお気に入りは取得できません。', 'Favorites saved in this browser. Complete older history and other users’ Favorites are unavailable.')));
+    const rows = ctProfileExistingRows(panel);
+    const focused = panel.contains(document.activeElement) ? document.activeElement : null;
+    const content = [];
+    content.push(ctProfileStatus(ctProfileText('このブラウザに保存したお気に入りです。読み込み済みの投稿から復元します。過去の全履歴は取得できません。', 'Favorites saved in this browser. Restores Favorites from loaded posts; the entire past history cannot be retrieved.')));
     const controls = ctProfileStatus('');
     const update = ctProfileControl(ctProfileText('表示を更新', 'Refresh view'), () => ctProfileLoadFavoriteMutes(true));
-    update.disabled = muted.busy; controls.append(update); content.append(controls);
+    update.disabled = muted.busy; controls.append(update); content.push(controls);
     if (legacy.length) {
       const migration = ctProfileStatus(ctProfileText('以前の保存データがあります。使用中のアカウントのものか確認して取り込めます。', 'Older saved data is available. Import it if it belongs to this account.'));
-      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.append(migration);
+      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.push(migration);
     }
-    if (ctProfileState.storageError) content.append(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。保存設定を確認してください。', 'Browser storage is unavailable. Check your storage settings.')));
+    if (ctProfileState.storageError) content.push(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。保存設定を確認してください。', 'Browser storage is unavailable. Check your storage settings.')));
     if (!muted.done) {
       const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート一覧を確認中…', 'Checking muted accounts…') :
         muted.error || ctProfileText('ミュート一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted accounts have been checked.'));
       waiting.setAttribute('role', 'status');
       if (!muted.busy) waiting.append(document.createElement('br'), ctProfileControl(
         muted.error ? ctProfileText('再試行', 'Try again') : ctProfileText('続きを確認', 'Continue checking'), () => ctProfileLoadFavoriteMutes()));
-      content.append(waiting);
+      content.push(waiting);
     } else {
       const visible = items.filter(item => item.username && !muted.handles.has(item.username));
-      if (visible.length < items.length) content.append(ctProfileStatus(ctProfileText(
+      if (visible.length < items.length) content.push(ctProfileStatus(ctProfileText(
         `ミュートした作者や作者を確認できない投稿${items.length - visible.length}件を非表示にしています。保存データは保持しています。`,
         `${items.length - visible.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`)));
       if (!visible.length) {
         const empty = document.createElement('p'); empty.className = 'ct-profile-empty';
         empty.textContent = items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
           ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.');
-        content.append(empty);
-      } else for (const item of visible) content.append(ctProfileRow(item));
+        content.push(empty);
+      } else for (const item of visible) content.push(ctProfileReuseRow(item, rows));
     }
-    panel.replaceChildren(content);
+    ctProfileReplaceContent(panel, content, focused);
   }
   function ctProfileMediaState() {
     const uid = ctProfileUID();
@@ -2992,6 +3121,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       ctProfileState.media = { user: ctProfileState.user, uid, items: [], postItems: [], replyItems: [],
         scanned: 0, replyScanned: 0, cursor: null, started: false, postsStarted: false, repliesChecked: false,
         busy: false, error: '', postError: '', replyError: '', done: false, retryRefresh: false, replyLimited: false };
+      const cached = uid && ctProfileState.mediaCache.get(uid + ':' + ctProfileState.user);
+      if (cached && Date.now() - cached.at < 30000) ctProfileState.media = { ...cached.state,
+        items: [...cached.state.items], postItems: [...cached.state.postItems], replyItems: [...cached.state.replyItems], busy: false };
+      else if (cached) ctProfileState.mediaCache.delete(uid + ':' + ctProfileState.user);
     }
     if (uid && !ctProfileState.media.uid) ctProfileState.media.uid = uid;
     return ctProfileState.media;
@@ -3012,6 +3145,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const state = ctProfileMediaState();
     refresh = refresh || (state.postError && state.retryRefresh);
     if (state.busy || (!refresh && state.started && state.done && !state.error)) return;
+    if (refresh && state.uid) ctProfileState.mediaCache.delete(state.uid + ':' + state.user);
     const loadPosts = refresh || !state.postsStarted || !!state.postError || (!state.done && !state.replyError);
     const loadReplies = refresh || !state.repliesChecked || !!state.replyError;
     state.busy = true; state.error = ''; const sequence = ctProfileState.sequence;
@@ -3029,18 +3163,25 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const headers = { Authorization: `Bearer ${auth.token}` };
       // Only the native posts route has a verified cursor. The native replies
       // route returns wrappers without pagination; display its newest 100 safely.
-      const [postsJSON, repliesJSON] = await Promise.all([
-        loadPosts ? requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/posts?' + query, headers) : null,
-        loadReplies ? requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/replies', headers) : null
-      ]);
-      const current = await getAuth(); const context = ctProfileContext();
-      if (sequence !== ctProfileState.sequence || location.pathname !== path || !context || context.user !== user || current?.uid !== auth.uid) return;
-      state.started = true;
-      if (loadPosts) {
+      const currentRequest = () => sequence === ctProfileState.sequence && ctProfileState.media === state &&
+        location.pathname === path && ctProfileState.path === path && ctProfileState.user === user &&
+        ctProfileUID() === auth.uid && ctProfileContext()?.user === user;
+      const publish = () => {
+        state.items = [...new Map([...state.postItems, ...state.replyItems].map(item => [item.id, item])).values()]
+          .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+        state.error = [state.postError, state.replyError].filter(Boolean).join(' ');
+        ctProfileRenderMedia();
+      };
+      const posts = async () => {
+        if (!loadPosts) return;
+        const postsJSON = await requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/posts?' + query, headers).catch(() => null);
+        const current = await getAuth();
+        if (!currentRequest() || current?.uid !== auth.uid) return;
         if (!postsJSON || postsJSON.success === false || postsJSON.error || !Array.isArray(postsJSON.posts) || postsJSON.posts.length > 100) {
           state.postError = ctProfileText('ツイートの写真・動画を取得できませんでした。もう一度お試しください。', 'Tweet photos and videos could not be loaded. Try again.');
           state.retryRefresh = !!refresh;
         } else {
+          ctProfileRememberLikedPosts(postsJSON.posts, auth.uid, user);
           const items = postsJSON.posts.map(post => ctProfilePostItem(post, user)).filter(Boolean);
           state.postItems = [...new Map([...(refresh ? [] : state.postItems), ...items].map(item => [item.id, item])).values()];
           state.scanned = (refresh ? 0 : state.scanned) + postsJSON.posts.length;
@@ -3048,8 +3189,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           state.cursor = next && next !== cursor ? next : null;
           state.done = !state.cursor; state.postsStarted = true; state.postError = ''; state.retryRefresh = false;
         }
-      }
-      if (loadReplies) {
+        publish();
+      };
+      const replies = async () => {
+        if (!loadReplies) return;
+        const repliesJSON = await requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(user) + '/replies', headers).catch(() => null);
+        const current = await getAuth();
+        if (!currentRequest() || current?.uid !== auth.uid) return;
         if (!repliesJSON || repliesJSON.success === false || repliesJSON.error || !Array.isArray(repliesJSON.replies)) {
           state.replyError = ctProfileText('返信の写真・動画を取得できませんでした。再試行すると返信を再確認します。', 'Reply photos and videos could not be loaded. Try again to recheck replies.');
         } else {
@@ -3057,14 +3203,23 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
             ctProfileId(post?.id) && ctProfileHandle(post.authorUsername) === user)
             .sort((a, b) => (Date.parse(b.createdAt ?? b.created_at) || 0) - (Date.parse(a.createdAt ?? a.created_at) || 0));
           const checked = replies.slice(0, 100);
+          ctProfileRememberLikedPosts(checked, auth.uid, user);
           state.replyItems = checked.map(post => ctProfilePostItem(post, user)).filter(Boolean);
           state.replyScanned = checked.length; state.replyLimited = replies.length > 100;
           state.repliesChecked = true; state.replyError = '';
         }
+        publish();
+      };
+      // Independent streams start together, but each publishes as soon as its
+      // response is checked. Slow replies no longer hold back ready photos.
+      await Promise.all([posts(), replies()]);
+      if (currentRequest()) {
+        state.started = true;
+        if (!state.error) {
+          ctProfileState.mediaCache.set(auth.uid + ':' + user, { at: Date.now(), state: { ...state, busy: false } });
+          while (ctProfileState.mediaCache.size > 8) ctProfileState.mediaCache.delete(ctProfileState.mediaCache.keys().next().value);
+        }
       }
-      state.items = [...new Map([...state.postItems, ...state.replyItems].map(item => [item.id, item])).values()]
-        .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
-      state.error = [state.postError, state.replyError].filter(Boolean).join(' ');
     } catch {
       if (sequence === ctProfileState.sequence) {
         state.postError = ctProfileText('写真・動画を取得できませんでした。ログイン状態を確認して、もう一度お試しください。', 'Photos and videos could not be loaded. Check your sign-in and try again.');
@@ -3086,28 +3241,30 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const signature = JSON.stringify(['media', state.uid, state.items, state.scanned, state.replyScanned, state.busy, state.error, state.done, state.replyLimited]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
-    const content = document.createDocumentFragment();
+    const rows = ctProfileExistingRows(ctProfileState.panel);
+    const focused = ctProfileState.panel.contains(document.activeElement) ? document.activeElement : null;
+    const content = [];
     const note = ctProfileStatus(ctProfileText(`投稿${state.scanned}件・返信${state.replyScanned}件を確認 · 写真・動画`, `${state.scanned} posts and ${state.replyScanned} replies checked · Photos and videos`));
     const scope = document.createElement('div');
     scope.textContent = ctProfileText('返信は最新100件まで含みます。以前のツイートは下から読み込めます。', 'Includes up to the latest 100 replies. Load older Tweets below.');
     note.append(scope, document.createElement('br'), ctProfileControl(ctProfileText('更新', 'Refresh'), () => ctProfileLoadMedia(true)));
-    note.querySelector('button').disabled = state.busy; content.append(note);
-    for (const item of state.items) content.append(ctProfileRow(item));
+    note.querySelector('button').disabled = state.busy; content.push(note);
+    for (const item of state.items) content.push(ctProfileReuseRow(item, rows));
     if (!state.items.length) {
       const empty = document.createElement('p'); empty.className = 'ct-profile-empty'; empty.setAttribute('role', 'status');
       empty.textContent = state.busy ? ctProfileText('写真・動画を読み込み中…', 'Loading photos and videos…') :
         state.done && !state.error ? ctProfileText('写真・動画のあるツイートはありません。', 'No Tweets with photos or videos.') :
           ctProfileText('ここまでの投稿には写真・動画がありません。以前の投稿を確認できます。', 'No photos or videos in the posts checked so far. You can check older posts.');
-      content.append(empty);
+      content.push(empty);
     }
-    if (state.error) content.append(ctProfileStatus(state.error));
+    if (state.error) content.push(ctProfileStatus(state.error));
     if (!state.done || state.error) {
       const footer = ctProfileStatus('');
       const next = ctProfileControl(state.busy ? ctProfileText('読み込み中…', 'Loading…') :
         state.error ? ctProfileText('再試行', 'Try again') : ctProfileText('以前の投稿を確認', 'Check older posts'), () => ctProfileLoadMedia());
-      next.disabled = state.busy; footer.append(next); content.append(footer);
+      next.disabled = state.busy; footer.append(next); content.push(footer);
     }
-    ctProfileState.panel.replaceChildren(content);
+    ctProfileReplaceContent(ctProfileState.panel, content, focused);
   }
 
     // Native feed cards have no permalink. Resolve only an exact author/time/body
@@ -3116,6 +3273,32 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const ctFavoriteCaptures = new WeakMap();
   const ctFavoritePostCache = new Map();
   const ctFavoriteStateWatchers = new WeakMap();
+  let ctFavoriteRestoreBusy = false;
+
+  function ctFavoriteReplyParent(article) {
+    const container = article.closest('[id^="inline-replies-"]');
+    const inline = container?.id.match(/^inline-replies-([A-Za-z0-9_-]{1,160})$/)?.[1];
+    return inline || null;
+  }
+
+  function ctFavoriteRelativeTimeMatches(text, createdAt, observedAt) {
+    const created = Date.parse(createdAt);
+    if (!Number.isFinite(created)) return false;
+    const value = text.trim();
+    const short = /^(\d+)([mhd])$/.exec(value);
+    const japanese = /^(\d+)(分|時間|日)前$/.exec(value);
+    const units = {m:60000,h:3600000,d:86400000,'分':60000,'時間':3600000,'日':86400000};
+    const match = short || japanese;
+    if (match) {
+      const unit = units[match[2]], age = observedAt - created;
+      // The card may have been rendered shortly before the click. Allow two
+      // minutes of render age, while still requiring one unique author/body ID.
+      return age >= Number(match[1]) * unit && age < (Number(match[1]) + 1) * unit + 120000;
+    }
+    if (/^(Just now|たった今|今)$/.test(value)) return observedAt - created >= 0 && observedAt - created < 180000;
+    // A month/day label carries no year and cannot identify an older reply.
+    return false;
+  }
 
   function ctWatchFavoriteRollback(button, snapshot, uid, generation, liked) {
     let currentLiked = liked;
@@ -3151,14 +3334,25 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const username = validUser(articleAuthor(article));
     const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[aria-live]'));
-    if (!username || !body || !timestamp) return null;
+    const replyTime = [...article.querySelectorAll('span.text-tl-app-text-muted.shrink-0')].find(el =>
+      el.closest('article') === article && el.previousElementSibling?.textContent.trim() === '·' &&
+      el.parentElement.querySelector(':scope > button.font-bold.truncate') &&
+      el.parentElement.querySelector('button > svg.lucide-ellipsis-vertical'));
+    const parentId = ctFavoriteReplyParent(article);
+    if (!username || !body || (!timestamp && !replyTime)) return null;
+    const translated = [...article.querySelectorAll('button')].some(el => el.closest('article') === article &&
+      /^(Show original|原文を表示)$/i.test(el.textContent.trim()));
+    // A translated reply has no exact ISO time or original body in the DOM.
+    // Do not infer its identity from the translated text.
+    if (!timestamp && translated) return null;
     const author = [...article.querySelectorAll('button.truncate.font-bold')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote'));
     return { username, name: author?.textContent || username, text: body.textContent,
-      avatar: articleAvatar(article), createdAt: timestamp.title, savedAt: Date.now() };
+      avatar: articleAvatar(article), createdAt: timestamp?.title || '', savedAt: Date.now(),
+      relativeText: replyTime?.textContent || '', observedAt: Date.now(), parentId, translated };
   }
 
-  async function ctFavoriteAuthorPosts(username, auth) {
+  async function ctFavoriteAuthorPosts(username, auth, deadline = Infinity) {
     const key = auth.uid + ':' + username.toLowerCase();
     const previous = ctFavoritePostCache.get(key);
     if (previous?.pending) return previous.pending;
@@ -3167,6 +3361,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     record.pending = (async () => {
       let cursor = null;
       for (let page = 0; page < 3; page++) {
+        if (Date.now() >= deadline) { record.expired = true; break; }
         const query = new URLSearchParams({ limit: '50' });
         if (cursor) query.set('cursor', cursor);
         const json = await requestJSON(API_ORIGIN + '/api/users/' + encodeURIComponent(username) + '/posts?' + query,
@@ -3182,27 +3377,84 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ctFavoritePostCache.set(key, record);
     while (ctFavoritePostCache.size > 40) ctFavoritePostCache.delete(ctFavoritePostCache.keys().next().value);
     try { return await record.pending; }
-    finally { record.pending = null; record.at = Date.now(); }
+    finally {
+      record.pending = null; record.at = Date.now();
+      if (record.expired && ctFavoritePostCache.get(key) === record) ctFavoritePostCache.delete(key);
+    }
   }
 
-  async function ctResolveFavorite(candidate, uid) {
+  async function ctFavoriteReplyPosts(candidate, auth, deadline = Infinity) {
+    const base = candidate.parentId ? '/api/posts/' + encodeURIComponent(candidate.parentId) + '/replies' :
+      '/api/users/' + encodeURIComponent(candidate.username) + '/replies';
+    // Relative-time identities must use fresh, complete responses. Reusing an
+    // old list could mistake a newly added duplicate reply for an earlier one.
+    const posts = [];
+    let cursor = null;
+    for (let page = 0; page < (candidate.parentId ? 3 : 1); page++) {
+      if (Date.now() >= deadline) return null;
+      const query = new URLSearchParams({limit:'50'});
+      if (cursor) query.set('cursor',cursor);
+      const json = await requestJSON(API_ORIGIN + base + (candidate.parentId ? '?' + query : ''),
+        {Authorization:`Bearer ${auth.token}`});
+      if (!json || json.success === false || json.error || !Array.isArray(json.replies) || json.replies.length > 1000) return null;
+      posts.push(...json.replies.map(row => candidate.parentId ? row : row?.post).filter(Boolean));
+      const next = json.nextCursor ?? null;
+      if (next === null) return posts;
+      if (!candidate.parentId || typeof next !== 'string' || !next || next.length > 2000 || next === cursor) return null;
+      cursor = next;
+    }
+    return null;
+  }
+
+  async function ctResolveFavorite(candidate, uid, deadline = Infinity) {
     if (!candidate || !uid) return null;
     const auth = await getAuth();
     if (!auth?.token || auth.uid !== uid) return null;
     if (candidate.id) return candidate;
-    const posts = await ctFavoriteAuthorPosts(candidate.username, auth);
+    const posts = candidate.relativeText && !candidate.createdAt ? await ctFavoriteReplyPosts(candidate, auth, deadline) :
+      await ctFavoriteAuthorPosts(candidate.username, auth, deadline);
     const current = await getAuth();
-    if (current?.uid !== uid) return null;
+    if (current?.uid !== uid || !Array.isArray(posts)) return null;
     const matches = posts.filter(post => typeof post.id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(post.id) &&
       !post.isDeleted && !post.originalPostId && !post.isRepost &&
+      post.status !== 'MUTED' &&
       post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&
-      Date.parse(post.createdAt ?? post.created_at) === Date.parse(candidate.createdAt) &&
-      typeof post.text === 'string' && post.text === candidate.text);
+      (candidate.createdAt ? Date.parse(post.createdAt ?? post.created_at) === Date.parse(candidate.createdAt) :
+        ctFavoriteRelativeTimeMatches(candidate.relativeText, post.createdAt ?? post.created_at, candidate.observedAt)) &&
+      typeof post.text === 'string' && (candidate.translated || post.text === candidate.text));
     const unique = [...new Map(matches.map(post => [post.id, post])).values()];
     if (unique.length !== 1) return null;
-    return { ...candidate, id: unique[0].id, href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
+    return { ...candidate, id: unique[0].id, text: unique[0].text, createdAt: unique[0].createdAt ?? unique[0].created_at,
+      href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
       avatar: ctProfileURL(unique[0].authorAvatar) || candidate.avatar,
       media: ctProfileMediaAssets(unique[0]) };
+  }
+
+  async function ctRestoreVisibleFavorites() {
+    if (ctFavoriteRestoreBusy) return null;
+    ctFavoriteRestoreBusy = true;
+    let saved = 0, unresolved = 0;
+    try {
+      const auth = await getAuth();
+      if (!auth?.token || !auth.uid) throw new Error('sign-in');
+      const deadline = Date.now() + 45000;
+      const cards = [...document.querySelectorAll('main article')].filter(article => {
+        const button = article.querySelector('button[data-testid="tweet-like-action"]');
+        return button && !article.closest('[data-ct-owned],[data-ct-local-ui],[aria-hidden="true"]') && ctIsLiked(button);
+      }).slice(0,40);
+      for (const [index, article] of cards.entries()) {
+        if (Date.now() >= deadline) { unresolved += cards.length - index; break; }
+        if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
+        const button = article.querySelector('button[data-testid="tweet-like-action"]');
+        const candidate = ctFavoriteCandidate(article);
+        const snapshot = candidate && await ctResolveFavorite(candidate, auth.uid, deadline);
+        if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
+        if (snapshot && button.isConnected && ctIsLiked(button)) {
+          if (saveFavorite(snapshot, auth.uid) !== false) saved++;
+        } else unresolved++;
+      }
+      return {saved,unresolved};
+    } finally { ctFavoriteRestoreBusy = false; }
   }
 
   function ctCaptureFavoriteClick(event) {
@@ -3628,6 +3880,70 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const ctBadgeImageStates = new WeakMap();
   const ctBadgeRequests = new WeakMap();
 
+  function ctBadgeLabel(kind) {
+    const labels = { founder: '創設メンバー', fighter: 'ファイター', centurion: 'センチュリオン',
+      'team-member': '運営メンバー', ambassador: 'Tweetアンバサダー', wing: 'ウィング', press: 'プレス' };
+    return typeof CT_LOCALE !== 'undefined' && CT_LOCALE === 'ja' ? labels[kind] || '' : ctOfficialBadgeKinds[kind] || '';
+  }
+
+  function ctBadgeJapaneseDescription(value, kinds) {
+    if (typeof CT_LOCALE === 'undefined' || CT_LOCALE !== 'ja' || typeof value !== 'string') return null;
+    const names = value.split(' + ');
+    const entries = Object.entries(ctOfficialBadgeKinds);
+    const selected = names.map(name => entries.find(([, label]) => label === name)?.[0]);
+    // Accept complete, known role combinations backed by the current artwork.
+    // Display names, custom descriptions and numbered membership labels stay intact.
+    return selected.length <= 7 && selected.every(kind => kind && kinds.includes(kind)) &&
+      new Set(selected).size === selected.length ? selected.map(ctBadgeLabel).join(' + ') : null;
+  }
+
+  function ctBadgeDescriptionProtected(el) {
+    return !!el.closest('[data-ct-owned],[data-ct-local-ui],[data-user-content],.tl-user-text,' +
+      '[data-testid="tweet-text"],[data-testid="profile-bio"],[translate="no"],.notranslate,' +
+      '[contenteditable]:not([contenteditable="false"]),.whitespace-pre-wrap,.break-words,.wrap-break-word');
+  }
+
+  function ctPatchNativeBadgeDescriptions(images, root) {
+    if (typeof CT_LOCALE === 'undefined' || CT_LOCALE !== 'ja') return;
+    const wrappers = new Set();
+    const tooltips = new Set();
+    for (const img of images) {
+      if (!img.matches('img.shrink-0.select-none') || !ctBadgeAsset(img.getAttribute('src')) || ctBadgeDescriptionProtected(img)) continue;
+      const wrapper = img.closest('span.relative.inline-flex.shrink-0.items-center.align-middle,' +
+        'button.relative.inline-flex.shrink-0.items-center.align-middle');
+      if (wrapper) wrappers.add(wrapper);
+      const tooltip = img.closest('[role="tooltip"].fixed.pointer-events-none');
+      if (tooltip) tooltips.add(tooltip);
+    }
+    const changedTooltip = root.closest?.('[role="tooltip"].fixed.pointer-events-none');
+    if (changedTooltip) tooltips.add(changedTooltip);
+    for (const wrapper of wrappers) {
+      if (ctBadgeDescriptionProtected(wrapper)) continue;
+      const kinds = [...wrapper.querySelectorAll('img.shrink-0.select-none')]
+        .map(img => ctBadgeAsset(img.getAttribute('src'))?.kind).filter(Boolean);
+      for (const attr of ['aria-label', 'title']) {
+        const value = wrapper.getAttribute(attr);
+        const out = ctBadgeJapaneseDescription(value, kinds);
+        if (out && value !== out) wrapper.setAttribute(attr, out);
+      }
+    }
+    for (const tooltip of tooltips) {
+      if (ctBadgeDescriptionProtected(tooltip)) continue;
+      const box = tooltip.firstElementChild;
+      const artwork = box?.firstElementChild;
+      const label = artwork?.nextElementSibling;
+      if (!box?.matches('div.bg-tl-app-card.border.flex.flex-col.items-center') ||
+          !artwork?.matches('span.inline-flex.flex-wrap.justify-center') ||
+          !label?.matches('span.font-bold.text-tl-app-text.text-center.leading-tight') ||
+          label.children.length || label.childNodes.length !== 1 || label.firstChild.nodeType !== Node.TEXT_NODE ||
+          !artwork.children.length || [...artwork.children].some(img => !img.matches('img.shrink-0.select-none') ||
+            !ctBadgeAsset(img.getAttribute('src')))) continue;
+      const kinds = [...artwork.children].map(img => ctBadgeAsset(img.getAttribute('src')).kind);
+      const out = ctBadgeJapaneseDescription(label.firstChild.nodeValue, kinds);
+      if (out && label.firstChild.nodeValue !== out) label.firstChild.nodeValue = out;
+    }
+  }
+
   function ctBadgeAsset(value) {
     try {
       const url = new URL(value, location.origin);
@@ -3760,7 +4076,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     group.setAttribute('role', 'img');
     const labelKinds = kinds.filter(kind => !(kind === 'founder' && kinds.includes('fighter')) &&
       !(kind === 'fighter' && kinds.includes('centurion')));
-    group.setAttribute('aria-label', labelKinds.map(kind => ctOfficialBadgeKinds[kind]).join(' + '));
+    group.setAttribute('aria-label', labelKinds.map(ctBadgeLabel).join(' + '));
     group.title = group.getAttribute('aria-label');
     group.replaceChildren(...kinds.map(kind => {
       const img = document.createElement('img');
@@ -3798,9 +4114,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   function patchOfficialBadges(root = document) {
-    const images = [...(root.querySelectorAll?.('img[src]') || [])];
-    if (root.matches?.('img[src]')) images.push(root);
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const images = [...(host.querySelectorAll?.('img[src]') || [])];
+    if (host.matches?.('img[src]')) images.push(host);
     images.forEach(ctUpgradeBadgeImage);
+    ctPatchNativeBadgeDescriptions(images, host);
     const scopes = new Set(root.querySelectorAll?.('article,[role="dialog"][aria-label="Account menu"]') || []);
     if (root.matches?.('article,[role="dialog"][aria-label="Account menu"]')) scopes.add(root);
     const parent = root.closest?.('article,[role="dialog"][aria-label="Account menu"]');
@@ -5030,6 +5348,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ['Loading profile...', 'プロフィールを読み込み中…'],
     ['Loading posts...', 'ツイートを読み込み中…'],
     ['Loading more posts...', 'ツイートをさらに読み込み中…'],
+    ['Loading replies...', '返信を読み込み中…'],
+    ['This post is no longer available', 'このツイートは表示できません'],
     ['Loading followers...', 'フォロワーを読み込み中…'],
     ['Loading following...', 'フォロー中のユーザーを読み込み中…'],
     ['Loading more', 'さらに読み込み中…'],
@@ -5123,6 +5443,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
     // Translation / profile copy
     ['Translate', '翻訳する'],
+    ['Translating', '翻訳中'],
     ['Translated', '翻訳済み'],
     ["Couldn’t translate. Try again.", '翻訳できませんでした。もう一度お試しください。'],
     ['Manage your public profile, photo, and bio.', 'プロフィール、写真、自己紹介を編集できます'],
@@ -5663,7 +5984,7 @@ if (/^just\s+now$/i.test(t)) {
     }
 
     if ((m = t.match(/^Joined\s+(.+)$/i))) {
-      return `${m[1]}からTwitterを利用しています`;
+      return `${m[1]}からTweetを利用しています`;
     }
 
     if ((m = t.match(/^(\d+)\s+codes?\s+remaining$/i))) {
@@ -5671,7 +5992,7 @@ if (/^just\s+now$/i.test(t)) {
     }
 
     if ((m = t.match(/^参加した人数\s+(.+)$/))) {
-      return `${m[1]}からTwitterを利用しています`;
+      return `${m[1]}からTweetを利用しています`;
     }
 
     if ((m = t.match(/^([\d,.]+[KMB]?)\s+Following$/i))) {
@@ -5894,6 +6215,85 @@ if (/^just\s+now$/i.test(t)) {
       Number.isFinite(Date.parse(title));
   }
 
+  function isNativeReplyTimestamp(el) {
+    if (!el?.matches('span.text-tl-app-text-muted.shrink-0') ||
+        el.hasAttribute('title') || !el.closest('article') ||
+        el.closest('button,a,[role="button"]')) return false;
+    // Inline replies omit the main tweet's ISO title. Their timestamp has a
+    // fixed position between the author separator and the native action menu.
+    const header = el.parentElement;
+    const separator = el.previousElementSibling;
+    const author = header?.firstElementChild;
+    const separatorIndex = [...(header?.children || [])].indexOf(separator);
+    const decorations = [...(header?.children || [])].slice(1, separatorIndex);
+    return !!header?.matches('div.flex.items-center.gap-1.min-w-0') &&
+      separatorIndex >= 1 && decorations.every(marker =>
+        marker.matches('span.ct-official-badges[data-ct-owned][role="img"]') && marker.children.length &&
+        [...marker.children].every(img => img.matches('img') &&
+          /^https:\/\/app\.tweet\.app\/assets\/(?:founder|fighter|centurion|team-member|ambassador|wing|press)-badge-(?:36|96)\.png$/.test(img.getAttribute('src') || '')) ||
+        marker.matches('span.ct-founder') && !marker.children.length && /^#\d{5,}$/.test(clean(marker.textContent)) &&
+          marker.getAttribute('title') === `Founder Number ${clean(marker.textContent)}`) &&
+      !!author?.matches('button.font-bold.truncate.hover\\:underline') &&
+      !!separator?.matches('span.text-tl-app-text-muted') && clean(separator.textContent) === '·' &&
+      !!header.querySelector(':scope > div.flex.items-center.shrink-0.ml-auto') &&
+      !!header.nextElementSibling?.matches('p.tl-user-text.whitespace-pre-wrap');
+  }
+
+  function isNativeReplyOptionsButton(el) {
+    return !!el?.matches('button.p-2.rounded-full.text-tl-app-text-muted') && !!el.closest('article') &&
+      !!el.parentElement?.matches('div.relative') &&
+      !!el.querySelector(':scope > svg.lucide-ellipsis-vertical[width="18"][height="18"]');
+  }
+
+  function nativeLocalizationParentPostPreview(el) {
+    const button = el?.closest('button.flex.w-full.items-start.gap-3.px-4.pt-3.pb-2.text-left');
+    if (!button?.parentElement?.matches('div.border-b.border-tl-app-border') ||
+        button !== button.parentElement.firstElementChild ||
+        !button.nextElementSibling?.matches('article')) return null;
+    const body = button.querySelector(':scope > div.min-w-0.flex-1');
+    const header = body?.firstElementChild;
+    return header?.matches('div.flex.min-w-0.flex-wrap.items-center.gap-1.leading-4') &&
+      header.firstElementChild?.matches('span.font-semibold.truncate') &&
+      header.children[1]?.matches('span.text-tl-app-text-muted.truncate') &&
+      /^@[A-Za-z0-9_.-]+$/.test(clean(header.children[1].textContent)) ? { button, body, header } : null;
+  }
+
+  function isNativeParentPostTimestamp(el) {
+    const preview = nativeLocalizationParentPostPreview(el);
+    return !!preview && el.matches('span.shrink-0.text-tl-app-text-muted') && !el.hasAttribute('title') &&
+      el.parentElement === preview.header && el === preview.header.lastElementChild &&
+      el.previousElementSibling?.matches('span.text-tl-app-text-muted') &&
+      clean(el.previousElementSibling.textContent) === '·';
+  }
+
+  function isNativeTranslationMetadata(el) {
+    if (!el?.matches('p.text-tl-app-text-muted[aria-live="polite"]') || !el.closest('article') ||
+        !el.parentElement?.matches('div.mt-0\\.5') ||
+        !el.querySelector(':scope > span.select-none')) return false;
+    return [...el.children].some(child => child.matches('button.text-sky-500,button.text-tl-app-text-muted') &&
+      /^(?:Show translation|Show original|Translating…|翻訳を表示|原文を表示|翻訳中…)$/.test(clean(child.textContent)));
+  }
+
+  function nativeLocalizationMonthNumber(value) {
+    const month = value.toLowerCase().replace(/\.$/, '');
+    return ['january', 'february', 'march', 'april', 'may', 'june',
+      'july', 'august', 'september', 'october', 'november', 'december'].findIndex(name =>
+      name === month || name.slice(0, 3) === month || name === 'september' && month === 'sept') + 1;
+  }
+
+  function nativeTimestampJapaneseText(el, text) {
+    if (!isNativeLocalizationTimestamp(el) && !isNativeReplyTimestamp(el) && !isNativeParentPostTimestamp(el) &&
+        !isNativeNotificationTimestamp(el)) return null;
+    const relative = text.match(/^(\d+)([smhd])$/);
+    if (relative) return relative[1] + { s: '秒前', m: '分前', h: '時間前', d: '日前' }[relative[2]];
+    // The native relative-time formatter uses an English month after a week.
+    const date = text.match(/^([A-Za-z]+\.?) (\d{1,2})$/);
+    const month = date && nativeLocalizationMonthNumber(date[1]);
+    const day = date && Number(date[2]);
+    return month && day >= 1 && day <= [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?
+      `${month}月${day}日` : null;
+  }
+
   function isNativeEditedIndicator(el) {
     if (!el?.matches('span.text-tl-app-text-muted[title]') ||
         !el.closest('article') || el.closest('button,a,[role="button"]') ||
@@ -5917,7 +6317,7 @@ if (/^just\s+now$/i.test(t)) {
     const parent = el.parentElement;
     const strong = el.firstElementChild;
     if (/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname) &&
-        strong?.matches('strong.font-extrabold.text-tl-app-text') && /^[\d,]+$/.test(clean(strong.textContent)) &&
+        strong?.matches('strong.font-extrabold.text-tl-app-text') && /^[\d,.]+[KMB]?$/.test(clean(strong.textContent)) &&
         parent?.querySelector(':scope > button')) return true;
     return !!el.closest('aside') && el.classList.contains('mt-0.5') && parent?.matches('button.group') &&
       parent.children.length === 2 && parent.lastElementChild === el &&
@@ -6036,6 +6436,11 @@ if (/^just\s+now$/i.test(t)) {
     if (isProtectedLocalizationElement(el)) return false;
     if (localizationNotificationAction(node) || isNativeNotificationTimestamp(el)) return true;
     if (localizationNotificationRow(el)) return false;
+    if (isNativeParentPostTimestamp(el)) return true;
+    if (nativeLocalizationParentPostPreview(el) && el.matches('p.italic.leading-5.text-tl-app-text-muted') &&
+        clean(node.nodeValue) === 'This post is no longer available') return true;
+    if (isNativeTranslationMetadata(el) && node === el.firstChild &&
+        /^(?:Translated|Translated from .{1,80})$/.test(clean(node.nodeValue))) return true;
     if (isNativeLocalizationPollUI(el)) return true;
     if (nativeLocalizationAccountMenu(el)) return node === el.firstChild &&
       /^(?:Report|Mute unavailable|(?:Mute|Unmute) @[A-Za-z0-9_.-]+)$/.test(clean(node.nodeValue));
@@ -6056,6 +6461,9 @@ if (/^just\s+now$/i.test(t)) {
     const control = el.closest('button,[role="button"],[role="tab"],[role="menuitem"],summary');
     if (control) {
       if (control.querySelector('img') || /@[A-Za-z0-9_.-]/.test(clean(control.textContent))) return false;
+      if (text === 'Translating' && el === control && control.matches('button.text-tl-app-text-muted[aria-busy="true"]') &&
+          control.parentElement?.matches('p.text-tl-app-text-muted[aria-live="polite"]') &&
+          control.parentElement.parentElement?.matches('div.mt-0\\.5') && control.closest('article')) return true;
       // User cards are buttons too. Paragraphs and styled names inside those
       // buttons are data, not labels. Real notification actions are handled above.
       const paragraph = el.closest('p');
@@ -6063,7 +6471,7 @@ if (/^just\s+now$/i.test(t)) {
       if (el.closest('article') && !/^(?:Like|Likes|Liked|Unlike|Favorite|Favorites|Favorited|Unfavorite|お気に入り|お気に入り済み|お気に入りを解除|いいね|いいね済み|いいねを取り消す|Reply|Replies|Repost|Reposts|Retweet|Retweets|Quote|Quote Tweet|Quote Retweet|Undo repost|Undo retweet|Translate|Translated|Show translation|Show original|Show more|Show less|Share|Copy link|Edit|Edit post|Delete|Report|Mute user|Unmute|Follow|Unfollow)$/i.test(text)) return false;
       return true;
     }
-    if (isNativeLocalizationTimestamp(el) || isNativeEditedIndicator(el)) return true;
+    if (isNativeLocalizationTimestamp(el) || isNativeReplyTimestamp(el) || isNativeEditedIndicator(el)) return true;
     if (el.closest('[role="status"],[role="alert"]')) return true;
     if (el.closest('article')) return false;
     if (el.closest('label,legend')) return true;
@@ -6074,6 +6482,9 @@ if (/^just\s+now$/i.test(t)) {
       // Profile headings contain display names; all other static headings are
       // still restricted to exact dictionary entries by translateTextNode.
       if (/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname) && heading.tagName !== 'H1' &&
+          !(heading.matches('aside h3.font-semibold.text-tl-app-text.shrink-0') &&
+            heading.parentElement?.matches('div.bg-tl-app-card.border.border-tl-app-border') &&
+            /^(?:Who to follow|Trends for you|おすすめユーザー|おすすめのトレンド)$/.test(text)) &&
           !(location.pathname.replace(/\/$/, '') === '/profile' && heading.matches('h2.truncate') &&
             heading.closest('.sticky') && /^(?:Feed|プロフィール)$/.test(text)) &&
           !(heading.matches('h3.text-xs.font-bold.uppercase.tracking-wider') &&
@@ -6183,7 +6594,8 @@ if (/^just\s+now$/i.test(t)) {
         const likers = el.matches('[data-testid="tweet-like-action-count"]') &&
           value?.match(/^View (\d+) likes?$/);
         const choice = nativeLocalizationPoll(el)?.compose && value?.match(/^Remove choice (\d+)$/);
-        const out = choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
+        const out = value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
+          choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
           likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value);
         if (out && value !== out) ctRememberLocalization(el, attr, out);
@@ -6198,14 +6610,15 @@ if (/^just\s+now$/i.test(t)) {
     // Dynamic replacements belong to their specific UI contexts. In particular,
     // never parse actor names or dates from arbitrary text that resembles a UI.
     const el = node.parentElement;
-    const relative = (isNativeLocalizationTimestamp(el) || isNativeNotificationTimestamp(el)) && text.match(/^(\d+)([smhd])$/);
+    const timestamp = nativeTimestampJapaneseText(el, text);
+    const sourceLanguage = isNativeTranslationMetadata(el) && node === el.firstChild && text.match(/^Translated from (.{1,80})$/);
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
-    const units = { s: '秒前', m: '分前', h: '時間前', d: '日前' };
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
-    let out = nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || (relative ? relative[1] + units[relative[2]] :
-      remaining ? `${remaining[1]}個のコードが残っています` :
+    let out = nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+      (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
+      (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
-      isNativeTweetCount(el) && /^([\d,]+) tweets?$/i.test(text) ? `${text.match(/^([\d,]+)/)[1]}件のツイート` :
+      isNativeTweetCount(el) && /^([\d,.]+[KMB]?) tweets?$/i.test(text) ? `${text.match(/^([\d,.]+[KMB]?)/)[1]}件のツイート` :
       isNativeTweetCount(el) && /^Tweets?$/i.test(text) ? 'ツイート' :
       /^\/profile\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
         el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text) ||
@@ -6911,15 +7324,33 @@ if (/^just\s+now$/i.test(t)) {
 
   function patchProfileJoinedDate(root = document) {
     if (!/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname)) return;
+    const metadata = new Set();
     for (const node of localizationScopeNodes(root)) {
       const el = node.parentElement;
       if (isProtectedLocalizationElement(el) || el.closest('article')) continue;
       // The profile metadata uses a calendar icon. Location/bio/name strings
       // resembling "Joined ..." must never be interpreted as metadata.
-      if (!el.matches('span.inline-flex') || !el.querySelector('svg.lucide-calendar')) continue;
-      const text = clean(node.nodeValue);
-      if (/^(?:Joined|参加した人数)$/i.test(text)) replaceLocalizationText(node, '登録日:');
-      else if (/^Joined\s+/i.test(text)) replaceLocalizationText(node, text.replace(/^Joined\s+/i, '登録日: '));
+      if (el.matches('span.inline-flex') && el.querySelector(':scope > svg.lucide-calendar') &&
+          [...el.children].every(child => child.matches('svg.lucide-calendar'))) metadata.add(el);
+    }
+    for (const el of metadata) {
+      // React renders Joined, a spacer and the localized month as separate
+      // nodes. Keep every node and the calendar icon for subsequent renders.
+      const nodes = [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE);
+      const text = clean(nodes.map(node => node.nodeValue).join(''))
+        .replace(/^(?:Joined|登録日\s*[:：]|参加した人数)\s*/i, '')
+        .replace(/から(?:Tweet|Twitter)を利用しています$/, '');
+      const english = text.match(/^([A-Za-z]+\.?)\s+(\d{4})$/);
+      const japanese = text.match(/^(\d{4})年\s*(\d{1,2})月$/);
+      const numeric = text.match(/^(\d{4})[/-](\d{1,2})$/) || text.match(/^(\d{1,2})[/.](\d{4})$/);
+      const year = english ? Number(english[2]) : japanese ? Number(japanese[1]) :
+        numeric ? Number(numeric[1].length === 4 ? numeric[1] : numeric[2]) : 0;
+      const month = english ? nativeLocalizationMonthNumber(english[1]) : japanese ? Number(japanese[2]) :
+        numeric ? Number(numeric[1].length === 4 ? numeric[2] : numeric[1]) : 0;
+      if (year < 1000 || month < 1 || month > 12) continue;
+      const output = `${year}年${month}月からTweetを利用しています`;
+      const last = nodes[nodes.length - 1];
+      for (const node of nodes) ctRememberLocalization(node, null, node === last ? output : '');
     }
   }
 
@@ -7021,6 +7452,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.13.0 loaded'
+    '🐦 Classic Twitter JP v6.14.0 loaded'
   );
 })();

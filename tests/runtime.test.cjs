@@ -68,6 +68,7 @@ function harness(t, html = '', options = {}) {
     options.scan?.(root, window.qa, stats);
   };
   window.ctCaptureFavoriteClick = () => {};
+  window.ctRestoreVisibleFavorites = async () => ({saved:0,unresolved:0});
   window.eval(`
     const KEY = { autoTranslate: 'autoTranslate' };
     const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};

@@ -37,7 +37,8 @@ function fixture(language, html, route = '/feed') {
   const japanese = [
     'ctLocalizationRegularText', 'ctLocalizationClassicText',
     'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
-    'isNativeEditedIndicator',
+    'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber', 'nativeTimestampJapaneseText',
+    'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
     'notificationTextNodes', 'patchNotificationGrammar', 'patchNotificationConnectors',
     'patchNotificationParticles', 'patchNotificationFollowGrammar', 'patchReplyingTo',
@@ -245,13 +246,55 @@ test('ja: Joined changes only calendar metadata or referral dt, never bio, names
   assert.equal(f.text('bio'), 'Joined September 2026');
   assert.equal(f.text('location'), 'Joined September 2026');
   assert.equal(f.text('post'), 'Joined September 2026');
-  assert.equal(f.text('joined'), '登録日: September 2026');
+  assert.equal(f.text('joined'), '2026年9月からTweetを利用しています');
   f.dom.window.close();
   const g = fixture('ja', '<main><dl><div><dt id="label">Joined</dt><dd id="value">Home</dd></div></dl></main>', '/settings');
   g.run();
   assert.equal(g.text('label'), '参加した人数');
   assert.equal(g.text('value'), 'Home');
   g.dom.window.close();
+});
+
+test('ja: split native joined metadata formats the month and retains React nodes on date updates', () => {
+  const f = fixture('ja', '<main><span class="inline-flex" id="joined"><svg class="lucide-calendar"></svg></span></main>', '/profile');
+  const el = f.document.getElementById('joined');
+  const icon = el.firstElementChild;
+  const label = f.document.createTextNode('Joined');
+  const spacer = f.document.createTextNode(' ');
+  const date = f.document.createTextNode('Sep 2026');
+  el.append(label, spacer, date);
+  f.run();
+  assert.equal(el.textContent, '2026年9月からTweetを利用しています');
+  assert.deepEqual([...el.childNodes], [icon, label, spacer, date]);
+  const before = el.innerHTML;
+  f.run();
+  assert.equal(el.innerHTML, before);
+  // Native React may update only the date, or render all three values again.
+  date.nodeValue = '2026年10月';
+  f.run(date);
+  assert.equal(el.textContent, '2026年10月からTweetを利用しています');
+  label.nodeValue = 'Joined'; spacer.nodeValue = ' '; date.nodeValue = 'Nov 2026';
+  f.run(el);
+  assert.equal(el.textContent, '2026年11月からTweetを利用しています');
+  f.dom.window.qaClassic = false;
+  f.run();
+  assert.equal(el.textContent, '2026年11月からTweetを利用しています');
+  f.dom.window.close();
+});
+
+test('ja: joined date accepts native English and Japanese month formats but preserves unknown and protected data', () => {
+  const values = ['Jan 2026', 'September 2026', 'Sept. 2026', '2026年9月', '2026/09', '9/2026', '09.2026',
+    'Unknown 2026', '2026年13月', 'Jan 26'];
+  const html = values.map((value, i) => `<span class="inline-flex" id="joined-${i}"><svg class="lucide-calendar"></svg>Joined ${value}</span>`).join('') +
+    '<div data-user-content><span class="inline-flex" id="protected"><svg class="lucide-calendar"></svg>Joined September 2026</span></div>' +
+    '<span class="inline-flex" id="nested"><svg class="lucide-calendar"></svg><span>Joined September 2026</span></span>';
+  const f = fixture('ja', `<main>${html}</main>`, '/user/alice');
+  f.run();
+  for (let i = 0; i < 7; i++) assert.equal(f.text(`joined-${i}`), `2026年${i === 0 ? 1 : 9}月からTweetを利用しています`);
+  for (let i = 7; i < values.length; i++) assert.equal(f.text(`joined-${i}`), `Joined ${values[i]}`);
+  assert.equal(f.text('protected'), 'Joined September 2026');
+  assert.equal(f.text('nested'), 'Joined September 2026');
+  f.dom.window.close();
 });
 
 test('ja: replying-to labels preserve handles instead of adding honorifics to identities', () => {
@@ -318,6 +361,173 @@ test('ja: native timestamp translations require ISO date and header styling', ()
   const before = f.document.body.innerHTML;
   f.run();
   assert.equal(f.document.body.innerHTML, before);
+  f.dom.window.close();
+});
+
+function nativeReplyTimestampCard(value, id, extra = '') {
+  return `<article><div class="flex items-start gap-3"><button aria-label="View @alice's profile"><img></button>
+    <div class="min-w-0 flex-1"><div class="flex items-center gap-1 min-w-0"><button class="font-bold truncate hover:underline">alice</button>
+      <span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted shrink-0" id="${id}" ${extra}>${value}</span>
+      <div class="flex items-center shrink-0 ml-auto"><button aria-label="More options"></button></div></div>
+    <p class="tl-user-text whitespace-pre-wrap">${value}</p></div></div></article>`;
+}
+
+test('ja: native reply header times localize without ISO titles and preserve body, names and native nodes', () => {
+  const values = ['Just now', '12s', '5m', '3h', '2d', 'Sep 27', 'Feb 29'];
+  const f = fixture('ja', values.map((value, i) => nativeReplyTimestampCard(value, `time-${i}`)).join(''), '/post/example');
+  const time = f.document.getElementById('time-3');
+  const node = time.firstChild;
+  f.run();
+  const expected = ['たった今', '12秒前', '5分前', '3時間前', '2日前', '9月27日', '2月29日'];
+  for (let i = 0; i < values.length; i++) assert.equal(f.text(`time-${i}`), expected[i]);
+  assert.deepEqual([...f.document.querySelectorAll('p.tl-user-text')].map(el => el.textContent), values);
+  assert.equal(time.firstChild, node);
+  node.nodeValue = '4h';
+  f.run(node);
+  assert.equal(time.textContent, '4時間前');
+  const before = f.document.body.innerHTML;
+  f.run(); assert.equal(f.document.body.innerHTML, before);
+  f.dom.window.close();
+});
+
+test('ja: reply timestamp guard rejects lookalike content and invalid dates', () => {
+  const f = fixture('ja', nativeReplyTimestampCard('3h', 'native') +
+    nativeReplyTimestampCard('3h', 'invalid-title', 'title="not-a-date"') +
+    nativeReplyTimestampCard('Apr 31', 'invalid-monthday') +
+    nativeReplyTimestampCard('3h', 'protected', 'data-user-content') +
+    '<article><span class="text-tl-app-text-muted shrink-0" id="unscoped">3h</span></article>' +
+    '<div class="flex items-center gap-1 min-w-0"><button class="font-bold truncate hover:underline">alice</button><span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted shrink-0" id="outside">3h</span><div class="flex items-center shrink-0 ml-auto"></div></div><p class="tl-user-text whitespace-pre-wrap">3h</p>');
+  f.run();
+  assert.equal(f.text('native'), '3時間前');
+  for (const id of ['invalid-title', 'protected', 'unscoped', 'outside']) assert.equal(f.text(id), '3h', id);
+  assert.equal(f.text('invalid-monthday'), 'Apr 31');
+  f.dom.window.close();
+});
+
+test('ja: reply times remain native metadata when official owned badges and founder numbers precede the separator', () => {
+  const f = fixture('ja', nativeReplyTimestampCard('5h', 'time') + nativeReplyTimestampCard('3h', 'unknown') +
+    nativeReplyTimestampCard('3h', 'bad-founder') + nativeReplyTimestampCard('3h', 'bad-art'), '/post/example');
+  const decoration = '<span class="ct-official-badges" data-ct-owned role="img" aria-label="創設メンバー"><img src="https://app.tweet.app/assets/founder-badge-96.png"></span><span class="ct-founder" title="Founder Number #05376">#05376</span>';
+  const insert = (id, html) => f.document.getElementById(id).parentElement.firstElementChild.insertAdjacentHTML('afterend', html);
+  insert('time', decoration);
+  insert('unknown', '<span>Unknown user content</span>');
+  insert('bad-founder', '<span class="ct-founder" title="Different metadata">#05376</span>');
+  insert('bad-art', '<span class="ct-official-badges" data-ct-owned role="img"><img src="https://example.com/founder-badge-96.png"></span>');
+  f.document.getElementById('time').parentElement.firstElementChild.classList.add('ct-author-name');
+  f.run();
+  assert.equal(f.text('time'), '5時間前');
+  for (const id of ['unknown', 'bad-founder', 'bad-art']) assert.equal(f.text(id), '3h');
+  assert.equal(f.document.querySelector('span.ct-founder').textContent, '#05376');
+  assert.equal(f.document.querySelector('button.ct-author-name').textContent, 'alice');
+  const node = f.document.getElementById('time').firstChild;
+  node.nodeValue = '6h'; f.run(node); assert.equal(node.nodeValue, '6時間前');
+  f.dom.window.close();
+});
+
+test('ja: reply options accessibility label localizes only on the verified native menu trigger', () => {
+  const f = fixture('ja', '<article><div class="relative"><button class="p-2 rounded-full text-tl-app-text-muted" aria-label="Reply options" title="Reply options" id="menu"><svg class="lucide-ellipsis-vertical" width="18" height="18"></svg></button></div>' +
+    '<button aria-label="Reply options" id="unscoped"></button><p class="tl-user-text" id="body">Reply options</p>' +
+    '<div data-user-content><div class="relative"><button class="p-2 rounded-full text-tl-app-text-muted" aria-label="Reply options" id="protected"><svg class="lucide-ellipsis-vertical" width="18" height="18"></svg></button></div></div></article>');
+  f.run();
+  assert.equal(f.document.getElementById('menu').getAttribute('aria-label'), '返信のメニュー');
+  assert.equal(f.document.getElementById('menu').title, '返信のメニュー');
+  for (const id of ['unscoped', 'protected']) assert.equal(f.document.getElementById(id).getAttribute('aria-label'), 'Reply options');
+  assert.equal(f.text('body'), 'Reply options');
+  f.dom.window.close();
+});
+
+test('ja: old native tweet dates localize only with valid ISO metadata', () => {
+  const f = fixture('ja', '<article><span class="text-tl-app-text-muted hover:underline" title="2026-09-27T09:00:00Z" id="date">Sep 27</span><span class="text-tl-app-text-muted hover:underline" title="not-a-date" id="invalid">Sep 27</span><p class="tl-user-text" id="body">Sep 27</p></article>');
+  f.run();
+  assert.equal(f.text('date'), '9月27日');
+  assert.equal(f.text('invalid'), 'Sep 27');
+  assert.equal(f.text('body'), 'Sep 27');
+  f.dom.window.close();
+});
+
+test('en: native reply relative times and joined metadata retain natural English', () => {
+  const f = fixture('en', nativeReplyTimestampCard('3h', 'time') + '<span class="inline-flex" id="joined"><svg class="lucide-calendar"></svg>Joined Sep 2026</span>', '/user/alice');
+  f.run();
+  assert.equal(f.text('time'), '3h');
+  assert.equal(f.text('joined'), 'Joined Sep 2026');
+  f.dom.window.close();
+});
+
+test('ja: native parent-preview timestamp and unavailable metadata translate while names and quoted text stay intact', () => {
+  const f = fixture('ja', `<main><div class="border-b border-tl-app-border"><button class="flex w-full items-start gap-3 px-4 pt-3 pb-2 text-left">
+    <div class="min-w-0 flex-1"><div class="flex min-w-0 flex-wrap items-center gap-1 leading-4">
+      <span class="font-semibold truncate" id="name">Just now</span><span class="text-tl-app-text-muted truncate">@alice</span>
+      <span class="text-tl-app-text-muted">·</span><span class="shrink-0 text-tl-app-text-muted" id="time">3h</span></div>
+    <p class="mt-1">Replying to <span id="handle">@alice</span></p>
+    <p class="line-clamp-3 wrap-break-word" id="preview">3h Translated from English</p>
+    <p class="mt-1 italic leading-5 text-tl-app-text-muted" id="unavailable">This post is no longer available</p></div></button><article><p class="tl-user-text" id="post">This post is no longer available</p></article></div>
+    <button class="flex w-full items-start gap-3 px-4 pt-3 pb-2 text-left"><div class="min-w-0 flex-1"><div class="flex min-w-0 flex-wrap items-center gap-1 leading-4"><span class="font-semibold truncate">Alice</span><span class="text-tl-app-text-muted truncate">@alice</span><span class="text-tl-app-text-muted">·</span><span class="shrink-0 text-tl-app-text-muted" id="lookalike">3h</span></div></div></button></main>`, '/user/alice');
+  f.run();
+  assert.equal(f.text('time'), '3時間前');
+  assert.equal(f.text('name'), 'Just now');
+  assert.equal(f.text('handle'), '@alice');
+  assert.equal(f.text('preview'), '3h Translated from English');
+  assert.equal(f.text('unavailable'), 'このツイートは表示できません');
+  assert.equal(f.text('post'), 'This post is no longer available');
+  assert.equal(f.text('lookalike'), '3h');
+  f.document.getElementById('time').firstChild.nodeValue = 'Sep 27';
+  f.run(f.document.getElementById('time'));
+  assert.equal(f.text('time'), '9月27日');
+  f.dom.window.close();
+});
+
+test('ja: native translation source language formats naturally and preserves generated translation and user content', () => {
+  const f = fixture('ja', `<article><div class="mt-0.5"><p class="text-tl-app-text-muted" aria-live="polite" id="metadata">Translated from English<span class="select-none"> · </span><button class="text-sky-500" id="toggle">Show original</button></p></div>
+    <div class="mt-0.5"><p class="text-tl-app-text-muted" aria-live="polite" id="japanese-source">Translated from 英語<span class="select-none"> · </span><button class="text-sky-500">Show original</button></p></div>
+    <p class="tl-user-text" id="translated">Translated from English</p>
+    <p class="text-tl-app-text-muted" aria-live="polite" id="unscoped">Translated from English</p>
+    <div data-user-content class="mt-0.5"><p class="text-tl-app-text-muted" aria-live="polite" id="protected">Translated from English<span class="select-none"> · </span><button class="text-sky-500">Show original</button></p></div></article>`);
+  const node = f.document.getElementById('metadata').firstChild;
+  f.run();
+  assert.equal(node.nodeValue, '英語から翻訳');
+  assert.equal(f.text('toggle'), '原文を表示');
+  assert.ok(f.text('japanese-source').startsWith('英語から翻訳 · '));
+  assert.equal(f.text('translated'), 'Translated from English');
+  assert.equal(f.text('unscoped'), 'Translated from English');
+  assert.ok(f.text('protected').startsWith('Translated from English · '));
+  node.nodeValue = 'Translated from Japanese';
+  f.run(node);
+  assert.equal(node.nodeValue, '日本語から翻訳');
+  f.dom.window.close();
+});
+
+test('ja: native busy translation control localizes split text without rewriting body or unrelated buttons', () => {
+  const f = fixture('ja', `<article><div class="mt-0.5"><p class="text-tl-app-text-muted" aria-live="polite"><button class="text-tl-app-text-muted" aria-busy="true" aria-disabled="true" id="translating"></button></p></div>
+    <p class="tl-user-text" id="body">Translating</p><button class="text-tl-app-text-muted" aria-busy="true" id="unscoped">Translating</button></article>`);
+  const button = f.document.getElementById('translating');
+  const label = f.document.createTextNode('Translating');
+  const dots = f.document.createTextNode('…');
+  button.append(label, dots);
+  f.run();
+  assert.equal(button.textContent, '翻訳中…');
+  assert.deepEqual([...button.childNodes], [label, dots]);
+  assert.equal(button.getAttribute('aria-busy'), 'true');
+  assert.equal(button.getAttribute('aria-disabled'), 'true');
+  assert.equal(f.text('body'), 'Translating');
+  assert.equal(f.text('unscoped'), 'Translating');
+  f.dom.window.close();
+});
+
+for (const route of ['/profile', '/user/alice']) test(`ja: verified profile sidebar headings and abbreviated tweet counts translate on ${route}`, () => {
+  const f = fixture('ja', `<main><h3 class="font-semibold text-tl-app-text shrink-0" id="name">Who to follow</h3></main>
+    <aside><div class="bg-tl-app-card border border-tl-app-border"><h3 class="font-semibold text-tl-app-text shrink-0" id="heading">Who to follow</h3>
+      <h3 class="font-semibold text-tl-app-text shrink-0" id="trends">Trends for you</h3>
+      <button class="group"><span class="truncate" title="#Home" id="tag">#Home</span><span class="text-tl-app-text-muted mt-0.5" id="count">1.1K tweets</span></button>
+      <button class="group"><span class="truncate" title="#Friends">#Friends</span><span class="text-tl-app-text-muted mt-0.5" id="million">2M tweets</span></button>
+      <p class="tl-user-text" id="body">1.1K tweets</p></div></aside>`, route);
+  f.run();
+  assert.equal(f.text('name'), 'Who to follow');
+  assert.equal(f.text('heading'), 'おすすめユーザー');
+  assert.equal(f.text('trends'), 'おすすめのトレンド');
+  assert.equal(f.text('count'), '1.1K件のツイート');
+  assert.equal(f.text('million'), '2M件のツイート');
+  assert.equal(f.text('tag'), '#Home');
+  assert.equal(f.text('body'), '1.1K tweets');
   f.dom.window.close();
 });
 

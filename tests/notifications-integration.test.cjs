@@ -109,7 +109,7 @@ for (const { file, locale } of distributions) {
     const name = reply.querySelector('button.font-bold');
     assert.equal(name.textContent, 'Home', 'dictionary-like display names are preserved');
     assert.equal(name.dataset.ctAuthorUser, 'alice');
-    assert.equal(reply.querySelector('.ct-official-badges')?.getAttribute('aria-label'), 'Centurion + Wing');
+    assert.equal(reply.querySelector('.ct-official-badges')?.getAttribute('aria-label'), file.includes('-ja') ? 'センチュリオン + ウィング' : 'Centurion + Wing');
     assert.equal(reply.querySelectorAll('.ct-official-badges img').length, 4);
     assert.equal(reply.querySelector('.ct-founder').textContent, '#00071');
     assert.equal(reply.querySelector('.break-words').textContent, 'Home Following Settings');

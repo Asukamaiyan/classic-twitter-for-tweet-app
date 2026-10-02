@@ -1,5 +1,14 @@
 # Changelog
 
+## All distributions v6.14.0 — 2026-10-02
+
+- Japanese reply and parent-preview timestamps now use 分前／時間前／日前 and Japanese month/day labels. Profile Joined preserves Tweet’s supplied month/year and reads 「年月からTweetを利用しています」.
+- Localize native translation status, sidebar suggestions/trends and abbreviated Tweet counts without changing user text.
+- Profile photos/videos render each verified posts/replies response as it arrives, reuse media rows, and reuse recent account-scoped results. Favorites reuse only complete mute checks for 30 seconds; native mute actions or Refresh discard them.
+- Save reply Favorites using verified parent-reply or author-reply GET routes, unique author/body/time matches and existing rollback checks. Native-translated main Tweets keep exact author/ISO identity and save API original text.
+- Tools → Restore loaded Favorites recovers up to 40 already-favorited Tweets loaded on the current screen. Media reads also recover verified `hasLiked` records. There is no verified API for the entire past Favorites history; unresolved/ambiguous records are not guessed.
+- Preserve six edition IDs/names, saved data, native handlers, English content and classic-display OFF behavior.
+
 ## All distributions v6.13.0 — 2026-10-01
 
 - お気に入りの表示処理をDOMContentLoaded前に開始し、初期表示とReactの再描画でハートやLike／いいねが一瞬戻る問題を修正。一般の100ms待機を経由せず、対象ボタン・件数・一覧ダイアログだけを描画前に補正。
