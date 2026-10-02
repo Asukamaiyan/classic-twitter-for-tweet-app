@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.18.0
+// @version      6.18.1
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -76,10 +76,12 @@
           return null;
         }
       };
+      // Managers can expose GM as a sandbox binding without a window property.
+      const gm = typeof GM !== 'undefined' ? GM : globalThis.GM;
       let gmRequest = null;
       if (typeof GM_xmlhttpRequest === 'function') gmRequest = GM_xmlhttpRequest;
-      else if (typeof globalThis.GM?.xmlHttpRequest === 'function') {
-        gmRequest = globalThis.GM.xmlHttpRequest.bind(globalThis.GM);
+      else if (typeof gm?.xmlHttpRequest === 'function') {
+        gmRequest = gm.xmlHttpRequest.bind(gm);
       }
       if (gmRequest) {
         try {
@@ -90,7 +92,11 @@
             onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null)
           });
           if (handle && typeof handle.then === 'function') {
-            Promise.resolve(handle).then(response => finish(parse(response)), () => finish(null));
+            Promise.resolve(handle).then(response => {
+              // An acknowledgement is not the response. Some bridges resolve
+              // first, then deliver the HTTP result through onload.
+              if (response && typeof response === 'object' && 'status' in response) finish(parse(response));
+            }, () => finish(null));
           }
         } catch {
           finish(null);
@@ -1299,7 +1305,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         gap:0!important;
         min-height:46px;
       }
-      .ct-classic-shell .ct-classic-tab {
+      /* React replaces a tab's complete className on every selection. Style
+         direct native buttons through the verified list as well, so the
+         rounded native pill cannot flash before the next reconciliation. */
+      .ct-classic-shell .ct-classic-tab,
+      .ct-classic-shell .ct-classic-tabs-list > button.rounded-full.text-xs {
         padding:11px 12px 8px!important;
         border:0!important;
         border-bottom:3px solid transparent!important;
@@ -1309,12 +1319,14 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         font-size:13px;
         line-height:20px;
       }
-      .ct-classic-shell .ct-classic-tab.bg-sky-500 {
+      .ct-classic-shell .ct-classic-tab.bg-sky-500,
+      .ct-classic-shell .ct-classic-tabs-list > button.rounded-full.text-xs.bg-sky-500 {
         color:var(--ct-classic-blue)!important;
         border-bottom-color:var(--ct-classic-blue)!important;
         font-weight:700;
       }
-      .ct-classic-shell .ct-classic-tab:hover {
+      .ct-classic-shell .ct-classic-tab:hover,
+      .ct-classic-shell .ct-classic-tabs-list > button.rounded-full.text-xs:hover {
         color:var(--ct-classic-blue)!important;
         background:var(--ct-classic-hover)!important;
       }
@@ -1385,7 +1397,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
       @media (max-width:1023px) {
         .ct-classic-shell .ct-classic-tabs-list { min-height:44px; }
-        .ct-classic-shell .ct-classic-tab {
+        .ct-classic-shell .ct-classic-tab,
+        .ct-classic-shell .ct-classic-tabs-list > button.rounded-full.text-xs {
           padding:10px 11px 7px!important;
           min-height:44px;
         }
@@ -2330,7 +2343,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   let ctScanConversationPanels = new WeakSet();
   let ctScanConversationPath = location.pathname;
   const ctScanOwnedSelector = '[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel';
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-selected', 'aria-current', 'role', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
 
   function ctScanElement(node) {
     return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
@@ -2383,6 +2396,44 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return avatar || el.closest('[role="dialog"],[role="tablist"],[role="form"],form,nav,aside,header,footer') || el;
   }
 
+  function ctNativeViewElement(el) {
+    return !!el && !el.closest('article,[id^="ct-"],[data-ct-owned],[data-ct-local-ui],textarea,input,select,[contenteditable],.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],.whitespace-pre-wrap,.break-words,.wrap-break-word,[translate="no"],.notranslate');
+  }
+
+  function ctNativeHomeTabGroup(el) {
+    if (!/^\/feed\/?$/.test(location.pathname) || !ctNativeViewElement(el)) return null;
+    const group = el.closest('div.overflow-x-auto');
+    const header = group?.closest('div.sticky');
+    if (!header?.closest('main') || header.closest('article,[data-ct-local-ui],[data-ct-owned]')) return null;
+    const buttons = [...group.children];
+    return buttons.length >= 2 && buttons.every(button =>
+      button.matches('button.rounded-full.whitespace-nowrap') && !button.querySelector('img,p,[data-user-content]')) ? group : null;
+  }
+
+  function ctNativeViewChanged(mutation) {
+    const el = ctScanElement(mutation.target);
+    if (!ctNativeViewElement(el)) return false;
+    if (mutation.type === 'attributes') {
+      // Switching a view at the same URL affects more than the changed tab:
+      // sibling timelines and locally mounted panels need one reconciliation.
+      if (mutation.attributeName === 'aria-selected') return el.matches('[role="tab"]') &&
+        !!el.closest('[role="tablist"]');
+      if (mutation.attributeName === 'aria-current') return el.matches('a,button') &&
+        !!el.closest('nav,[role="navigation"],header,aside');
+      if (mutation.attributeName === 'role') return ['tab', 'tablist', 'navigation'].includes(mutation.oldValue) ||
+        el.matches('[role="tab"],[role="tablist"],[role="navigation"]');
+      if (mutation.attributeName === 'class') {
+        const group = ctNativeHomeTabGroup(el);
+        if (!group || el.parentElement !== group) return false;
+        const oldClasses = new Set((mutation.oldValue || '').split(/\s+/));
+        const wasSelected = oldClasses.has('bg-sky-500') && oldClasses.has('text-white');
+        const selected = el.classList.contains('bg-sky-500') && el.classList.contains('text-white');
+        return wasSelected !== selected;
+      }
+    }
+    return mutation.type === 'childList' && (el.matches('[role="tablist"]') || !!ctNativeHomeTabGroup(el));
+  }
+
   function ctRememberScanContexts(root) {
     if (typeof ctTimestampDetailContext !== 'function') return;
     if (ctScanConversationPath !== location.pathname) {
@@ -2418,7 +2469,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     for (const mutation of mutations) {
       if (!ctMutationChanged(mutation)) continue;
       changed = true;
-      if (mutation.type === 'attributes' && mutation.attributeName === 'data-app-theme') ctQueueScanRoot(document);
+      if ((mutation.type === 'attributes' && mutation.attributeName === 'data-app-theme') || ctNativeViewChanged(mutation)) ctQueueScanRoot(document);
       else if (mutation.type === 'childList' && mutation.addedNodes.length) {
         for (const node of mutation.addedNodes) {
           const el = ctScanElement(node);
@@ -2467,7 +2518,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.18.0';
+    document.documentElement.dataset.ctActiveVersion = '6.18.1';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -6164,14 +6215,23 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         ? response.responseText : null;
       let request = null;
       if (typeof GM_xmlhttpRequest === 'function') request = GM_xmlhttpRequest;
-      else if (typeof globalThis.GM?.xmlHttpRequest === 'function') request = globalThis.GM.xmlHttpRequest.bind(globalThis.GM);
+      else {
+        // Some managers expose GM as a sandbox binding rather than a property
+        // on globalThis. Losing that API falls through to a CORS-blocked fetch.
+        const gm = typeof GM !== 'undefined' ? GM : globalThis.GM;
+        if (typeof gm?.xmlHttpRequest === 'function') request = gm.xmlHttpRequest.bind(gm);
+      }
       if (request) {
         try {
           handle = request({ method: 'GET', url: target, anonymous: true, redirect: 'error',
             timeout: ctNewsState.timeout, headers: { Accept: 'application/rss+xml, application/xml, text/xml' },
             onload: response => finish(parse(response)), onerror: () => finish(null),
             ontimeout: () => finish(null), onabort: () => finish(null) });
-          if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => finish(parse(response)), () => finish(null));
+          if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => {
+            // A mobile bridge can resolve its request receipt before onload.
+            // Wait for a real response or the bounded callback/timeout instead.
+            if (response?.status != null || typeof response?.responseText === 'string') finish(parse(response));
+          }, () => finish(null));
         } catch { finish(null); }
         return;
       }
@@ -6309,7 +6369,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const world = document.createElement('button');
     world.type = 'button'; world.textContent = ja ? '世界' : 'World';
     world.dataset.ctNewsRegion = 'world';
-    controls.append(japan, world);
+    const retry = document.createElement('button');
+    retry.type = 'button'; retry.textContent = ja ? '再試行' : 'Retry';
+    retry.dataset.ctNewsAction = 'retry'; retry.hidden = true;
+    controls.append(japan, world, retry);
     const status = document.createElement('p');
     status.className = 'ct-news-status';
     status.setAttribute('role', 'status');
@@ -6317,10 +6380,19 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     list.className = 'ct-news-list';
     panel.append(controls, status, list);
     target.container.before(panel);
-    const mount = { ...target, panel, status, list, japan, world, rendered: null, loading: null };
+    const mount = { ...target, panel, status, list, japan, world, retry, rendered: null, loading: null };
     for (const button of [japan, world]) button.addEventListener('click', () => {
       ctNewsState.region = button.dataset.ctNewsRegion;
       try { localStorage.setItem(ctNewsPreferenceKey, ctNewsState.region); } catch {}
+      patchJapaneseNews();
+    });
+    retry.addEventListener('click', () => {
+      if (!ctNewsState.pageActive || document.hidden || ctNewsState.region !== 'jp' ||
+          ctNewsState.mounts.get(mount.container) !== mount || !mount.panel.isConnected) return;
+      const current = ctNewsTargets().find(target => target.container === mount.container && target.topic === mount.topic);
+      if (!current || ctNewsState.pending.has(current.topic)) return;
+      // Explicit retry may bypass the failure delay, never a pending request.
+      ctNewsState.retryAt.delete(current.topic);
       patchJapaneseNews();
     });
     return mount;
@@ -6365,6 +6437,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (button.getAttribute('aria-pressed') !== value) button.setAttribute('aria-pressed', value);
     }
     if (!japan) {
+      if (!mount.retry.hidden) mount.retry.hidden = true;
       ctNewsUnhide(mount);
       if (!mount.list.hidden) mount.list.hidden = true;
       ctNewsSetText(mount.status, '');
@@ -6372,6 +6445,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     const cached = ctNewsState.cache.get(mount.topic);
     if (cached && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) {
+      if (!mount.retry.hidden) mount.retry.hidden = true;
       ctNewsRenderArticles(mount, cached.articles);
       if (mount.list.hidden) mount.list.hidden = false;
       if (!mount.container.classList.contains('ct-news-native-hidden')) mount.container.classList.add('ct-news-native-hidden');
@@ -6384,9 +6458,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ctNewsUnhide(mount);
     if (!mount.list.hidden) mount.list.hidden = true;
     if ((ctNewsState.retryAt.get(mount.topic) || 0) > Date.now()) {
+      if (mount.retry.hidden) mount.retry.hidden = false;
       ctNewsSetText(mount.status, ja ? '日本のニュースを取得できなかったため、世界のニュースを表示しています。' : 'Japanese news is unavailable. Showing world news.');
       return;
     }
+    if (!mount.retry.hidden) mount.retry.hidden = true;
     ctNewsSetText(mount.status, ja ? '日本のニュースを読み込み中…' : 'Loading Japanese news…');
     if (mount.loading === mount.topic) return;
     const topic = mount.topic;
@@ -7336,5 +7412,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.18.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.18.1 loaded');
 })();

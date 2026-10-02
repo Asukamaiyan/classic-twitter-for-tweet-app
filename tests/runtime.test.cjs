@@ -13,9 +13,13 @@ const navigation = fs.readFileSync(path.join(__dirname, '../src/navigation.js'),
 const script = fs.readFileSync(path.join(__dirname, '../classic-twitter-ja.user.js'), 'utf8');
 const helperNames = new Set(['ctTranslationButtonText', 'ctTranslationControls', 'ctDeclaredLanguage', 'ctLikelyLanguage']);
 const helpers = [];
+const shippedFunctions = new Map();
 function visit(node) {
   if (!node || typeof node !== 'object') return;
-  if (node.type === 'FunctionDeclaration' && helperNames.has(node.id?.name)) helpers.push(script.slice(node.start, node.end));
+  if (node.type === 'FunctionDeclaration') {
+    shippedFunctions.set(node.id?.name, script.slice(node.start, node.end));
+    if (helperNames.has(node.id?.name)) helpers.push(script.slice(node.start, node.end));
+  }
   for (const value of Object.values(node)) {
     if (Array.isArray(value)) value.forEach(visit);
     else if (value && typeof value === 'object') visit(value);
@@ -23,6 +27,24 @@ function visit(node) {
 }
 visit(acorn.parse(script, { ecmaVersion: 'latest' }));
 assert.equal(helpers.length, helperNames.size, 'runtime fixtures use the actual shipped translation helpers');
+const localizationNames = [
+  'localizationScopeNodes', 'isOwnedLocalizationElement', 'isNativeSettingsNavigation', 'isNativeLocalizationTimestamp',
+  'isProtectedLocalizationElement', 'nativeLocalizationPoll', 'isNativeLocalizationPollUI', 'nativeLocalizationAccountMenu',
+  'nativeLocalizationAccountDialog', 'localizationNotificationRow', 'localizationNotificationAction', 'isLocalizationUI',
+  'ctLocalizationClassicEnabled', 'ctLocalizationState', 'ctLocalizationNativeRecordException', 'ctLocalizationRecordAllowed',
+  'ctLocalizationRead', 'ctLocalizationWrite', 'ctLocalizationForget', 'ctRememberLocalization', 'ctSyncLocalizationAppearance',
+  'replaceLocalizationText', 'patchUIAttributes', 'translateTextNode', 'patchUI', 'patchInputs', 'ctLocalizationRegularText',
+  'ctLocalizationClassicText', 'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
+  'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber',
+  'nativeTimestampJapaneseText', 'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
+  'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText'
+];
+const jpMapStart = script.indexOf('  const JP = new Map([');
+const jpMapEnd = script.indexOf('\n  ]);', jpMapStart) + '\n  ]);'.length;
+const localizationSource = script.slice(jpMapStart, jpMapEnd) + localizationNames.map(name => {
+  assert.ok(shippedFunctions.has(name), `missing shipped localization helper ${name}`);
+  return shippedFunctions.get(name);
+}).join('\n');
 
 function post(id, text = `This is a post in English. ${id}`,  language = 'en', label = 'Show translation') {
   return `<article id="${id}"><p class="whitespace-pre-wrap" lang="${language}">${text}</p><p aria-live="polite"><button id="${id}-translate">${label}</button></p></article>`;
@@ -93,12 +115,14 @@ function harness(t, html = '', options = {}) {
     ${options.motion ? motion : ''}
     ${runtime}
     ${options.navigation ? navigation : ''}
+    ${options.localization ? localizationSource : ''}
     window.qa = { autoTranslationEnabled, patchAutoTranslation, ctOwnTranslationText,
       ctRememberTranslationChoice, patchFavoriteButtons, articleId, start, ctRunScan, ctScheduleScan,
       ctPrepareFavoritePresentation, pending: () => ctAutoPending.size,
       timestampPatch: typeof ctTimestampPatchExactPostTime === 'function' ? ctTimestampPatchExactPostTime : null,
       patchClassicMotion: typeof patchClassicMotion === 'function' ? patchClassicMotion : null,
-      patchNavigation: typeof patchNavigation === 'function' ? patchNavigation : null };
+      patchNavigation: typeof patchNavigation === 'function' ? patchNavigation : null,
+      patchUI: typeof patchUI === 'function' ? patchUI : null };
   `);
   async function flush() { await Promise.resolve(); await Promise.resolve(); }
   async function advance(duration = 0) {
@@ -1015,4 +1039,91 @@ test('a newly valid conversation is recognized, while an unverified similar cont
   f.document.getElementById('back').setAttribute('aria-label', 'Back'); await f.advance(100);
   assert.equal(f.stats.roots[2], f.document.getElementById('conversation'));
   assert.equal(f.document.querySelectorAll('.ct-detail-post-time').length, 2, 'positive detail context is detected even without a previous stamp');
+});
+
+test('native home tab selection gets one full reconciliation, while later card updates retain the fast path', async t => {
+  let visits = 0;
+  const labels = ['For you', 'Following', 'News', 'Sports', 'Entertainment', 'Technology'];
+  const tabs = `<div class="sticky top-app-header border-dashed"><div class="overflow-x-auto">${labels.map((label, index) => `<button id="home-tab-${index}" class="rounded-full text-xs whitespace-nowrap ${index === 0 ? 'bg-sky-500 text-white' : 'bg-tl-app-card text-tl-app-text-muted'}">${label}</button>`).join('')}</div></div>`;
+  const f = harness(t, `<main>${tabs}${Array.from({ length: 240 }, (_, index) => `<article id="tab-card-${index}"><p class="tl-user-text">Following News Post ${index}</p></article>`).join('')}</main><textarea>Following News draft</textarea>`, {
+    localization: true,
+    scan(root, qa) {
+      visits += root.matches?.('article') ? 1 : root.querySelectorAll('article').length;
+      qa.patchUI(root);
+    }
+  });
+  f.qa.start(); assert.equal(visits, 240); visits = 0;
+  const original = f.document.getElementById('home-tab-0');
+  const following = f.document.getElementById('home-tab-1');
+  let nativeClicks = 0;
+  following.addEventListener('click', () => {
+    nativeClicks++;
+    original.className = 'rounded-full text-xs whitespace-nowrap bg-tl-app-card text-tl-app-text-muted';
+    following.className = 'rounded-full text-xs whitespace-nowrap bg-sky-500 text-white';
+  });
+  following.click(); await f.advance(100);
+  assert.equal(nativeClicks, 1); assert.equal(f.stats.scans, 2); assert.equal(f.stats.roots[1], f.document);
+  assert.equal(visits, 240, 'a native view switch reconciles retained sibling state once');
+  assert.equal(following.textContent, 'フォロー中');
+  assert.equal(f.document.querySelector('textarea').value, 'Following News draft');
+  assert.equal(f.document.getElementById('tab-card-42').textContent, 'Following News Post 42');
+  visits = 0;
+  f.document.getElementById('tab-card-42').querySelector('p').firstChild.data = 'Updated post';
+  await f.advance(100);
+  assert.equal(visits, 1); assert.equal(f.stats.roots[2], f.document.getElementById('tab-card-42'));
+  following.classList.add('new-native-hover-style'); await f.advance(100);
+  assert.notEqual(f.stats.roots[3], f.document, 'an unchanged selected state does not promote cosmetic tab updates');
+  await f.advance(1000); assert.equal(f.stats.scans, 4);
+});
+
+test('aria-selected-only native tab switches reconcile the full view and preserve localized labels and native handlers', async t => {
+  const f = harness(t, '<main><div role="tablist"><button id="posts-tab" role="tab" aria-selected="true" aria-label="Posts">Posts</button><button id="replies-tab" role="tab" aria-selected="false" aria-label="Replies">Replies</button></div><article><p class="tl-user-text">Posts Replies user text</p><button class="font-bold truncate">Following</button></article><textarea>Posts Replies draft</textarea></main>', {
+    route: '/profile', localization: true,
+    scan(root, qa) { qa.patchUI(root); }
+  });
+  f.qa.start();
+  const posts = f.document.getElementById('posts-tab');
+  const replies = f.document.getElementById('replies-tab');
+  let clicks = 0;
+  replies.addEventListener('click', () => {
+    clicks++; posts.setAttribute('aria-selected', 'false'); replies.setAttribute('aria-selected', 'true');
+  });
+  replies.click(); await f.advance(100);
+  assert.equal(clicks, 1); assert.equal(f.stats.scans, 2); assert.equal(f.stats.roots[1], f.document);
+  assert.equal(posts.textContent, 'ツイート'); assert.equal(replies.textContent, '返信');
+  assert.equal(posts.getAttribute('aria-selected'), 'false'); assert.equal(replies.getAttribute('aria-selected'), 'true');
+  assert.equal(f.document.querySelector('.tl-user-text').textContent, 'Posts Replies user text');
+  assert.equal(f.document.querySelector('.font-bold').textContent, 'Following');
+  assert.equal(f.document.querySelector('textarea').value, 'Posts Replies draft');
+  replies.setAttribute('aria-selected', 'true'); await f.advance(1000);
+  assert.equal(f.stats.scans, 2, 'writing the same native selection again cannot keep scanning');
+});
+
+test('same-URL native navigation current-state and tablist replacement get one full reconciliation', async t => {
+  const f = harness(t, '<nav><button id="home" aria-current="page">Home</button><button id="notifications">Notifications</button></nav><main><div id="tabs" role="tablist"><button role="tab" aria-selected="true">Posts</button><button role="tab" aria-selected="false">Replies</button></div></main>');
+  f.qa.start();
+  f.document.getElementById('home').removeAttribute('aria-current');
+  f.document.getElementById('notifications').setAttribute('aria-current', 'page');
+  await f.advance(100);
+  assert.equal(f.stats.scans, 2); assert.equal(f.stats.roots[1], f.document);
+  f.document.getElementById('tabs').innerHTML = '<button role="tab" aria-selected="true">Replies</button><button role="tab" aria-selected="false">Reposts</button>';
+  await f.advance(100);
+  assert.equal(f.stats.scans, 3); assert.equal(f.stats.roots[2], f.document);
+  f.document.getElementById('tabs').removeAttribute('role'); await f.advance(100);
+  assert.equal(f.stats.scans, 4); assert.equal(f.stats.roots[3], f.document, 'losing the native tablist role also releases sibling state');
+  await f.advance(1000); assert.equal(f.stats.scans, 4);
+});
+
+test('post content, draft suggestions and local panels cannot promote their selected controls to a full scan', async t => {
+  const f = harness(t, '<main><article id="post"><div class="tl-user-text" role="tablist"><button role="tab" aria-selected="false" id="content-tab">Following</button></div></article><div role="listbox"><button role="option" aria-selected="false" id="suggestion">Following</button></div><div data-ct-local-ui="japanese-news"><button aria-current="page" role="tab" aria-selected="false" id="local-tab">日本</button></div><textarea>Following draft</textarea></main>');
+  f.qa.start();
+  f.document.getElementById('content-tab').setAttribute('aria-selected', 'true');
+  await f.advance(100); assert.equal(f.stats.roots[1], f.document.getElementById('post'));
+  f.document.getElementById('suggestion').setAttribute('aria-selected', 'true');
+  await f.advance(100); assert.notEqual(f.stats.roots[2], f.document);
+  f.document.getElementById('local-tab').setAttribute('aria-selected', 'true');
+  f.document.getElementById('local-tab').setAttribute('aria-current', 'step');
+  await f.advance(1000); assert.equal(f.stats.scans, 3);
+  assert.equal(f.document.getElementById('content-tab').textContent, 'Following');
+  assert.equal(f.document.querySelector('textarea').value, 'Following draft');
 });

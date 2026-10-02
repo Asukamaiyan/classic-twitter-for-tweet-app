@@ -54,10 +54,12 @@
           return null;
         }
       };
+      // Managers can expose GM as a sandbox binding without a window property.
+      const gm = typeof GM !== 'undefined' ? GM : globalThis.GM;
       let gmRequest = null;
       if (typeof GM_xmlhttpRequest === 'function') gmRequest = GM_xmlhttpRequest;
-      else if (typeof globalThis.GM?.xmlHttpRequest === 'function') {
-        gmRequest = globalThis.GM.xmlHttpRequest.bind(globalThis.GM);
+      else if (typeof gm?.xmlHttpRequest === 'function') {
+        gmRequest = gm.xmlHttpRequest.bind(gm);
       }
       if (gmRequest) {
         try {
@@ -68,7 +70,11 @@
             onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null)
           });
           if (handle && typeof handle.then === 'function') {
-            Promise.resolve(handle).then(response => finish(parse(response)), () => finish(null));
+            Promise.resolve(handle).then(response => {
+              // An acknowledgement is not the response. Some bridges resolve
+              // first, then deliver the HTTP result through onload.
+              if (response && typeof response === 'object' && 'status' in response) finish(parse(response));
+            }, () => finish(null));
           }
         } catch {
           finish(null);

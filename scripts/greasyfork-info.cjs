@@ -111,8 +111,8 @@ function render(edition) {
     : '';
   const current = japanese ? 'このページのスクリプト' : 'The script on this page';
   const features = japanese
-    ? '昔のTwitter風の表示、星のお気に入り、通知フィルター、写真スライドなどを追加。6.18.0は画面の再確認と重複描画を減らし、非表示中の監視を休止します。投稿と確認できた返信の時刻を更新し、編集日時や親投稿の日時を混ぜません。日時不明は推測せず、本文・名前・下書き・サイトのテーマを保持します。'
-    : 'Adds classic Twitter styling, star Favorites, notification filters and photo slides. Version 6.18.0 reduces repeated scanning/rendering and suspends general observation while hidden. Updates post and verified reply times without mixing edit or parent-post dates. Unknown dates are not guessed. Keeps post text, names, drafts and the site theme intact.';
+    ? '昔のTwitter風の表示、星のお気に入り、通知フィルター、写真スライドなどを追加。日本ニュースの通信を修正し、取得失敗時に「再試行」を表示。標準タブの選択変更に追従し、クラシックのタブ表示を維持します。投稿と確認できた返信の時刻を更新し、本文・名前・下書き・サイトのテーマを保持します。'
+    : 'Adds classic Twitter styling, star Favorites, notification filters and photo slides. Fixes Japanese news requests and adds Retry after a failed load. Follows native tab selection changes and keeps classic tab styling. Updates post and verified reply times, preserving post text, names, drafts and the site theme.';
   const safariFeature = edition.platform === 'safari'
     ? japanese ? '<p>Safari版は写真・動画の長押しで配信ファイル情報も表示します。</p>' : '<p>The Safari edition also shows delivered media file information on a long press.</p>'
     : '';

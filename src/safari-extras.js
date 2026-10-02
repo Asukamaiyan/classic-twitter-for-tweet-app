@@ -41,13 +41,16 @@
         resolve({ bytes: length ? Number(length) : null, contentType });
       };
       const timer = setTimeout(() => { finish(null); try { handle?.abort?.(); } catch {} }, 8000);
+      const manager = typeof GM !== 'undefined' ? GM : globalThis.GM;
       const gm = typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest :
-        typeof globalThis.GM?.xmlHttpRequest === 'function' ? globalThis.GM.xmlHttpRequest.bind(globalThis.GM) : null;
+        typeof manager?.xmlHttpRequest === 'function' ? manager.xmlHttpRequest.bind(manager) : null;
       if (!gm) return finish(null);
       try {
         handle = gm({ method: 'HEAD', url: src, timeout: 8000, anonymous: true, redirect: 'error',
           onload: finish, onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null) });
-        if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(finish, () => finish(null));
+        if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => {
+          if (response && typeof response === 'object' && 'status' in response) finish(response);
+        }, () => finish(null));
       } catch { finish(null); }
     });
   }

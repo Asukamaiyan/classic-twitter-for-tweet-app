@@ -1,5 +1,13 @@
 # Changelog
 
+## All distributions v6.18.1 — 2026-10-03
+
+- Resolve manager-provided `GM.xmlHttpRequest` sandbox bindings and wait for the actual news response when a Promise first returns an empty acknowledgement. Retain callback/Promise support, request deadlines and RSS response validation.
+- Add Japanese news Retry after a failed load. Keep the native news available on failure or World selection, and reject retries or late responses for inactive, hidden, detached or changed-topic panels.
+- Reconcile native same-URL view changes, including feed tab selection, so local news and profile panels follow the current native view. Preserve scoped processing for ordinary article changes.
+- Style native buttons through the verified classic tab group as well as per-button markers, preventing a rounded native tab from flashing when Tweet replaces its classes. Keep classic OFF restoration.
+- Apply the same manager-binding and acknowledgement handling to API GET requests and Safari media HEAD probes. Preserve existing grants, connection allowlists, storage, content, drafts and native actions.
+
 ## All distributions v6.18.0 — 2026-10-03
 
 - Coalesce native DOM changes and scan verified affected articles or shared UI contexts. Keep full initial, route, theme, settings and visibility-restoration passes; suspend the general observer while hidden.

@@ -348,3 +348,28 @@ test('replaced native composer avatars are reidentified while unsupported shapes
   patch();
   assert.equal(replacement.classList.contains('ct-classic-composer-avatar'), false);
 });
+
+
+test('native tab class replacement keeps classic shape before any delayed scan and OFF restores pills', t => {
+  const { window, document, patch } = setup(t);
+  const nativeStyle = document.createElement('style');
+  nativeStyle.textContent = '.rounded-full { border-radius:9999px; }';
+  document.head.append(nativeStyle);
+  const tabs = [...document.querySelectorAll('main > .sticky button')];
+  let nativeClicks = 0;
+  tabs[1].addEventListener('click', () => {
+    nativeClicks++;
+    tabs[0].className = 'rounded-full text-xs';
+    tabs[1].className = 'rounded-full text-xs bg-sky-500';
+  });
+  patch();
+  tabs[1].click();
+  assert.equal(nativeClicks, 1);
+  assert.ok(!tabs[1].classList.contains('ct-classic-tab'), 'native render removes its prior marker');
+  for (const tab of tabs) assert.equal(window.getComputedStyle(tab).borderRadius, '0', 'no frame needs the delayed observer');
+  assert.equal(tabs[0].textContent, 'For you');
+  assert.equal(tabs[1].textContent, 'Following');
+  patch(document, false);
+  for (const tab of tabs) assert.equal(window.getComputedStyle(tab).borderRadius, '9999px');
+  assert.equal(document.querySelector('#public-tweet-input').value, 'English Like News draft');
+});

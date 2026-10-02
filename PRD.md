@@ -124,3 +124,9 @@ User now explicitly requests a site-wide appearance closer to old Twitter, prior
 ## 6.18.0: lower repeated work with correct partial updates
 
 Reduce repeated userscript DOM traversal on visible native changes, favorite commits and clock updates. Maintain full initial/route/theme/settings/visibility restoration and all classic OFF behavior. Promote verified shared avatar and conversation contexts so partial processing does not leave native overlays or stale detail dates. Benchmark deterministic traversal counts separately from whole-site latency. Preserve native events, storage identities, user content, drafts and reply source validation; no new API or polling.
+
+## 6.18.1 日本ニュースの取得とタブ切り替えの復旧
+
+スマホ幅・PCとも、日本ニュースの取得では管理アプリのGM通信を正しく選び、要求受付だけのPromise応答を取得失敗とみなさず実際の応答を待つ。通信期限・RSS検証・キャッシュを維持し、取得失敗時は元ニュースと「再試行」を表示する。再試行は表示中の日本ニュースの現在の分類だけを対象とし、重複取得、画面・分類変更後の古い応答表示、背景での再取得を避ける。世界ニュースへの切り替えは元のDOMと操作を保持する。
+
+同じURLのまま標準タブの選択が変わる場合も、ニュースやプロフィールの追加欄を現在の表示へ揃える。Tweetがボタンのクラスを置き換えてもクラシックのタブ表示を維持し、クラシックOFFでは標準表示へ戻す。通常の記事更新には6.18.0の部分更新を維持する。既存権限・接続先・保存キーは変えず、実Stay／Android管理アプリでの確認は自動テスト・スマホ幅ブラウザ確認と区別する。
