@@ -20,8 +20,10 @@ function harness(t, options = {}) {
   const { window } = dom; t.after(() => window.close());
   let auth = { uid: 'uid-viewer', token: 'token-viewer' }; let accountUser = 'viewer'; let pages = [{ posts: [], nextCursor: null }]; let userReplies = [];
   let mutedPages = [{ success: true, users: [], nextCursor: null }];
+  const historyStatuses = new Map([['uid-viewer', options.history || null]]);
   let override = null; const calls = [];
   window.ctNetworkState = { authUID: auth.uid };
+  window.ctFavoriteHistoryStatus = () => historyStatuses.get(window.ctNetworkState.authUID) || null;
   window.getAuth = async () => { window.ctNetworkState.authUID = auth?.uid || null; return auth; };
   window.requestJSON = async (url, headers) => {
     const endpoint = new URL(url); calls.push(endpoint.pathname + endpoint.search);
@@ -43,6 +45,7 @@ function harness(t, options = {}) {
     context:ctProfileContext, viewerClose:ctProfileCloseViewer, backup:ctProfileFavoriteBackup, backupParts:ctProfileFavoriteBackupParts, importBackup:ctProfileImportFavoriteBackup, setActive:value=>{ctPageActive=value;}};`);
   return { window, document: window.document, api: window.profile, calls,
     pages: value => { pages = value; }, replies: value => { userReplies = value; }, muted: value => { mutedPages = value; }, override: value => { override = value; },
+    history: value => { historyStatuses.set(window.ctNetworkState.authUID, value); window.dispatchEvent(new window.Event('ct-favorite-history-change')); },
     setAuth: (value, user = 'other') => { auth = value; accountUser = user; window.ctNetworkState.authUID = auth?.uid || null; },
     route: (route, user) => { window.history.replaceState({}, '', route); window.document.querySelector('main').innerHTML = `<div class="animate-fadeIn">${client(user)}</div>`; },
     async ready() { this.api.patch(); await new Promise(resolve => setTimeout(resolve, 0)); this.api.patch(); },
@@ -639,48 +642,44 @@ test('Favorites retain more than 500 records and mount progressively without reb
   assert.equal(favoriteRows(h).length, 100); assert.equal(h.document.querySelector('[data-ct-profile-post=archive-0]'), row);
   assert.equal(favoriteControl(h, 'Show 50 more'), more); assert.equal(h.document.activeElement, more);
   assert.equal(row.querySelector('video'), video); assert.equal(video.currentTime, 24);
-  assert.match(h.document.getElementById('ct-favorite-count').textContent, /100 of 621.*621 saved/);
+  assert.match(h.document.getElementById('ct-favorite-count').textContent, /621 saved for this account.*100 shown.*621 available/);
   assert.equal(h.api.load().length, 621);
 });
 
-test('Favorites search, media filters and sorting use local data and preserve input focus and IME', async t => {
+test('Favorites simply display saved rows without search or filter controls and retain playing video during progress updates', async t => {
   const h = harness(t); await h.ready();
   h.api.save(item('old-photo', { name: 'Alice', text: '星の写真', savedAt: 10, createdAt: '2020-01-01T00:00:00Z', media: [{ type: 'image', url: 'https://images.example/photo.jpg', poster: '' }] }));
   h.api.save(item('new-video', { username: 'bob', name: 'Bob', text: '星の動画', savedAt: 30, createdAt: '2026-01-01T00:00:00Z', media: [{ type: 'video', url: 'https://images.example/video.mp4', poster: '' }] }));
   h.api.save(item('middle', { username: 'carol', text: 'Other words', savedAt: 20, createdAt: '2023-01-01T00:00:00Z' }));
   await h.select('favorites'); const before = h.calls.length;
   assert.deepEqual(favoriteRows(h), ['new-video', 'middle', 'old-photo']);
-  const query = h.document.getElementById('ct-favorite-query'); const tools = query.closest('[data-ct-favorite-tools]'); query.focus();
-  query.dispatchEvent(new h.window.CompositionEvent('compositionstart', { bubbles: true })); query.value = '星';
-  query.dispatchEvent(new h.window.InputEvent('input', { bubbles: true, isComposing: true }));
-  h.api.save(item('extra', { savedAt: 0 }));
-  assert.equal(h.document.getElementById('ct-favorite-query'), query); assert.equal(h.document.activeElement, query); assert.equal(query.value, '星');
-  assert.equal(favoriteRows(h).length, 4);
-  query.dispatchEvent(new h.window.CompositionEvent('compositionend', { bubbles: true }));
-  assert.deepEqual(favoriteRows(h), ['new-video', 'old-photo']); assert.equal(query.closest('[data-ct-favorite-tools]'), tools);
+  assert.equal(h.document.querySelector('#ct-favorites-panel input:not([type=file]),#ct-favorites-panel select'), null);
+  const button = h.document.getElementById('ct-favorite-export'); const tools = button.closest('[data-ct-favorite-tools]'); button.focus();
   const video = h.document.querySelector('[data-ct-profile-post=new-video] video'); video.currentTime = 9;
-  const sort = h.document.getElementById('ct-favorite-sort'); sort.value = 'oldest'; sort.dispatchEvent(new h.window.Event('change', { bubbles: true }));
-  assert.deepEqual(favoriteRows(h), ['old-photo', 'new-video']); assert.equal(h.document.querySelector('[data-ct-profile-post=new-video] video'), video); assert.equal(video.currentTime, 9);
-  const type = h.document.getElementById('ct-favorite-type'); type.value = 'video'; type.dispatchEvent(new h.window.Event('change', { bubbles: true }));
-  assert.deepEqual(favoriteRows(h), ['new-video']);
-  query.value = '@BOB'; query.dispatchEvent(new h.window.Event('input', { bubbles: true })); assert.deepEqual(favoriteRows(h), ['new-video']);
-  query.value = 'not found'; query.dispatchEvent(new h.window.Event('input', { bubbles: true }));
-  assert.deepEqual(favoriteRows(h), []); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /No Favorites match/);
-  assert.equal(h.calls.length, before); assert.equal(h.api.load().length, 4);
+  h.history({ source: 'for-you', pages: 3, scanned: 60, recovered: 2, busy: true });
+  assert.deepEqual(favoriteRows(h), ['new-video', 'middle', 'old-photo']);
+  assert.equal(h.document.querySelector('[data-ct-profile-post=new-video] video'), video); assert.equal(video.currentTime, 9);
+  assert.equal(button.closest('[data-ct-favorite-tools]'), tools); assert.equal(h.document.activeElement, button);
+  assert.match(h.document.getElementById('ct-favorite-count').textContent, /3 saved for this account.*3 shown.*3 available/);
+  assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /For you and Following.*\nChecking \(For you\).*3 pages.*60 posts checked.*2 recovered/);
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /2020.*2026.*3 dated/);
+  assert.equal(h.calls.length, before); assert.equal(h.api.load().length, 3);
 });
 
-test('search does not reveal muted snapshots and progress resets when conditions change', async t => {
+test('Favorites counts and date range cover displayable saves while keeping muted snapshots hidden', async t => {
   const h = harness(t); await h.ready();
   h.window.localStorage.setItem('legacy.favorites:uid:uid-viewer', JSON.stringify([
-    item('hidden', { text: 'secret needle', username: 'alice' }),
-    ...Array.from({ length: 105 }, (_, index) => item('visible-' + index, { text: 'needle', username: 'bob' }))
+    item('hidden', { text: 'secret needle', username: 'alice', createdAt: '1900-01-01T00:00:00Z' }),
+    ...Array.from({ length: 105 }, (_, index) => item('visible-' + index, { text: 'needle', username: 'bob', createdAt: index ? '2026-01-01T00:00:00Z' : '2020-01-01T00:00:00Z' }))
   ]));
   h.muted([{ success: true, users: [mutedUser('alice')], nextCursor: null }]); await h.select('favorites');
   favoriteControl(h, 'Show 50 more').click(); assert.equal(favoriteRows(h).length, 100);
-  const query = h.document.getElementById('ct-favorite-query'); query.value = 'needle'; query.dispatchEvent(new h.window.Event('input', { bubbles: true }));
-  assert.equal(favoriteRows(h).length, 50); assert.ok(!favoriteRows(h).includes('hidden'));
-  query.value = 'secret'; query.dispatchEvent(new h.window.Event('input', { bubbles: true }));
-  assert.deepEqual(favoriteRows(h), []); assert.doesNotMatch(h.document.getElementById('ct-favorites-panel').textContent, /secret needle/);
+  h.history({ source: 'following', pages: 8, scanned: 160, recovered: 9, paused: true });
+  assert.equal(favoriteRows(h).length, 100); assert.ok(!favoriteRows(h).includes('hidden'));
+  assert.doesNotMatch(h.document.getElementById('ct-favorites-panel').textContent, /secret needle/);
+  assert.match(h.document.getElementById('ct-favorite-count').textContent, /106 saved for this account.*100 shown.*105 available/);
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /2020.*2026.*105 dated/);
+  assert.doesNotMatch(h.document.getElementById('ct-favorite-range').textContent, /1900/);
   assert.equal(h.api.load().length, 106);
 });
 
@@ -819,4 +818,56 @@ test('Favorites quota warnings follow the affected UID and remain visible after 
   h.setAuth({ uid: 'uid-viewer', token: 'token-viewer' }, 'viewer'); h.route('/profile', 'viewer'); await h.ready(); await h.select('favorites');
   assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Browser storage is unavailable/);
   assert.equal(h.api.load()[0].id, 'a-memory');
+});
+
+test('Favorites show account-local recovery coverage without claiming that the whole history is complete', async t => {
+  const h = harness(t, { locale: 'ja' }); await h.ready(); h.api.save(item('unknown-date')); await h.select('favorites');
+  assert.equal(h.document.getElementById('ct-favorite-query'), null); assert.equal(h.document.getElementById('ct-favorite-type'), null); assert.equal(h.document.getElementById('ct-favorite-sort'), null);
+  assert.match(h.document.getElementById('ct-favorite-count').textContent, /このアカウントに保存済み1件.*表示1件.*表示対象1件/);
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /日付未確認/);
+  assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /おすすめ・フォロー中.*サービスが返す投稿.*\n.*未確認/);
+  const calls = h.calls.length;
+  h.history({ source: 'following', pages: 12, scanned: 240, recovered: 7, done: true });
+  assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /返された範囲の確認が終了.*12ページ.*240投稿.*7件を復元/);
+  assert.match(h.document.getElementById('ct-favorites-panel').textContent, /全履歴の復元は保証できません/);
+  assert.doesNotMatch(h.document.getElementById('ct-favorite-history-scope').textContent, /全履歴.*完了/);
+  h.history({ source: 'following', pages: 12, scanned: 240, recovered: 7, error: 'network', paused: true });
+  assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /確認を中断（フォロー中）/);
+  h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.route('/profile', 'other'); await h.ready(); await h.select('favorites');
+  assert.match(h.document.getElementById('ct-favorite-count').textContent, /保存済み0件.*表示0件/);
+  assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /未確認/);
+  assert.doesNotMatch(h.document.getElementById('ct-favorite-history-scope').textContent, /240|7件/);
+  assert.equal(h.calls.slice(calls).filter(url => url.startsWith('/api/posts')).length, 0);
+});
+
+test('photo dialog centers a stage in the current visual viewport and removes viewport listeners on close', async t => {
+  const h = harness(t); await h.ready(); const viewport = new h.window.EventTarget();
+  Object.assign(viewport, { width: 390, height: 844, offsetTop: 12, offsetLeft: 0 });
+  Object.defineProperty(h.window, 'visualViewport', { configurable: true, value: viewport });
+  h.window.HTMLDialogElement.prototype.showModal = function() { this.setAttribute('open', ''); };
+  h.window.HTMLDialogElement.prototype.close = function() { this.removeAttribute('open'); };
+  h.api.save(item('photo', { media: [{ type: 'image', url: 'https://images.example/photo.jpg', poster: '' }] })); await h.select('favorites');
+  const trigger = h.document.querySelector('.ct-profile-photo'); trigger.click(); const dialog = h.document.querySelector('dialog');
+  assert.equal(dialog.querySelector('.ct-profile-viewer-stage > img').src, 'https://images.example/photo.jpg');
+  assert.equal(h.window.getComputedStyle(dialog).display, 'grid');
+  assert.equal(h.window.getComputedStyle(dialog).gridTemplateRows, 'minmax(0,1fr)');
+  assert.equal(h.window.getComputedStyle(dialog.querySelector('.ct-profile-viewer-nav')).position, 'absolute');
+  assert.equal(h.window.getComputedStyle(dialog.querySelector('.ct-profile-viewer-stage')).placeItems, 'center');
+  assert.equal(dialog.style.getPropertyValue('--ct-photo-view-height'), '844px');
+  assert.equal(dialog.style.getPropertyValue('--ct-photo-view-width'), '390px');
+  viewport.height = 600; viewport.width = 320; viewport.offsetTop = 6; viewport.dispatchEvent(new h.window.Event('resize'));
+  assert.equal(dialog.style.getPropertyValue('--ct-photo-view-height'), '600px'); assert.equal(dialog.style.getPropertyValue('--ct-photo-view-width'), '320px');
+  assert.equal(dialog.style.getPropertyValue('--ct-photo-view-top'), '6px');
+  dialog.querySelector('[aria-label=Close]').click(); assert.equal(h.document.activeElement, trigger);
+  viewport.height = 500; viewport.dispatchEvent(new h.window.Event('resize'));
+  assert.equal(dialog.style.getPropertyValue('--ct-photo-view-height'), '600px'); assert.equal(h.document.querySelector('dialog'), null);
+});
+
+test('local profile videos gain shared fullscreen handling only after mounting and keep their existing nodes', async t => {
+  const h = harness(t); await h.ready(); const mounted = new Set();
+  h.window.ctMediaEnhanceVideo = video => { assert.equal(video.isConnected, true); mounted.add(video); };
+  h.api.save(item('video', { media: [{ type: 'video', url: 'https://images.example/video.mp4', poster: '' }] })); await h.select('favorites');
+  const video = h.document.querySelector('video'); assert.ok(mounted.has(video)); video.currentTime = 16;
+  h.history({ source: 'following', pages: 2, scanned: 40, recovered: 1, paused: true });
+  assert.equal(h.document.querySelector('video'), video); assert.equal(video.currentTime, 16); assert.equal(mounted.size, 1);
 });

@@ -1,5 +1,12 @@
 # Changelog
 
+## All distributions v6.16.0 — 2026-10-02
+
+- Remove Favorites search/filter/sort controls as requested. Display saved records directly with account-local counts, dated available-record range and read-only recovery scope/progress; retain pagination and backups.
+- Center both native and profile enlarged photos in the visible viewport, including mobile safe areas and viewport changes, while keeping native close and carousel interactions.
+- Add same-video fullscreen actions for native posts and local profile videos. Preserve playback position, sound/rate and user pause; narrowly prevent Tweet's inline visibility manager from pausing an actively playing fullscreen video. Restore all guards on exit/failure and allow background, route, source and account changes to stop playback.
+- Adapt touch targets and safe-area layout for phones, pointer/focus feedback for desktop, and reduced-motion preferences.
+
 ## All distributions v6.15.0 — 2026-10-02
 
 - Explicit resumable recovery checks older For you and Following pages, then verifies each liked candidate through fresh post detail. Pause on cancellation, backgrounding, account change, failed response or storage error; do not advertise feed coverage as complete outgoing-like history.

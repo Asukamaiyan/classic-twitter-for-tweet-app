@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.15.0
+// @version      6.16.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -334,7 +334,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     restoreResult: (saved, unresolved) => `${saved}件を保存しました。${unresolved ? ` ${unresolved}件は特定できませんでした。詳細画面か原文を開いて再度お試しください。` : ''}`,
     restoreError: 'お気に入りを確認できませんでした。ログイン状態と通信を確認して、もう一度お試しください。',
     history: '過去のお気に入りを探す', historyStart: '過去の投稿から探す', historyContinue: '続きから探す', historyStop: '一時停止', historyRestart: '最初から探し直す',
-    historyHelp: 'おすすめ・フォロー中の過去ページを順に確認します。画面を開いたまま使い、1回100ページまで。取得できるタイムラインの範囲で復元するため、全お気に入りを保証するものではありません。保存済みのお気に入りはプロフィールで検索・バックアップできます。',
+    historyHelp: 'おすすめ・フォロー中の過去ページを順に確認します。画面を開いたまま使い、1回100ページまで。取得できるタイムラインの範囲で復元するため、全お気に入りを保証するものではありません。保存済みのお気に入りの件数・期間・確認範囲はプロフィールで表示します。',
     historyProgress: (s) => `${s.pages || 0}ページ・${s.scanned || 0}件を確認／${s.recovered || 0}件を追加。${s.busy ? '確認中…' : s.done ? '取得できるタイムラインの終端まで確認しました。' : s.paused ? '一時停止中です。' : ''}`,
     historyError: '通信・ログイン・保存状態を確認し、続きから再試行してください。',
     historyErrors: {'sign-in':'Tweetにログインしてから開始してください。','account-changed':'アカウントが変わったため停止しました。','response':'投稿を確認できませんでした。少し待って続きからお試しください。','cursor':'次のページを確認できませんでした。最初から探し直してください。','network':'通信できませんでした。少し待って続きからお試しください。','checkpoint':'続きの位置を保存できませんでした。','storage':'保存容量に達しました。プロフィールのお気に入りでJSONバックアップしてください。'},
@@ -373,7 +373,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     restoreResult: (saved, unresolved) => `Saved ${saved}. ${unresolved ? `${unresolved} could not be identified. Open the detail page or original text and try again.` : ''}`,
     restoreError: 'Could not check Favorites. Check your sign-in and connection, then try again.',
     history: 'Find older Favorites', historyStart: 'Search older posts', historyContinue: 'Continue searching', historyStop: 'Pause', historyRestart: 'Search again from the start',
-    historyHelp: 'Checks older For you and Following pages in order, up to 100 pages per run while this tab is visible. Recovery covers the timelines the service returns and cannot guarantee your entire Favorites history. Search and back up saved Favorites on your profile.',
+    historyHelp: 'Checks older For you and Following pages in order, up to 100 pages per run while this tab is visible. Recovery covers the timelines the service returns and cannot guarantee your entire Favorites history. Your profile shows saved Favorites, their date range and recovery coverage.',
     historyProgress: (s) => `Checked ${s.pages || 0} pages / ${s.scanned || 0} posts; added ${s.recovered || 0}. ${s.busy ? 'Checking…' : s.done ? 'Reached the end of the timelines returned by the service.' : s.paused ? 'Paused.' : ''}`,
     historyError: 'Check your connection, sign-in and storage, then continue to retry.',
     historyErrors: {'sign-in':'Sign in to Tweet before starting.','account-changed':'Stopped because the account changed.','response':'Could not check posts. Wait a little, then continue.','cursor':'Could not verify the next page. Search again from the start.','network':'Connection failed. Wait a little, then continue.','checkpoint':'Could not save the resume position.','storage':'Browser storage is full. Back up Favorites as JSON on your profile.'},
@@ -2340,7 +2340,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.15.0';
+    document.documentElement.dataset.ctActiveVersion = '6.16.0';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -2714,10 +2714,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-empty{padding:32px 16px;text-align:center;color:var(--color-tl-app-text-muted,#657786);font-size:14px}
       .ct-profile-control{min-height:44px;padding:8px 14px;border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:4px 0}
       .ct-profile-control:disabled{cursor:wait;opacity:.6}
-      .ct-favorite-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
-      .ct-favorite-tools label{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 140px}
-      .ct-favorite-tools input[type=search],.ct-favorite-tools select{box-sizing:border-box;width:100%;min-height:44px;min-width:0;padding:8px;border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;background:var(--color-tl-app-input-bg,transparent);color:inherit;font:inherit;font-size:16px}
-      .ct-favorite-tools input:focus-visible,.ct-favorite-tools select:focus-visible{outline:2px solid #55acee;outline-offset:1px}
+      .ct-favorite-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
       .ct-favorite-tools input[type=file]{display:none}
       .ct-favorite-tools .ct-profile-control{margin:0}
       .ct-favorite-summary{flex-basis:100%;overflow-wrap:anywhere}
@@ -2736,10 +2733,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-media-note{font-size:12px;color:var(--color-tl-app-text-muted,#657786);margin:6px 0}
       .ct-profile-post-link{display:inline-flex;align-items:center;min-height:44px;color:#55acee;font-size:13px;text-decoration:none}
       .ct-profile-post-link:hover,.ct-profile-name:hover{text-decoration:underline}
-      .ct-profile-viewer{padding:0;border:0;background:#000;color:#fff;width:min(100vw,1000px);max-width:100vw;max-height:100dvh;overflow:auto}
+      .ct-profile-viewer{box-sizing:border-box;position:fixed;inset:var(--ct-photo-view-top,0px) auto auto var(--ct-photo-view-left,0px);margin:0;padding:0;border:0;background:#000;color:#fff;width:var(--ct-photo-view-width,100vw);height:var(--ct-photo-view-height,100dvh);max-width:none;max-height:none;overflow:hidden}
+      .ct-profile-viewer[open]{display:grid;grid-template-rows:minmax(0,1fr)}
       .ct-profile-viewer::backdrop{background:#000c}
-      .ct-profile-viewer img{display:block;max-width:100%;max-height:calc(100dvh - 64px);object-fit:contain;margin:auto}
-      .ct-profile-viewer-nav{display:flex;align-items:center;justify-content:space-between;padding:8px;gap:8px}
+      .ct-profile-viewer-stage{box-sizing:border-box;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right))}
+      .ct-profile-viewer img{display:block;width:100%;height:100%;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
+      .ct-profile-viewer-nav{position:absolute;left:env(safe-area-inset-left);right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom);display:flex;align-items:center;justify-content:space-between;padding:8px;gap:8px}
       .ct-profile-viewer-nav button{min-width:44px;min-height:44px;border:1px solid #ffffff55;border-radius:4px;color:inherit;background:transparent;font:inherit;cursor:pointer}
       @media(max-width:480px){.ct-profile-row{padding:12px;gap:10px}.ct-profile-photo img,.ct-profile-video{max-height:360px}}
       @media(prefers-reduced-motion:no-preference){.ct-profile-tab,.ct-profile-control{transition:color 120ms ease,background-color 120ms ease}}
@@ -2750,6 +2749,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const viewer = ctProfileState.viewer;
     if (!viewer) return;
     ctProfileState.viewer = null;
+    viewer.cleanup?.();
     try { viewer.dialog.close(); } catch {}
     viewer.dialog.remove();
     if (viewer.trigger?.isConnected) viewer.trigger.focus({ preventScroll: true });
@@ -2765,6 +2765,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     dialog.setAttribute('aria-label', ctProfileText('写真を拡大', 'Enlarged photos'));
     const img = document.createElement('img');
     img.referrerPolicy = 'no-referrer';
+    const stage = document.createElement('div'); stage.className = 'ct-profile-viewer-stage'; stage.append(img);
     const nav = document.createElement('div'); nav.className = 'ct-profile-viewer-nav';
     const previous = document.createElement('button'); previous.type = 'button'; previous.textContent = '‹';
     previous.setAttribute('aria-label', ctProfileText('前の写真', 'Previous photo'));
@@ -2787,8 +2788,20 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
     });
     dialog.addEventListener('cancel', event => { event.preventDefault(); ctProfileCloseViewer(); });
-    nav.append(previous, count, next, close); dialog.append(img, nav); document.body.append(dialog);
-    ctProfileState.viewer = { dialog, trigger };
+    nav.append(previous, count, next, close); dialog.append(stage, nav); document.body.append(dialog);
+    const viewport = window.visualViewport;
+    const fit = () => {
+      const dimensions = viewport ? { width: viewport.width, height: viewport.height, top: viewport.offsetTop, left: viewport.offsetLeft } :
+        { width: window.innerWidth, height: window.innerHeight, top: 0, left: 0 };
+      for (const [name, value] of Object.entries(dimensions)) {
+        if (Number.isFinite(value) && value >= 0) dialog.style.setProperty('--ct-photo-view-' + name, value + 'px');
+      }
+    };
+    viewport?.addEventListener('resize', fit); viewport?.addEventListener('scroll', fit); window.addEventListener('resize', fit);
+    ctProfileState.viewer = { dialog, trigger, cleanup: () => {
+      viewport?.removeEventListener('resize', fit); viewport?.removeEventListener('scroll', fit); window.removeEventListener('resize', fit);
+    } };
+    fit();
     show();
     try { dialog.showModal(); close.focus(); } catch { ctProfileCloseViewer(); }
   }
@@ -2829,6 +2842,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
     });
     window.addEventListener('pagehide', () => { ctProfileCloseViewer(); ctProfileClearFavoriteBackupParts(); });
+    window.addEventListener('ct-favorite-history-change', renderFavoritesPanel);
     document.addEventListener('click', event => {
       const button = event.target.closest?.('button');
       if (!button || button.disabled || button.closest('[data-ct-owned],[data-ct-local-ui],[data-user-content],.tl-user-text,.whitespace-pre-wrap,.break-words,[contenteditable]')) return;
@@ -3058,6 +3072,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (node === next) next = next.nextSibling;
       else panel.insertBefore(node, next);
     }
+    if (typeof ctMediaEnhanceVideo === 'function') {
+      for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
+    }
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
   function ctProfileFavoriteMuteState() {
@@ -3144,7 +3161,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const uid = ctProfileUID();
     if (!ctProfileState.favoriteView || ctProfileState.favoriteView.uid !== uid) {
       ctProfileClearFavoriteBackupParts();
-      ctProfileState.favoriteView = { uid, query: '', type: 'all', sort: 'saved', limit: 50, message: '', error: false, busy: false,
+      ctProfileState.favoriteView = { uid, limit: 50, message: '', error: false, busy: false,
         backupParts: null, backupRevision: 0, backupURLs: new Map() };
     }
     return ctProfileState.favoriteView;
@@ -3241,36 +3258,47 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       error?.message === 'size' ? ctProfileText('バックアップは32MB・10万件以内です。データは変更していません。', 'Backups must fit within 32 MB and 100,000 records. Data has not changed.') :
         ctProfileText('バックアップを読み込めませんでした。形式とファイルを確認してください。データは変更していません。', 'Could not read the backup. Check its format and file. Data has not changed.');
   }
+  function ctProfileFavoriteHistorySummary(uid) {
+    if (!uid || uid !== ctProfileUID() || typeof ctFavoriteHistoryStatus !== 'function') return null;
+    try {
+      const status = ctFavoriteHistoryStatus();
+      if (!status || !['for-you', 'following'].includes(status.source) ||
+          !['pages', 'scanned', 'recovered'].every(key => Number.isSafeInteger(status[key]) && status[key] >= 0)) return null;
+      return { source: status.source, pages: status.pages, scanned: status.scanned, recovered: status.recovered,
+        busy: status.busy === true, paused: status.paused === true, done: status.done === true,
+        error: !!status.error, warning: !!status.warning };
+    } catch { return null; }
+  }
+  function ctProfileFavoriteHistoryText(status) {
+    const scope = ctProfileText('復元の確認範囲：おすすめ・フォロー中（サービスが返す投稿）', 'Recovery scope: For you and Following (posts returned by Tweet)');
+    if (!status || (!status.busy && !status.paused && !status.done && !status.error && !status.warning && !status.pages)) {
+      return scope + '\n' + ctProfileText('復元状況：未確認 · 便利ツールから開始できます。', 'Recovery: not checked yet. Start from Tools.');
+    }
+    const phase = status.done ? ctProfileText('返された範囲の確認が終了', 'Returned timeline range checked') :
+      status.error || status.warning ? ctProfileText('確認を中断', 'Checking interrupted') :
+        status.busy ? ctProfileText('確認中', 'Checking') : ctProfileText('一時停止', 'Paused');
+    const source = status.source === 'following' ? ctProfileText('フォロー中', 'Following') : ctProfileText('おすすめ', 'For you');
+    return scope + '\n' + ctProfileText(`${phase}${status.done ? '' : `（${source}）`} · ${status.pages}ページ・${status.scanned}投稿を確認／${status.recovered}件を復元`,
+      `${phase}${status.done ? '' : ` (${source})`} · ${status.pages} pages / ${status.scanned} posts checked / ${status.recovered} recovered`);
+  }
+  function ctProfileFavoriteDateRange(items) {
+    let firstDate = Infinity; let lastDate = -Infinity; let dated = 0;
+    for (const item of items) {
+      const date = Date.parse(item.createdAt);
+      if (!Number.isFinite(date)) continue;
+      firstDate = Math.min(firstDate, date); lastDate = Math.max(lastDate, date); dated++;
+    }
+    if (!dated) return ctProfileText('保存した投稿の日付範囲：日付未確認', 'Saved Tweet date range: dates unavailable');
+    const locale = CT_LOCALE === 'ja' ? 'ja-JP' : 'en-US';
+    const first = new Date(firstDate).toLocaleDateString(locale);
+    const last = new Date(lastDate).toLocaleDateString(locale);
+    return ctProfileText(`保存した投稿の日付範囲（表示対象）：${first}〜${last} · 日付あり${dated}件`,
+      `Saved Tweet date range (available records): ${first}–${last} · ${dated} dated`);
+  }
   function ctProfileFavoriteTools(panel, view) {
     const previous = panel.querySelector(':scope > [data-ct-favorite-tools]');
     if (previous?.ctFavoriteView === view) return previous;
     const tools = ctProfileStatus(''); tools.dataset.ctFavoriteTools = ''; tools.classList.add('ct-favorite-tools'); tools.ctFavoriteView = view;
-    function field(text, control) { const label = document.createElement('label'); label.append(document.createTextNode(text), control); tools.append(label); }
-    const query = document.createElement('input'); query.type = 'search'; query.id = 'ct-favorite-query'; query.maxLength = 200;
-    query.value = view.query; query.autocomplete = 'off'; field(ctProfileText('お気に入りを検索（本文・作者）', 'Search Favorites (text or author)'), query);
-    let composing = false;
-    const applyQuery = () => {
-      if (composing || !ctProfileFavoriteViewCurrent(view)) return;
-      view.query = query.value; view.limit = 50; renderFavoritesPanel();
-    };
-    query.addEventListener('compositionstart', () => { composing = true; });
-    query.addEventListener('compositionend', () => { composing = false; applyQuery(); });
-    query.addEventListener('input', event => { if (!event.isComposing) applyQuery(); });
-    function select(id, title, options, property) {
-      const control = document.createElement('select'); control.id = id;
-      for (const [value, text] of options) { const option = document.createElement('option'); option.value = value; option.textContent = text; control.append(option); }
-      control.value = view[property]; field(title, control);
-      control.addEventListener('change', () => {
-        if (!ctProfileFavoriteViewCurrent(view)) return;
-        view[property] = control.value; view.limit = 50; renderFavoritesPanel();
-      });
-    }
-    select('ct-favorite-type', ctProfileText('表示', 'Show'), [
-      ['all', ctProfileText('全て', 'All')], ['image', ctProfileText('写真', 'Photos')], ['video', ctProfileText('動画', 'Videos')]
-    ], 'type');
-    select('ct-favorite-sort', ctProfileText('並べ替え', 'Sort'), [
-      ['saved', ctProfileText('保存した順（新しい順）', 'Recently saved')], ['newest', ctProfileText('投稿が新しい順', 'Newest Tweets')], ['oldest', ctProfileText('投稿が古い順', 'Oldest Tweets')]
-    ], 'sort');
     const download = ctProfileControl(ctProfileText('バックアップを保存', 'Save local backup'), async () => {
       if (!ctProfileFavoriteViewCurrent(view)) return;
       try {
@@ -3311,9 +3339,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     tools.append(download, importButton, file);
     const note = document.createElement('div'); note.className = 'ct-favorite-summary'; note.textContent = ctProfileText('このアカウントのブラウザ内保存データです。バックアップの取り込みはTweet上のお気に入りを変更しません。', 'Browser-local data for this account. Importing a backup does not change Favorites on Tweet.');
     const count = document.createElement('div'); count.id = 'ct-favorite-count'; count.className = 'ct-favorite-summary'; count.setAttribute('role', 'status');
+    const range = document.createElement('div'); range.id = 'ct-favorite-range'; range.className = 'ct-favorite-summary';
+    const history = document.createElement('div'); history.id = 'ct-favorite-history-scope'; history.className = 'ct-favorite-summary'; history.style.whiteSpace = 'pre-line'; history.setAttribute('role', 'status');
     const message = document.createElement('div'); message.id = 'ct-favorite-backup-status'; message.className = 'ct-favorite-summary'; message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
     const parts = document.createElement('div'); parts.id = 'ct-favorite-backup-parts'; parts.className = 'ct-favorite-summary';
-    tools.append(note, count, message, parts); return tools;
+    tools.append(note, count, range, history, message, parts); return tools;
   }
   function renderFavoritesPanel() {
     if (!favoritesActive || ctProfileState.active !== 'favorites') return;
@@ -3326,8 +3356,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const items = ctProfileLoadFavorites(); const legacy = ctProfileLegacyFavorites();
     const uid = ctProfileUID(); const muted = ctProfileFavoriteMuteState(); const view = ctProfileFavoriteView();
     const storageError = ctProfileFavoriteStorageError(uid);
+    const history = ctProfileFavoriteHistorySummary(uid);
     const signature = JSON.stringify(['favorites', uid, items, legacy.length, storageError,
-      muted.busy, muted.done, muted.error, muted.pages, [...muted.handles], view.query, view.type, view.sort, view.limit, view.message, view.error, view.busy, view.backupRevision]);
+      muted.busy, muted.done, muted.error, muted.pages, [...muted.handles], view.limit, view.message, view.error, view.busy, view.backupRevision, history]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
     const rows = ctProfileExistingRows(panel);
@@ -3340,6 +3371,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const message = tools.querySelector('#ct-favorite-backup-status');
     if (message.textContent !== view.message) message.textContent = view.message;
     if (message.dataset.error !== String(view.error)) message.dataset.error = String(view.error);
+    const historyNode = tools.querySelector('#ct-favorite-history-scope'); const historyText = ctProfileFavoriteHistoryText(history);
+    if (historyNode.textContent !== historyText) historyNode.textContent = historyText;
     const partControls = tools.querySelector('#ct-favorite-backup-parts');
     if (partControls.ctBackupParts !== view.backupParts) {
       partControls.ctBackupParts = view.backupParts; partControls.replaceChildren();
@@ -3366,8 +3399,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (storageError) content.push(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。この画面を閉じる前にバックアップを保存してください。', 'Browser storage is unavailable. Save a backup before closing this page.')));
     if (!muted.done) {
       const count = tools.querySelector('#ct-favorite-count');
-      const summary = ctProfileText(`保存済み${items.length}件 · 表示前にミュート一覧を確認しています`, `${items.length} saved · Checking muted accounts before display`);
+      const summary = ctProfileText(`このアカウントに保存済み${items.length}件 · 表示前にミュート一覧を確認しています`, `${items.length} saved for this account · Checking muted accounts before display`);
       if (count.textContent !== summary) count.textContent = summary;
+      const range = tools.querySelector('#ct-favorite-range'); const rangeText = ctProfileText('保存した投稿の日付範囲：ミュート一覧を確認中', 'Saved Tweet date range: checking muted accounts');
+      if (range.textContent !== rangeText) range.textContent = rangeText;
       const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート一覧を確認中…', 'Checking muted accounts…') :
         muted.error || ctProfileText('ミュート一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted accounts have been checked.'));
       waiting.setAttribute('role', 'status');
@@ -3379,20 +3414,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (unmuted.length < items.length) content.push(ctProfileStatus(ctProfileText(
         `ミュートした作者や作者を確認できない投稿${items.length - unmuted.length}件を非表示にしています。保存データは保持しています。`,
         `${items.length - unmuted.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`)));
-      const normalize = value => String(value).normalize('NFKC').toLowerCase();
-      const query = normalize(view.query.trim());
-      const matching = unmuted.filter(item => (!query || normalize([item.text, item.name, '@' + item.username].join('\n')).includes(query)) &&
-        (view.type === 'all' || item.media.some(asset => asset.type === view.type)));
-      matching.sort((a, b) => view.sort === 'saved' ? b.savedAt - a.savedAt :
-        view.sort === 'oldest' ? (Date.parse(a.createdAt) || Infinity) - (Date.parse(b.createdAt) || Infinity) :
-          (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+      const matching = unmuted.sort((a, b) => b.savedAt - a.savedAt);
       const visible = matching.slice(0, view.limit);
       const count = tools.querySelector('#ct-favorite-count');
-      const summary = ctProfileText(`${matching.length}件中${visible.length}件を表示 · 保存済み${items.length}件`, `${visible.length} of ${matching.length} matches shown · ${items.length} saved`);
+      const summary = ctProfileText(`このアカウントに保存済み${items.length}件 · 表示${visible.length}件／表示対象${matching.length}件`, `${items.length} saved for this account · ${visible.length} shown / ${matching.length} available`);
       if (count.textContent !== summary) count.textContent = summary;
+      const range = tools.querySelector('#ct-favorite-range'); const rangeText = ctProfileFavoriteDateRange(matching);
+      if (range.textContent !== rangeText) range.textContent = rangeText;
       if (!visible.length) {
         const empty = document.createElement('p'); empty.className = 'ct-profile-empty';
-        empty.textContent = query || view.type !== 'all' ? ctProfileText('条件に合うお気に入りはありません。', 'No Favorites match these filters.') : items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
+        empty.textContent = items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
           ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.');
         content.push(empty);
       } else for (const item of visible) content.push(ctProfileReuseRow(item, rows));
@@ -4712,6 +4743,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const ctMediaUploads = new WeakMap();
   const ctMediaUploadEvents = new WeakSet();
   const ctMediaCarousels = new Map();
+  const ctMediaCenteredViewers = new Map();
+  const ctMediaVideos = new Map();
+  let ctMediaViewportBound = false;
   let ctMediaTransferSupported;
   let ctMediaPendingViewer = null;
   let ctMediaViewer = null;
@@ -5027,6 +5061,260 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     viewer.dialog.removeEventListener('touchend', viewer.onTouchEnd);
     ctMediaViewer = null;
   }
+  function ctMediaViewport(dialog) {
+    const viewport = window.visualViewport;
+    const values = {
+      '--ct-media-view-top': `${viewport?.offsetTop || 0}px`,
+      '--ct-media-view-left': `${viewport?.offsetLeft || 0}px`,
+      '--ct-media-view-width': `${viewport?.width || window.innerWidth}px`,
+      '--ct-media-view-height': `${viewport?.height || window.innerHeight}px`
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (dialog.style.getPropertyValue(key) !== value) dialog.style.setProperty(key, value);
+    }
+  }
+  function ctMediaCenterViewers() {
+    for (const [dialog, state] of ctMediaCenteredViewers) {
+      if (dialog.isConnected && dialog.querySelector('img[alt="Media preview"]')) continue;
+      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer');
+      state.stage.classList.remove('ct-media-viewer-stage');
+      state.header?.classList.remove('ct-media-viewer-header');
+      for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
+      ctMediaCenteredViewers.delete(dialog);
+    }
+    for (const dialog of document.querySelectorAll('div[role="dialog"][aria-modal="true"][aria-label="Media viewer"]')) {
+      const image = dialog.querySelector('img[alt="Media preview"]');
+      const stage = image?.parentElement;
+      if (!stage || stage.parentElement !== dialog) continue;
+      const previous = ctMediaCenteredViewers.get(dialog);
+      if (previous && previous.stage !== stage) previous.stage.classList.remove('ct-media-viewer-stage');
+      const header = [...dialog.children].find(el => el !== stage && el.querySelector('[aria-label="Close media viewer"]'));
+      dialog.classList.add('ct-media-centered-viewer');
+      // Contained native viewers remain inside their existing modal. Only the
+      // verified fixed viewer follows the visible viewport on mobile browsers.
+      dialog.classList.toggle('ct-media-viewport-viewer', dialog.classList.contains('fixed'));
+      stage.classList.add('ct-media-viewer-stage');
+      header?.classList.add('ct-media-viewer-header');
+      ctMediaCenteredViewers.set(dialog, { stage, header });
+      ctMediaViewport(dialog);
+    }
+    if (ctMediaViewportBound) return;
+    ctMediaViewportBound = true;
+    const update = () => {
+      for (const dialog of ctMediaCenteredViewers.keys()) if (dialog.isConnected) ctMediaViewport(dialog);
+    };
+    window.addEventListener('resize', update, { passive: true });
+    window.visualViewport?.addEventListener('resize', update, { passive: true });
+    window.visualViewport?.addEventListener('scroll', update, { passive: true });
+  }
+  function ctMediaVideoContext(video) {
+    return { source: video.currentSrc || video.src, path: location.pathname + location.search,
+      uid: typeof ctNetworkState === 'undefined' ? null : ctNetworkState.authUID };
+  }
+  function ctMediaVideoContextMatches(state) {
+    const current = ctMediaVideoContext(state.video);
+    return state.video.isConnected && current.source === state.context?.source &&
+      current.path === state.context?.path && current.uid === state.context?.uid;
+  }
+  function ctMediaVideoFullscreen(state) {
+    return document.fullscreenElement === state.video || state.webkitFullscreen === true ||
+      state.video.webkitDisplayingFullscreen === true;
+  }
+  function ctMediaRestorePause(state) {
+    clearInterval(state.guardTimer);
+    state.guardTimer = null;
+    if (!state.pauseGuard) return;
+    // Never overwrite a later page-owned replacement of the instance method.
+    if (state.video.pause === state.pauseGuard) {
+      if (state.pauseDescriptor) Object.defineProperty(state.video, 'pause', state.pauseDescriptor);
+      else delete state.video.pause;
+    }
+    state.pauseGuard = null;
+  }
+  function ctMediaVideoEnd(state, invalid = false) {
+    const pause = state.originalPause;
+    if (invalid) state.invalidatedFullscreen = true;
+    ctMediaRestorePause(state);
+    state.context = null;
+    state.intentPlaying = false;
+    state.requesting = false;
+    state.requestSequence++;
+    state.button.disabled = false;
+    if (!ctMediaVideoFullscreen(state) && !state.pendingRequests.size) state.invalidatedFullscreen = false;
+    if (!invalid) return;
+    // A removed post, another account, or a new route must not leave an old
+    // account's media playing in the browser's fullscreen top layer.
+    if (pause && !state.video.paused) try { pause.call(state.video); } catch {}
+    if (document.fullscreenElement === state.video) {
+      try { document.exitFullscreen?.()?.catch?.(() => {}); } catch {}
+    } else if (state.webkitFullscreen || state.video.webkitDisplayingFullscreen) {
+      try { state.video.webkitExitFullscreen?.(); } catch {}
+    }
+  }
+  function ctMediaGuardVideoPause(state) {
+    if (state.pauseGuard || typeof state.video.pause !== 'function') return;
+    const video = state.video;
+    state.pauseDescriptor = Object.getOwnPropertyDescriptor(video, 'pause');
+    state.originalPause = video.pause;
+    const original = state.originalPause;
+    // Tweet's autoplay manager observes the inline wrapper, which can leave the
+    // viewport while this same video is in the fullscreen top layer. Ignore
+    // only JavaScript pause calls during that active fullscreen session. Native
+    // player controls do not call this method and their pause event is retained.
+    state.pauseGuard = function (...args) {
+      if (this === video && state.intentPlaying && ctMediaVideoFullscreen(state) &&
+          !document.hidden && ctMediaVideoContextMatches(state)) return;
+      return original.apply(this, args);
+    };
+    try { Object.defineProperty(video, 'pause', { configurable: true, writable: true, value: state.pauseGuard }); }
+    catch { state.pauseGuard = null; return; }
+    state.guardTimer = setInterval(() => {
+      if (!ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
+      else if (!ctMediaVideoFullscreen(state) && !state.requesting) ctMediaVideoEnd(state);
+    }, 500);
+  }
+  function ctMediaVideoBegin(state) {
+    if (document.hidden) { ctMediaVideoEnd(state); return; }
+    if (!ctMediaVideoFullscreen(state)) {
+      // Fullscreen exit events are queued. An older exit, or a change for
+      // another player, must not cancel a valid request still awaiting entry.
+      if (state.requesting && ctMediaVideoContextMatches(state)) return;
+      ctMediaVideoEnd(state); return;
+    }
+    if (state.invalidatedFullscreen && !state.context) { ctMediaVideoEnd(state, true); return; }
+    if (!state.context && state.pendingRequests.size) { ctMediaVideoEnd(state, true); return; }
+    if (!state.context) {
+      state.context = ctMediaVideoContext(state.video);
+      state.intentPlaying = !state.video.paused && !state.video.ended;
+    }
+    state.requesting = false;
+    state.button.disabled = false;
+    ctMediaGuardVideoPause(state);
+  }
+  function ctMediaVideoStatus(state, text = '') {
+    state.status.textContent = text;
+    state.status.hidden = !text;
+  }
+  function ctMediaEnhanceVideo(video) {
+    if (video?.tagName !== 'VIDEO' || !video.controls || !video.isConnected ||
+        video.closest('[data-ct-local-ui]:not([data-ct-local-ui="profile"])') ||
+        video.closest('.w-full.mt-3.space-y-3') ||
+        (!video.matches('.ct-profile-video') && (!video.closest('main,article') ||
+          !video.playsInline || !video.loop || !video.matches('.w-full.object-contain')))) return;
+    const shell = video.parentElement;
+    if (!shell || !(video.currentSrc || video.src)) return;
+    const existing = ctMediaVideos.get(video);
+    if (existing) {
+      if (existing.shell !== shell) { ctMediaRemoveVideo(existing); return ctMediaEnhanceVideo(video); }
+      shell.classList.add('ct-media-video-shell');
+      video.classList.add('ct-media-enhanced-video');
+      if (!existing.controls.isConnected) video.after(existing.controls);
+      if (existing.context && !ctMediaVideoContextMatches(existing)) ctMediaVideoEnd(existing, true);
+      return;
+    }
+    if (typeof video.requestFullscreen !== 'function' && typeof video.webkitEnterFullscreen !== 'function') return;
+    const controls = document.createElement('div');
+    controls.className = 'ct-media-video-tools'; controls.dataset.ctLocalUi = 'media-video';
+    if (video.matches('.ct-profile-video')) controls.classList.add('ct-media-video-inline-tools');
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'ct-media-video-fullscreen';
+    const label = ctMediaJapanese() ? '動画を全画面で表示' : 'Show video fullscreen';
+    button.setAttribute('aria-label', label); button.title = label;
+    button.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>';
+    const status = document.createElement('span');
+    status.className = 'ct-media-video-status'; status.setAttribute('role', 'status'); status.hidden = true;
+    controls.append(button, status);
+    controls.addEventListener('click', event => event.stopPropagation());
+    const state = { video, shell, controls, button, status, context: null, pauseGuard: null,
+      guardTimer: null, webkitFullscreen: false, requesting: false, requestSequence: 0, pendingRequests: new Set(),
+      invalidatedFullscreen: false };
+    button.addEventListener('click', () => {
+      if (!video.isConnected || state.requesting) return;
+      ctMediaVideoStatus(state);
+      state.context = ctMediaVideoContext(video);
+      state.invalidatedFullscreen = false;
+      state.intentPlaying = !video.paused && !video.ended;
+      state.requesting = true; button.disabled = true;
+      const sequence = ++state.requestSequence;
+      ctMediaGuardVideoPause(state);
+      const failed = () => {
+        state.pendingRequests.delete(sequence);
+        if (sequence !== state.requestSequence) {
+          if (!state.context && !state.pendingRequests.size && !ctMediaVideoFullscreen(state)) state.invalidatedFullscreen = false;
+          return;
+        }
+        const same = ctMediaVideoContextMatches(state);
+        ctMediaVideoEnd(state, !same);
+        if (same) ctMediaVideoStatus(state, ctMediaJapanese() ? '全画面表示を開始できませんでした。動画の標準操作も利用できます。' :
+          'Fullscreen could not start. You can also use the video player controls.');
+      };
+      try {
+        // Keep this call in the click handler: browsers require user activation.
+        // This never clones/reparents media, seeks, changes sound/rate or plays
+        // a paused video just because its presentation is enlarged.
+        if (typeof video.requestFullscreen === 'function') {
+          state.pendingRequests.add(sequence);
+          const result = video.requestFullscreen();
+          Promise.resolve(result).then(() => {
+            state.pendingRequests.delete(sequence);
+            if (sequence !== state.requestSequence) {
+              // The fullscreen flag can become true before fullscreenchange is
+              // dispatched. Keep a cancelled successful request invalid until
+              // its top layer has actually exited; a queued entry event must
+              // not create a new session for changed media or another account.
+              if (!state.context || !ctMediaVideoContextMatches(state)) {
+                if (ctMediaVideoFullscreen(state)) ctMediaVideoEnd(state, true);
+                else if (!state.pendingRequests.size) state.invalidatedFullscreen = false;
+              }
+              return;
+            }
+            if (!ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
+            else ctMediaVideoBegin(state);
+          }, failed);
+        } else { video.webkitEnterFullscreen(); state.requesting = false; button.disabled = false; }
+      } catch { failed(); }
+    });
+    state.onFullscreen = () => ctMediaVideoBegin(state);
+    state.onWebkitBegin = () => { state.webkitFullscreen = true; ctMediaVideoBegin(state); };
+    state.onWebkitEnd = () => { state.webkitFullscreen = false; ctMediaVideoEnd(state); };
+    state.onPause = () => { state.intentPlaying = false; };
+    state.onPlay = () => { if (ctMediaVideoFullscreen(state) && ctMediaVideoContextMatches(state)) state.intentPlaying = true; };
+    state.onInvalid = () => { if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true); };
+    state.onPageHide = () => ctMediaVideoEnd(state, true);
+    state.onVisibility = () => {
+      if (document.hidden) ctMediaVideoEnd(state);
+      else if (ctMediaVideoFullscreen(state)) ctMediaVideoBegin(state);
+    };
+    document.addEventListener('fullscreenchange', state.onFullscreen);
+    document.addEventListener('visibilitychange', state.onVisibility);
+    video.addEventListener('webkitbeginfullscreen', state.onWebkitBegin);
+    video.addEventListener('webkitendfullscreen', state.onWebkitEnd);
+    video.addEventListener('pause', state.onPause);
+    video.addEventListener('play', state.onPlay);
+    video.addEventListener('emptied', state.onInvalid);
+    video.addEventListener('loadstart', state.onInvalid);
+    window.addEventListener('pagehide', state.onPageHide);
+    state.observer = new MutationObserver(state.onInvalid);
+    state.observer.observe(video, { attributes: true, attributeFilter: ['src'], childList: true, subtree: true });
+    shell.classList.add('ct-media-video-shell'); video.classList.add('ct-media-enhanced-video'); video.after(controls);
+    ctMediaVideos.set(video, state);
+  }
+  function ctMediaRemoveVideo(state) {
+    ctMediaVideoEnd(state, true);
+    state.observer.disconnect();
+    document.removeEventListener('fullscreenchange', state.onFullscreen);
+    document.removeEventListener('visibilitychange', state.onVisibility);
+    state.video.removeEventListener('webkitbeginfullscreen', state.onWebkitBegin);
+    state.video.removeEventListener('webkitendfullscreen', state.onWebkitEnd);
+    state.video.removeEventListener('pause', state.onPause);
+    state.video.removeEventListener('play', state.onPlay);
+    state.video.removeEventListener('emptied', state.onInvalid);
+    state.video.removeEventListener('loadstart', state.onInvalid);
+    window.removeEventListener('pagehide', state.onPageHide);
+    state.controls.remove(); state.shell.classList.remove('ct-media-video-shell');
+    state.video.classList.remove('ct-media-enhanced-video');
+    ctMediaVideos.delete(state.video);
+  }
   function ctMediaEnhanceViewer() {
     const active = ctMediaViewer;
     if (active && (!active.dialog.isConnected || !active.state.grid.isConnected || !ctMediaSlides(active.state.grid).length)) ctMediaClearViewer();
@@ -5117,17 +5405,39 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-media-carousel-controls button:hover:not(:disabled) { background:var(--color-tl-app-bg,#edf3f8); }
       .ct-media-carousel-controls button:disabled { opacity:.3; cursor:default; }
       .ct-media-carousel-controls button:focus-visible,.ct-media-upload-status button:focus-visible { outline:3px solid var(--color-tl-app-primary,#1688d4); }
-      .ct-media-viewer-controls { flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
+      .ct-media-centered-viewer { overflow:hidden!important; }
+      .ct-media-viewport-viewer { inset:auto!important; top:var(--ct-media-view-top,0)!important; left:var(--ct-media-view-left,0)!important; width:var(--ct-media-view-width,100vw)!important; height:var(--ct-media-view-height,100dvh)!important; }
+      .ct-media-centered-viewer > .ct-media-viewer-header { position:absolute!important; top:0; left:0; right:0; z-index:2; padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left))!important; pointer-events:none; }
+      .ct-media-centered-viewer > .ct-media-viewer-header button { pointer-events:auto; min-width:44px; min-height:44px; }
+      .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
+      .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
+      .ct-media-viewer-controls { position:absolute; left:0; right:0; bottom:0; z-index:2; flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
       .ct-media-viewer-controls button:hover:not(:disabled) { background:#ffffff26; }
+      .ct-media-video-shell { position:relative; }
+      .ct-media-video-tools { position:absolute; top:4px; right:4px; z-index:1; }
+      .ct-media-video-inline-tools { position:relative; top:auto; right:auto; display:flex; justify-content:flex-end; margin-top:-4px; margin-bottom:4px; }
+      .ct-media-video-fullscreen { display:flex; align-items:center; justify-content:center; width:44px; height:44px; padding:0; border:0; border-radius:50%; background:#0009; color:#fff; cursor:pointer; opacity:.8; transition:background 120ms ease-out,opacity 120ms ease-out; }
+      .ct-media-video-fullscreen:hover,.ct-media-video-fullscreen:focus-visible { opacity:1; background:#000c; }
+      .ct-media-video-fullscreen:focus-visible { outline:3px solid #fff; outline-offset:2px; }
+      .ct-media-video-fullscreen:disabled { cursor:wait; }
+      .ct-media-video-status { position:absolute; top:48px; right:0; box-sizing:border-box; width:min(270px,calc(100vw - 32px)); padding:8px 10px; border-radius:6px; background:#000e; color:#fff; font:13px/1.5 system-ui,sans-serif; }
+      .ct-media-video-tools [hidden] { display:none!important; }
+      .ct-media-enhanced-video:fullscreen { width:100%!important; height:100%!important; max-width:none!important; max-height:none!important; margin:0!important; object-fit:contain!important; background:#000; }
+      @media(hover:hover) and (pointer:fine) { .ct-media-video-shell:not(:hover):not(:focus-within) .ct-media-video-fullscreen { opacity:.45; } }
+      @media(max-width:480px) { .ct-media-viewer-controls { gap:24px; } .ct-media-video-fullscreen { opacity:1; } }
       .ct-media-upload-status { display:flex; align-items:center; gap:10px; font:13px/1.5 system-ui,sans-serif; color:var(--color-tl-app-text-muted,#657786); }
       .ct-media-upload-status button { flex-shrink:0; min-height:44px; padding:5px 10px; border:1px solid var(--color-tl-app-border,#b8c5d1); border-radius:8px; color:inherit; background:transparent; cursor:pointer; }
       .ct-media-upload-status [hidden] { display:none!important; }
-      @media(prefers-reduced-motion:reduce) { .ct-media-carousel { scroll-behavior:auto!important; } }
+      @media(prefers-reduced-motion:reduce) { .ct-media-carousel { scroll-behavior:auto!important; } .ct-media-video-fullscreen,.ct-media-centered-viewer,.ct-media-viewer-stage > img { animation:none!important; transition:none!important; } .ct-media-viewer-stage > img { transform:none!important; opacity:1!important; } }
     `;
     document.head.append(style);
   }
   function ctMediaEnhance(root = document) {
     ctMediaStyles();
+    for (const state of ctMediaVideos.values()) {
+      if (!state.video.isConnected) ctMediaRemoveVideo(state);
+      else if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
+    }
     for (const state of ctMediaCarousels.values()) {
       if (!state.grid.isConnected || !ctMediaSlides(state.grid).length) ctMediaRemoveCarousel(state);
     }
@@ -5154,6 +5464,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const grids = [...root.querySelectorAll?.('div.grid.rounded-2xl.overflow-hidden.border') || []];
     if (root.matches?.('div.grid.rounded-2xl.overflow-hidden.border')) grids.push(root);
     grids.forEach(ctMediaEnhanceCarousel);
+    const videos = [...root.querySelectorAll?.('video[controls]') || []];
+    if (root.matches?.('video[controls]')) videos.push(root);
+    videos.forEach(ctMediaEnhanceVideo);
+    ctMediaCenterViewers();
     ctMediaEnhanceViewer();
   }
 
@@ -6446,5 +6760,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.15.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.16.0 loaded');
 })();

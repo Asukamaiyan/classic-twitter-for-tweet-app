@@ -4,6 +4,9 @@
   const ctMediaUploads = new WeakMap();
   const ctMediaUploadEvents = new WeakSet();
   const ctMediaCarousels = new Map();
+  const ctMediaCenteredViewers = new Map();
+  const ctMediaVideos = new Map();
+  let ctMediaViewportBound = false;
   let ctMediaTransferSupported;
   let ctMediaPendingViewer = null;
   let ctMediaViewer = null;
@@ -319,6 +322,260 @@
     viewer.dialog.removeEventListener('touchend', viewer.onTouchEnd);
     ctMediaViewer = null;
   }
+  function ctMediaViewport(dialog) {
+    const viewport = window.visualViewport;
+    const values = {
+      '--ct-media-view-top': `${viewport?.offsetTop || 0}px`,
+      '--ct-media-view-left': `${viewport?.offsetLeft || 0}px`,
+      '--ct-media-view-width': `${viewport?.width || window.innerWidth}px`,
+      '--ct-media-view-height': `${viewport?.height || window.innerHeight}px`
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (dialog.style.getPropertyValue(key) !== value) dialog.style.setProperty(key, value);
+    }
+  }
+  function ctMediaCenterViewers() {
+    for (const [dialog, state] of ctMediaCenteredViewers) {
+      if (dialog.isConnected && dialog.querySelector('img[alt="Media preview"]')) continue;
+      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer');
+      state.stage.classList.remove('ct-media-viewer-stage');
+      state.header?.classList.remove('ct-media-viewer-header');
+      for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
+      ctMediaCenteredViewers.delete(dialog);
+    }
+    for (const dialog of document.querySelectorAll('div[role="dialog"][aria-modal="true"][aria-label="Media viewer"]')) {
+      const image = dialog.querySelector('img[alt="Media preview"]');
+      const stage = image?.parentElement;
+      if (!stage || stage.parentElement !== dialog) continue;
+      const previous = ctMediaCenteredViewers.get(dialog);
+      if (previous && previous.stage !== stage) previous.stage.classList.remove('ct-media-viewer-stage');
+      const header = [...dialog.children].find(el => el !== stage && el.querySelector('[aria-label="Close media viewer"]'));
+      dialog.classList.add('ct-media-centered-viewer');
+      // Contained native viewers remain inside their existing modal. Only the
+      // verified fixed viewer follows the visible viewport on mobile browsers.
+      dialog.classList.toggle('ct-media-viewport-viewer', dialog.classList.contains('fixed'));
+      stage.classList.add('ct-media-viewer-stage');
+      header?.classList.add('ct-media-viewer-header');
+      ctMediaCenteredViewers.set(dialog, { stage, header });
+      ctMediaViewport(dialog);
+    }
+    if (ctMediaViewportBound) return;
+    ctMediaViewportBound = true;
+    const update = () => {
+      for (const dialog of ctMediaCenteredViewers.keys()) if (dialog.isConnected) ctMediaViewport(dialog);
+    };
+    window.addEventListener('resize', update, { passive: true });
+    window.visualViewport?.addEventListener('resize', update, { passive: true });
+    window.visualViewport?.addEventListener('scroll', update, { passive: true });
+  }
+  function ctMediaVideoContext(video) {
+    return { source: video.currentSrc || video.src, path: location.pathname + location.search,
+      uid: typeof ctNetworkState === 'undefined' ? null : ctNetworkState.authUID };
+  }
+  function ctMediaVideoContextMatches(state) {
+    const current = ctMediaVideoContext(state.video);
+    return state.video.isConnected && current.source === state.context?.source &&
+      current.path === state.context?.path && current.uid === state.context?.uid;
+  }
+  function ctMediaVideoFullscreen(state) {
+    return document.fullscreenElement === state.video || state.webkitFullscreen === true ||
+      state.video.webkitDisplayingFullscreen === true;
+  }
+  function ctMediaRestorePause(state) {
+    clearInterval(state.guardTimer);
+    state.guardTimer = null;
+    if (!state.pauseGuard) return;
+    // Never overwrite a later page-owned replacement of the instance method.
+    if (state.video.pause === state.pauseGuard) {
+      if (state.pauseDescriptor) Object.defineProperty(state.video, 'pause', state.pauseDescriptor);
+      else delete state.video.pause;
+    }
+    state.pauseGuard = null;
+  }
+  function ctMediaVideoEnd(state, invalid = false) {
+    const pause = state.originalPause;
+    if (invalid) state.invalidatedFullscreen = true;
+    ctMediaRestorePause(state);
+    state.context = null;
+    state.intentPlaying = false;
+    state.requesting = false;
+    state.requestSequence++;
+    state.button.disabled = false;
+    if (!ctMediaVideoFullscreen(state) && !state.pendingRequests.size) state.invalidatedFullscreen = false;
+    if (!invalid) return;
+    // A removed post, another account, or a new route must not leave an old
+    // account's media playing in the browser's fullscreen top layer.
+    if (pause && !state.video.paused) try { pause.call(state.video); } catch {}
+    if (document.fullscreenElement === state.video) {
+      try { document.exitFullscreen?.()?.catch?.(() => {}); } catch {}
+    } else if (state.webkitFullscreen || state.video.webkitDisplayingFullscreen) {
+      try { state.video.webkitExitFullscreen?.(); } catch {}
+    }
+  }
+  function ctMediaGuardVideoPause(state) {
+    if (state.pauseGuard || typeof state.video.pause !== 'function') return;
+    const video = state.video;
+    state.pauseDescriptor = Object.getOwnPropertyDescriptor(video, 'pause');
+    state.originalPause = video.pause;
+    const original = state.originalPause;
+    // Tweet's autoplay manager observes the inline wrapper, which can leave the
+    // viewport while this same video is in the fullscreen top layer. Ignore
+    // only JavaScript pause calls during that active fullscreen session. Native
+    // player controls do not call this method and their pause event is retained.
+    state.pauseGuard = function (...args) {
+      if (this === video && state.intentPlaying && ctMediaVideoFullscreen(state) &&
+          !document.hidden && ctMediaVideoContextMatches(state)) return;
+      return original.apply(this, args);
+    };
+    try { Object.defineProperty(video, 'pause', { configurable: true, writable: true, value: state.pauseGuard }); }
+    catch { state.pauseGuard = null; return; }
+    state.guardTimer = setInterval(() => {
+      if (!ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
+      else if (!ctMediaVideoFullscreen(state) && !state.requesting) ctMediaVideoEnd(state);
+    }, 500);
+  }
+  function ctMediaVideoBegin(state) {
+    if (document.hidden) { ctMediaVideoEnd(state); return; }
+    if (!ctMediaVideoFullscreen(state)) {
+      // Fullscreen exit events are queued. An older exit, or a change for
+      // another player, must not cancel a valid request still awaiting entry.
+      if (state.requesting && ctMediaVideoContextMatches(state)) return;
+      ctMediaVideoEnd(state); return;
+    }
+    if (state.invalidatedFullscreen && !state.context) { ctMediaVideoEnd(state, true); return; }
+    if (!state.context && state.pendingRequests.size) { ctMediaVideoEnd(state, true); return; }
+    if (!state.context) {
+      state.context = ctMediaVideoContext(state.video);
+      state.intentPlaying = !state.video.paused && !state.video.ended;
+    }
+    state.requesting = false;
+    state.button.disabled = false;
+    ctMediaGuardVideoPause(state);
+  }
+  function ctMediaVideoStatus(state, text = '') {
+    state.status.textContent = text;
+    state.status.hidden = !text;
+  }
+  function ctMediaEnhanceVideo(video) {
+    if (video?.tagName !== 'VIDEO' || !video.controls || !video.isConnected ||
+        video.closest('[data-ct-local-ui]:not([data-ct-local-ui="profile"])') ||
+        video.closest('.w-full.mt-3.space-y-3') ||
+        (!video.matches('.ct-profile-video') && (!video.closest('main,article') ||
+          !video.playsInline || !video.loop || !video.matches('.w-full.object-contain')))) return;
+    const shell = video.parentElement;
+    if (!shell || !(video.currentSrc || video.src)) return;
+    const existing = ctMediaVideos.get(video);
+    if (existing) {
+      if (existing.shell !== shell) { ctMediaRemoveVideo(existing); return ctMediaEnhanceVideo(video); }
+      shell.classList.add('ct-media-video-shell');
+      video.classList.add('ct-media-enhanced-video');
+      if (!existing.controls.isConnected) video.after(existing.controls);
+      if (existing.context && !ctMediaVideoContextMatches(existing)) ctMediaVideoEnd(existing, true);
+      return;
+    }
+    if (typeof video.requestFullscreen !== 'function' && typeof video.webkitEnterFullscreen !== 'function') return;
+    const controls = document.createElement('div');
+    controls.className = 'ct-media-video-tools'; controls.dataset.ctLocalUi = 'media-video';
+    if (video.matches('.ct-profile-video')) controls.classList.add('ct-media-video-inline-tools');
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'ct-media-video-fullscreen';
+    const label = ctMediaJapanese() ? '動画を全画面で表示' : 'Show video fullscreen';
+    button.setAttribute('aria-label', label); button.title = label;
+    button.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>';
+    const status = document.createElement('span');
+    status.className = 'ct-media-video-status'; status.setAttribute('role', 'status'); status.hidden = true;
+    controls.append(button, status);
+    controls.addEventListener('click', event => event.stopPropagation());
+    const state = { video, shell, controls, button, status, context: null, pauseGuard: null,
+      guardTimer: null, webkitFullscreen: false, requesting: false, requestSequence: 0, pendingRequests: new Set(),
+      invalidatedFullscreen: false };
+    button.addEventListener('click', () => {
+      if (!video.isConnected || state.requesting) return;
+      ctMediaVideoStatus(state);
+      state.context = ctMediaVideoContext(video);
+      state.invalidatedFullscreen = false;
+      state.intentPlaying = !video.paused && !video.ended;
+      state.requesting = true; button.disabled = true;
+      const sequence = ++state.requestSequence;
+      ctMediaGuardVideoPause(state);
+      const failed = () => {
+        state.pendingRequests.delete(sequence);
+        if (sequence !== state.requestSequence) {
+          if (!state.context && !state.pendingRequests.size && !ctMediaVideoFullscreen(state)) state.invalidatedFullscreen = false;
+          return;
+        }
+        const same = ctMediaVideoContextMatches(state);
+        ctMediaVideoEnd(state, !same);
+        if (same) ctMediaVideoStatus(state, ctMediaJapanese() ? '全画面表示を開始できませんでした。動画の標準操作も利用できます。' :
+          'Fullscreen could not start. You can also use the video player controls.');
+      };
+      try {
+        // Keep this call in the click handler: browsers require user activation.
+        // This never clones/reparents media, seeks, changes sound/rate or plays
+        // a paused video just because its presentation is enlarged.
+        if (typeof video.requestFullscreen === 'function') {
+          state.pendingRequests.add(sequence);
+          const result = video.requestFullscreen();
+          Promise.resolve(result).then(() => {
+            state.pendingRequests.delete(sequence);
+            if (sequence !== state.requestSequence) {
+              // The fullscreen flag can become true before fullscreenchange is
+              // dispatched. Keep a cancelled successful request invalid until
+              // its top layer has actually exited; a queued entry event must
+              // not create a new session for changed media or another account.
+              if (!state.context || !ctMediaVideoContextMatches(state)) {
+                if (ctMediaVideoFullscreen(state)) ctMediaVideoEnd(state, true);
+                else if (!state.pendingRequests.size) state.invalidatedFullscreen = false;
+              }
+              return;
+            }
+            if (!ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
+            else ctMediaVideoBegin(state);
+          }, failed);
+        } else { video.webkitEnterFullscreen(); state.requesting = false; button.disabled = false; }
+      } catch { failed(); }
+    });
+    state.onFullscreen = () => ctMediaVideoBegin(state);
+    state.onWebkitBegin = () => { state.webkitFullscreen = true; ctMediaVideoBegin(state); };
+    state.onWebkitEnd = () => { state.webkitFullscreen = false; ctMediaVideoEnd(state); };
+    state.onPause = () => { state.intentPlaying = false; };
+    state.onPlay = () => { if (ctMediaVideoFullscreen(state) && ctMediaVideoContextMatches(state)) state.intentPlaying = true; };
+    state.onInvalid = () => { if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true); };
+    state.onPageHide = () => ctMediaVideoEnd(state, true);
+    state.onVisibility = () => {
+      if (document.hidden) ctMediaVideoEnd(state);
+      else if (ctMediaVideoFullscreen(state)) ctMediaVideoBegin(state);
+    };
+    document.addEventListener('fullscreenchange', state.onFullscreen);
+    document.addEventListener('visibilitychange', state.onVisibility);
+    video.addEventListener('webkitbeginfullscreen', state.onWebkitBegin);
+    video.addEventListener('webkitendfullscreen', state.onWebkitEnd);
+    video.addEventListener('pause', state.onPause);
+    video.addEventListener('play', state.onPlay);
+    video.addEventListener('emptied', state.onInvalid);
+    video.addEventListener('loadstart', state.onInvalid);
+    window.addEventListener('pagehide', state.onPageHide);
+    state.observer = new MutationObserver(state.onInvalid);
+    state.observer.observe(video, { attributes: true, attributeFilter: ['src'], childList: true, subtree: true });
+    shell.classList.add('ct-media-video-shell'); video.classList.add('ct-media-enhanced-video'); video.after(controls);
+    ctMediaVideos.set(video, state);
+  }
+  function ctMediaRemoveVideo(state) {
+    ctMediaVideoEnd(state, true);
+    state.observer.disconnect();
+    document.removeEventListener('fullscreenchange', state.onFullscreen);
+    document.removeEventListener('visibilitychange', state.onVisibility);
+    state.video.removeEventListener('webkitbeginfullscreen', state.onWebkitBegin);
+    state.video.removeEventListener('webkitendfullscreen', state.onWebkitEnd);
+    state.video.removeEventListener('pause', state.onPause);
+    state.video.removeEventListener('play', state.onPlay);
+    state.video.removeEventListener('emptied', state.onInvalid);
+    state.video.removeEventListener('loadstart', state.onInvalid);
+    window.removeEventListener('pagehide', state.onPageHide);
+    state.controls.remove(); state.shell.classList.remove('ct-media-video-shell');
+    state.video.classList.remove('ct-media-enhanced-video');
+    ctMediaVideos.delete(state.video);
+  }
   function ctMediaEnhanceViewer() {
     const active = ctMediaViewer;
     if (active && (!active.dialog.isConnected || !active.state.grid.isConnected || !ctMediaSlides(active.state.grid).length)) ctMediaClearViewer();
@@ -409,17 +666,39 @@
       .ct-media-carousel-controls button:hover:not(:disabled) { background:var(--color-tl-app-bg,#edf3f8); }
       .ct-media-carousel-controls button:disabled { opacity:.3; cursor:default; }
       .ct-media-carousel-controls button:focus-visible,.ct-media-upload-status button:focus-visible { outline:3px solid var(--color-tl-app-primary,#1688d4); }
-      .ct-media-viewer-controls { flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
+      .ct-media-centered-viewer { overflow:hidden!important; }
+      .ct-media-viewport-viewer { inset:auto!important; top:var(--ct-media-view-top,0)!important; left:var(--ct-media-view-left,0)!important; width:var(--ct-media-view-width,100vw)!important; height:var(--ct-media-view-height,100dvh)!important; }
+      .ct-media-centered-viewer > .ct-media-viewer-header { position:absolute!important; top:0; left:0; right:0; z-index:2; padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left))!important; pointer-events:none; }
+      .ct-media-centered-viewer > .ct-media-viewer-header button { pointer-events:auto; min-width:44px; min-height:44px; }
+      .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
+      .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
+      .ct-media-viewer-controls { position:absolute; left:0; right:0; bottom:0; z-index:2; flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
       .ct-media-viewer-controls button:hover:not(:disabled) { background:#ffffff26; }
+      .ct-media-video-shell { position:relative; }
+      .ct-media-video-tools { position:absolute; top:4px; right:4px; z-index:1; }
+      .ct-media-video-inline-tools { position:relative; top:auto; right:auto; display:flex; justify-content:flex-end; margin-top:-4px; margin-bottom:4px; }
+      .ct-media-video-fullscreen { display:flex; align-items:center; justify-content:center; width:44px; height:44px; padding:0; border:0; border-radius:50%; background:#0009; color:#fff; cursor:pointer; opacity:.8; transition:background 120ms ease-out,opacity 120ms ease-out; }
+      .ct-media-video-fullscreen:hover,.ct-media-video-fullscreen:focus-visible { opacity:1; background:#000c; }
+      .ct-media-video-fullscreen:focus-visible { outline:3px solid #fff; outline-offset:2px; }
+      .ct-media-video-fullscreen:disabled { cursor:wait; }
+      .ct-media-video-status { position:absolute; top:48px; right:0; box-sizing:border-box; width:min(270px,calc(100vw - 32px)); padding:8px 10px; border-radius:6px; background:#000e; color:#fff; font:13px/1.5 system-ui,sans-serif; }
+      .ct-media-video-tools [hidden] { display:none!important; }
+      .ct-media-enhanced-video:fullscreen { width:100%!important; height:100%!important; max-width:none!important; max-height:none!important; margin:0!important; object-fit:contain!important; background:#000; }
+      @media(hover:hover) and (pointer:fine) { .ct-media-video-shell:not(:hover):not(:focus-within) .ct-media-video-fullscreen { opacity:.45; } }
+      @media(max-width:480px) { .ct-media-viewer-controls { gap:24px; } .ct-media-video-fullscreen { opacity:1; } }
       .ct-media-upload-status { display:flex; align-items:center; gap:10px; font:13px/1.5 system-ui,sans-serif; color:var(--color-tl-app-text-muted,#657786); }
       .ct-media-upload-status button { flex-shrink:0; min-height:44px; padding:5px 10px; border:1px solid var(--color-tl-app-border,#b8c5d1); border-radius:8px; color:inherit; background:transparent; cursor:pointer; }
       .ct-media-upload-status [hidden] { display:none!important; }
-      @media(prefers-reduced-motion:reduce) { .ct-media-carousel { scroll-behavior:auto!important; } }
+      @media(prefers-reduced-motion:reduce) { .ct-media-carousel { scroll-behavior:auto!important; } .ct-media-video-fullscreen,.ct-media-centered-viewer,.ct-media-viewer-stage > img { animation:none!important; transition:none!important; } .ct-media-viewer-stage > img { transform:none!important; opacity:1!important; } }
     `;
     document.head.append(style);
   }
   function ctMediaEnhance(root = document) {
     ctMediaStyles();
+    for (const state of ctMediaVideos.values()) {
+      if (!state.video.isConnected) ctMediaRemoveVideo(state);
+      else if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
+    }
     for (const state of ctMediaCarousels.values()) {
       if (!state.grid.isConnected || !ctMediaSlides(state.grid).length) ctMediaRemoveCarousel(state);
     }
@@ -446,5 +725,9 @@
     const grids = [...root.querySelectorAll?.('div.grid.rounded-2xl.overflow-hidden.border') || []];
     if (root.matches?.('div.grid.rounded-2xl.overflow-hidden.border')) grids.push(root);
     grids.forEach(ctMediaEnhanceCarousel);
+    const videos = [...root.querySelectorAll?.('video[controls]') || []];
+    if (root.matches?.('video[controls]')) videos.push(root);
+    videos.forEach(ctMediaEnhanceVideo);
+    ctMediaCenterViewers();
     ctMediaEnhanceViewer();
   }

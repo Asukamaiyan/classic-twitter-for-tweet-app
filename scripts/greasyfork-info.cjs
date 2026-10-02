@@ -128,7 +128,7 @@ function render(edition) {
     `<h3>${japanese ? '版を選ぶ' : 'Choose an edition'}</h3>`,
     editionTable(edition.locale),
     `<p>${features}</p>`,
-    `<p>${japanese ? '過去のお気に入りは「便利ツール」→「過去の投稿から探す」。画面を開いたまま使い、「続きから探す」で再開できます（1回100ページまで）。返されるタイムラインの範囲で復元するため、全履歴は保証できません。プロフィールの「お気に入り」で検索・写真動画の絞り込み・JSONバックアップができます。' : 'For older Favorites: Tools → Search older posts, then Continue searching to resume (up to 100 pages per run while visible). Recovery covers returned timelines and cannot guarantee your entire history. Search/filter and save a JSON backup on your profile’s Favorites tab.'}</p>`,
+    `<p>${japanese ? '過去のお気に入りは「便利ツール」→「過去の投稿から探す」。画面を開いたまま使い、「続きから探す」で再開できます（1回100ページまで）。返されるタイムラインの範囲で復元するため、全履歴は保証できません。プロフィールの「お気に入り」は件数・期間・確認範囲と保存した投稿を表示し、JSONバックアップができます。写真は中央で拡大し、動画の「全画面表示」は同じプレーヤーを使います。' : 'For older Favorites: Tools → Search older posts, then Continue searching to resume (up to 100 pages per run while visible). Recovery covers returned timelines and cannot guarantee your entire history. Your profile’s Favorites tab shows saved posts, counts, date range and recovery coverage, with JSON backups. Enlarged photos are centered; video fullscreen keeps the same player.'}</p>`,
     safariFeature,
     `<p>${link(readmeUrl, japanese ? '機能・保存データ・対応範囲の詳細' : 'Features, saved data and compatibility details')}</p>`
   ].filter(Boolean).join('\n') + '\n';
