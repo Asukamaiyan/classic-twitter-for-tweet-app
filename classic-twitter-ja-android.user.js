@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese Android
 // @namespace    https://tweet.app/
-// @version      6.16.0
+// @version      6.17.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -2297,7 +2297,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   let ctScanning = false;
   let ctPageActive = true;
   let ctStarted = false;
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'class', 'src', 'data-app-theme'];
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-label', 'aria-disabled', 'aria-busy', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
   const observer = new MutationObserver(mutations => {
     if (ctScanning || !ctPageActive) return;
     if (!mutations.some(m => {
@@ -2340,7 +2340,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.16.0';
+    document.documentElement.dataset.ctActiveVersion = '6.17.0';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -2496,6 +2496,209 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       href: `${location.origin}/post/${encodeURIComponent(id)}`, savedAt: Date.now() };
   }
 
+    // Creation timestamps must carry their own timezone. Date.parse accepts
+  // calendar rollovers and local-time strings, which cannot identify a post's
+  // actual creation instant safely.
+  function ctTimestampParse(value) {
+    if (typeof value !== 'string') return null;
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/);
+    if (!match) return null;
+    const [, year, month, day, hour, minute, second, fraction, zone] = match;
+    const y = Number(year), m = Number(month), d = Number(day);
+    const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (m < 1 || m > 12 || d < 1 || d > days[m - 1] ||
+        Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59 ||
+        (zone !== 'Z' && (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4)) > 59))) return null;
+    // Normalize fractional precision to the standard millisecond form before
+    // parsing, including browsers that reject service timestamps with 6 digits.
+    const milliseconds = fraction ? `.${fraction.padEnd(3, '0').slice(0, 3)}` : '.000';
+    const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}${milliseconds}${zone}`);
+    return Number.isFinite(date.getTime()) ? date : null;
+  }
+
+  function ctTimestampPostValue(post) {
+    if (!post || typeof post !== 'object' || Array.isArray(post)) return '';
+    for (const value of [post.created_at, post.createdAt]) {
+      if (ctTimestampParse(value)) return value;
+    }
+    return '';
+  }
+
+  function ctTimestampPostDate(post) {
+    return ctTimestampParse(ctTimestampPostValue(post));
+  }
+
+  function ctTimestampExactText(value, locale = CT_LOCALE) {
+    const date = value instanceof Date ? value : ctTimestampParse(value);
+    if (!date || !Number.isFinite(date.getTime())) return '';
+    const language = locale === 'ja' ? 'ja-JP' : 'en-US';
+    const dateText = new Intl.DateTimeFormat(language, {
+      year: 'numeric', month: locale === 'ja' ? 'long' : 'short', day: 'numeric'
+    }).format(date);
+    const timeText = new Intl.DateTimeFormat(language, {
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).format(date);
+    return `${dateText} · ${timeText}`;
+  }
+
+  function ctTimestampNativeValue(el) {
+    if (!el?.matches('span.text-tl-app-text-muted') || !el.closest('article') ||
+        el.closest('button,a,[role="button"],blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border,.tl-user-text,[data-user-content],.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],[contenteditable]') ||
+        (typeof isOwnedLocalizationElement === 'function' && isOwnedLocalizationElement(el))) return '';
+    for (let parent = el; parent; parent = parent.parentElement) {
+      if (parent.hidden || parent.getAttribute('aria-hidden') === 'true' || parent.style.display === 'none' ||
+          (parent.classList.contains('hidden') && getComputedStyle(parent).display === 'none')) return '';
+    }
+    const header = el.parentElement;
+    if (!header?.matches('div.flex.items-center.gap-1.min-w-0') ||
+        !header.querySelector('button.font-bold.truncate') ||
+        !el.previousElementSibling?.matches('span.text-tl-app-text-muted') ||
+        el.previousElementSibling.textContent.trim() !== '·') return '';
+    if (el.classList.contains('hover:underline') && el.hasAttribute('title')) {
+      const value = el.getAttribute('title');
+      return ctTimestampParse(value) ? value : '';
+    }
+    // Inline replies omit the ISO title. A separate read-only resolver may
+    // provide the reply's own creation timestamp after unique API verification.
+    if (el.classList.contains('shrink-0') && !el.hasAttribute('title') &&
+        typeof ctReplyTimeSource === 'function') {
+      const value = ctReplyTimeSource(el);
+      return ctTimestampParse(value) ? value : '';
+    }
+    return '';
+  }
+
+  function ctTimestampCreationNode(article) {
+    const sources = [...article.querySelectorAll('span.text-tl-app-text-muted')]
+      .filter(el => el.closest('article') === article && !!ctTimestampNativeValue(el));
+    // Multiple candidates are ambiguous; never borrow from a quote or reply.
+    return sources.length === 1 ? sources[0] : null;
+  }
+
+  function ctTimestampRelativeText(value, now = Date.now(), locale = CT_LOCALE) {
+    const date = value instanceof Date ? value : ctTimestampParse(value);
+    if (!date || !Number.isFinite(date.getTime()) || !Number.isFinite(now)) return '';
+    const seconds = Math.floor((now - date.getTime()) / 1000);
+    if (seconds < 60) return locale === 'ja' ? 'たった今' : 'Just now';
+    for (const [limit, divisor, japanese, english] of [
+      [3600, 60, '分前', 'm'], [86400, 3600, '時間前', 'h'], [604800, 86400, '日前', 'd']
+    ]) {
+      if (seconds < limit) return `${Math.floor(seconds / divisor)}${locale === 'ja' ? japanese : english}`;
+    }
+    const year = date.getFullYear() !== new Date(now).getFullYear() ? 'numeric' : undefined;
+    return new Intl.DateTimeFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
+      ...(year ? { year } : {}), month: locale === 'ja' ? 'long' : 'short', day: 'numeric'
+    }).format(date);
+  }
+
+  function ctTimestampClockState() {
+    return ctTimestampClockState.value ||= { elements: new Set(), timer: null, active: true, installed: false };
+  }
+
+  function ctTimestampRefreshRelative() {
+    const state = ctTimestampClockState();
+    clearTimeout(state.timer);
+    state.timer = null;
+    if (!state.active || document.hidden) return;
+    const now = Date.now();
+    let delay = 60000;
+    for (const el of state.elements) {
+      const value = el.isConnected && ctTimestampNativeValue(el);
+      const date = value && ctTimestampParse(value);
+      const node = el.firstChild;
+      if (!date || el.childNodes.length !== 1 || node?.nodeType !== Node.TEXT_NODE) {
+        state.elements.delete(el);
+        continue;
+      }
+      const text = ctTimestampRelativeText(date, now);
+      if (node.nodeValue !== text) {
+        node.nodeValue = text;
+        if (typeof ctReplyTimeRendered === 'function' && !el.hasAttribute('title')) ctReplyTimeRendered(el, text);
+      }
+      const age = now - date.getTime();
+      if (age >= 0 && age < 604800000) delay = Math.min(delay, 60000 - age % 60000);
+    }
+    if (state.elements.size) state.timer = setTimeout(ctTimestampRefreshRelative, Math.max(1000, delay));
+  }
+
+  function ctTimestampTrackRelative(el) {
+    const state = ctTimestampClockState();
+    if (!state.installed) {
+      state.installed = true;
+      document.addEventListener('visibilitychange', ctTimestampRefreshRelative);
+      window.addEventListener('pagehide', () => {
+        state.active = false;
+        clearTimeout(state.timer);
+        state.timer = null;
+      });
+      window.addEventListener('pageshow', event => {
+        if (event.persisted) {
+          state.active = true;
+          ctTimestampRefreshRelative();
+        }
+      });
+    }
+    state.elements.add(el);
+    if (state.elements.size > 500) state.elements.delete(state.elements.values().next().value);
+  }
+
+  function ctTimestampDetailContext(article) {
+    if (!/^\/(?:post|posts)\/[^/]+\/?$/.test(location.pathname) && !/\/status\/[^/]+\/?$/.test(location.pathname)) return null;
+    // Tweet keeps the old feed mounted while a route is loading. Its URL and
+    // heading alone cannot identify the actual conversation panel.
+    const panel = article.closest('div.animate-fadeIn.flex.flex-col');
+    const scroll = article.closest('div.min-h-0.flex-1.overflow-y-auto');
+    const footer = panel?.lastElementChild;
+    return panel && scroll?.parentElement === panel &&
+      panel.querySelector(':scope > div.shrink-0 > div.sticky > button[aria-label="Back"],:scope > div.shrink-0 > div.sticky > button[aria-label="戻る"]') &&
+      footer?.matches('div.shrink-0.z-20.border-t') && footer.querySelector('[role="form"] textarea') ? panel : null;
+  }
+
+  function ctTimestampPatchExactPostTime(root = document) {
+    const scope = root?.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const articles = new Set();
+    if (scope instanceof Element) {
+      const parent = scope.closest('article');
+      if (parent) articles.add(parent);
+    }
+    scope?.querySelectorAll?.('article').forEach(article => articles.add(article));
+    for (const article of articles) {
+      if (!article.isConnected) continue;
+      const stamps = [...article.querySelectorAll('.ct-detail-post-time')]
+        .filter(stamp => stamp.closest('article') === article);
+      const creation = ctTimestampCreationNode(article);
+      if (creation) ctTimestampTrackRelative(creation);
+      const source = ctTimestampDetailContext(article) ? creation : null;
+      const value = source && ctTimestampNativeValue(source);
+      const date = value && ctTimestampParse(value);
+      if (!date) {
+        stamps.forEach(stamp => stamp.remove());
+        continue;
+      }
+      const stamp = stamps.shift() || document.createElement('div');
+      stamps.forEach(extra => extra.remove());
+      stamp.className = 'ct-detail-post-time';
+      stamp.dataset.ctOwned = 'true';
+      stamp.dataset.ctCreatedAt = value;
+      const text = ctTimestampExactText(date);
+      if (stamp.textContent !== text) stamp.textContent = text;
+      // Insert in this post's content column, before its own engagement row.
+      // The same article may contain a full inline reply thread below that row.
+      let column = source.parentElement;
+      while (column && column !== article && !column.parentElement?.matches('div.flex.items-start.gap-3')) column = column.parentElement;
+      if (!column || column === article) column = article;
+      const action = [...column.querySelectorAll('[data-testid="tweet-like-action"],[data-testid="tweet-open-comment-action"],[data-testid="tweet-comment-action"]')]
+        .find(button => button.closest('article') === article);
+      let actionRow = action;
+      while (actionRow && actionRow.parentElement !== column) actionRow = actionRow.parentElement;
+      if (actionRow) {
+        if (stamp.nextSibling !== actionRow || stamp.parentElement !== column) column.insertBefore(stamp, actionRow);
+      } else if (stamp.parentElement !== column) column.append(stamp);
+    }
+    ctTimestampRefreshRelative();
+  }
+
     // Profile additions use Tweet's verified posts GET. Favorites are browser-local
   // snapshots, scoped to the signed-in account; no favorite-history endpoint is assumed.
   const ctProfileState = {
@@ -2546,7 +2749,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       name: typeof item.name === 'string' ? item.name.slice(0, 200) : '',
       text: typeof item.text === 'string' ? item.text.slice(0, 10000) : '',
       avatar: ctProfileURL(item.avatar), savedAt: Number.isFinite(Number(item.savedAt)) && Number(item.savedAt) >= 0 ? Number(item.savedAt) : 0,
-      createdAt: typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) ? item.createdAt : '',
+      createdAt: typeof item.createdAt === 'string' && (ctTimestampParse(item.createdAt) || Number.isFinite(Date.parse(item.createdAt))) ? item.createdAt : '',
       href: `${location.origin}/post/${encodeURIComponent(item.id)}`,
       media: Array.isArray(item.media) ? item.media.slice(0, 16).filter(asset =>
         ['image', 'video'].includes(asset?.type) && ctProfileURL(asset.url)).map(asset => ({
@@ -2607,11 +2810,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (post?.hasLiked !== true || !ctProfileId(post.id) || !username ||
           (expectedHandle && username !== expectedHandle) || post.isDeleted || post.status === 'MUTED' ||
           post.isRepost || post.originalPostId || post.repostedBy || removed?.has(post.id) || typeof post.text !== 'string') continue;
-      const createdAt = post.createdAt ?? post.created_at;
+      // The native client prefers created_at. A missing or invalid alias must
+      // not hide a valid creation time or replace a known time with savedAt.
+      const createdAt = ctTimestampPostValue(post) || known.get(post.id)?.createdAt || '';
       recovered.set(post.id, { id: post.id, username,
         name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : username,
         avatar: ctProfileURL(post.authorAvatar), text: post.text.slice(0, 10000),
-        createdAt: typeof createdAt === 'string' && Number.isFinite(Date.parse(createdAt)) ? createdAt : '',
+        createdAt,
         savedAt: known.get(post.id)?.savedAt ?? Date.now(), media: ctProfileMediaAssets(post) });
     }
     if (!recovered.size || expectedUid !== ctProfileUID()) return 0;
@@ -2725,6 +2930,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-meta{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;font-size:14px;line-height:20px}
       .ct-profile-name{font-weight:700;color:inherit;text-decoration:none}
       .ct-profile-handle,.ct-profile-time{font-size:12px;color:var(--color-tl-app-text-muted,#657786);text-decoration:none}
+      .ct-profile-time{white-space:nowrap}
       .ct-profile-text{font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 10px}
       .ct-profile-gallery{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;border-radius:4px;scrollbar-width:thin}
       .ct-profile-photo{display:block;flex:0 0 100%;min-width:0;padding:0;background:var(--color-tl-app-bg,#f5f8fa);border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;overflow:hidden;scroll-snap-align:start;cursor:zoom-in}
@@ -3025,9 +3231,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (item.username) {
       const handle = document.createElement('span'); handle.className = 'ct-profile-handle'; handle.textContent = '@' + item.username; meta.append(handle);
     }
-    if (Number.isFinite(Date.parse(item.createdAt))) {
+    const created = ctTimestampParse(item.createdAt);
+    if (created) {
       const time = document.createElement('time'); time.className = 'ct-profile-time'; time.dateTime = item.createdAt;
-      time.textContent = new Date(item.createdAt).toLocaleDateString(CT_LOCALE === 'ja' ? 'ja-JP' : 'en-US'); meta.append(time);
+      const locale = CT_LOCALE === 'ja' ? 'ja-JP' : 'en-US';
+      time.textContent = created.toLocaleString(locale, { year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+      time.title = `${ctTimestampExactText(item.createdAt)} (${item.createdAt})`; meta.append(time);
     }
     main.append(meta);
     if (item.text) { const text = document.createElement('p'); text.className = 'ct-profile-text'; text.textContent = item.text; main.append(text); }
@@ -3237,7 +3447,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           !ctProfileId(item.id) || typeof item.username !== 'string' || (item.username && !ctProfileHandle(item.username)) ||
           typeof item.name !== 'string' || item.name.length > 200 || typeof item.text !== 'string' || item.text.length > 10000 ||
           !safeURL(item.avatar) || typeof item.savedAt !== 'number' || !Number.isFinite(item.savedAt) || item.savedAt < 0 ||
-          typeof item.createdAt !== 'string' || (item.createdAt && !Number.isFinite(Date.parse(item.createdAt))) ||
+          typeof item.createdAt !== 'string' || (item.createdAt && !ctTimestampParse(item.createdAt) && !Number.isFinite(Date.parse(item.createdAt))) ||
           !Array.isArray(item.media) || item.media.length > 16 || item.media.some(asset =>
             !keys(asset, ['type', 'url', 'poster']) || !['image', 'video'].includes(asset.type) ||
             !asset.url || !safeURL(asset.url) || !safeURL(asset.poster))) throw new Error('format');
@@ -3284,8 +3494,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctProfileFavoriteDateRange(items) {
     let firstDate = Infinity; let lastDate = -Infinity; let dated = 0;
     for (const item of items) {
-      const date = Date.parse(item.createdAt);
-      if (!Number.isFinite(date)) continue;
+      const date = ctTimestampParse(item.createdAt)?.getTime();
+      if (date === undefined) continue;
       firstDate = Math.min(firstDate, date); lastDate = Math.max(lastDate, date); dated++;
     }
     if (!dated) return ctProfileText('保存した投稿の日付範囲：日付未確認', 'Saved Tweet date range: dates unavailable');
@@ -3465,7 +3675,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return { id: post.id, username: user,
       name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : user,
       avatar: ctProfileURL(post.authorAvatar), text: typeof post.text === 'string' ? post.text.slice(0, 10000) : '',
-      createdAt: typeof (post.createdAt ?? post.created_at) === 'string' ? (post.createdAt ?? post.created_at) : '',
+      createdAt: ctTimestampPostValue(post),
       href: '/post/' + encodeURIComponent(post.id), media };
   }
   async function ctProfileLoadMedia(refresh = false) {
@@ -3496,7 +3706,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         ctProfileUID() === auth.uid && ctProfileContext()?.user === user;
       const publish = () => {
         state.items = [...new Map([...state.postItems, ...state.replyItems].map(item => [item.id, item])).values()]
-          .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+          .sort((a, b) => (ctTimestampParse(b.createdAt)?.getTime() ?? -Infinity) - (ctTimestampParse(a.createdAt)?.getTime() ?? -Infinity));
         state.error = [state.postError, state.replyError].filter(Boolean).join(' ');
         ctProfileRenderMedia();
       };
@@ -3529,7 +3739,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         } else {
           const replies = repliesJSON.replies.map(item => item?.post).filter(post =>
             ctProfileId(post?.id) && ctProfileHandle(post.authorUsername) === user)
-            .sort((a, b) => (Date.parse(b.createdAt ?? b.created_at) || 0) - (Date.parse(a.createdAt ?? a.created_at) || 0));
+            .sort((a, b) => (ctTimestampPostDate(b)?.getTime() ?? -Infinity) - (ctTimestampPostDate(a)?.getTime() ?? -Infinity));
           const checked = replies.slice(0, 100);
           ctProfileRememberLikedPosts(checked, auth.uid, user);
           state.replyItems = checked.map(post => ctProfilePostItem(post, user)).filter(Boolean);
@@ -3610,8 +3820,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   function ctFavoriteRelativeTimeMatches(text, createdAt, observedAt) {
-    const created = Date.parse(createdAt);
-    if (!Number.isFinite(created)) return false;
+    const created = ctTimestampParse(createdAt)?.getTime();
+    if (!Number.isFinite(created) || !Number.isFinite(observedAt)) return false;
     const value = text.trim();
     const short = /^(\d+)([mhd])$/.exec(value);
     const japanese = /^(\d+)(分|時間|日)前$/.exec(value);
@@ -3655,8 +3865,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   function ctFavoriteCandidate(article) {
     const timestamp = [...article.querySelectorAll('span.text-tl-app-text-muted.hover\\:underline[title]')].find(el =>
-      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote') &&
-      /^\d{4}-\d{2}-\d{2}T/.test(el.title) && Number.isFinite(Date.parse(el.title)));
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border') &&
+      !!ctTimestampParse(el.title));
     const known = snapshotFavorite(article);
     if (known) return { ...known, createdAt: timestamp?.title || '', media: ctFavoriteDOMMedia(article) };
     const username = validUser(articleAuthor(article));
@@ -3674,7 +3884,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     // Do not infer its identity from the translated text.
     if (!timestamp && translated) return null;
     const author = [...article.querySelectorAll('button.truncate.font-bold')].find(el =>
-      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote'));
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border'));
     return { username, name: author?.textContent || username, text: body.textContent,
       avatar: articleAvatar(article), createdAt: timestamp?.title || '', savedAt: Date.now(),
       relativeText: replyTime?.textContent || '', observedAt: Date.now(), parentId, translated };
@@ -3735,7 +3945,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   async function ctResolveFavorite(candidate, uid, deadline = Infinity) {
-    if (!candidate || !uid) return null;
+    if (!candidate || !uid || (candidate.createdAt && !ctTimestampParse(candidate.createdAt))) return null;
     const auth = await getAuth();
     if (!auth?.token || auth.uid !== uid) return null;
     if (candidate.id) return candidate;
@@ -3747,12 +3957,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       !post.isDeleted && !post.originalPostId && !post.isRepost &&
       post.status !== 'MUTED' &&
       post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&
-      (candidate.createdAt ? Date.parse(post.createdAt ?? post.created_at) === Date.parse(candidate.createdAt) :
-        ctFavoriteRelativeTimeMatches(candidate.relativeText, post.createdAt ?? post.created_at, candidate.observedAt)) &&
+      (candidate.createdAt ? ctTimestampPostDate(post)?.getTime() === ctTimestampParse(candidate.createdAt)?.getTime() :
+        ctFavoriteRelativeTimeMatches(candidate.relativeText, ctTimestampPostValue(post), candidate.observedAt)) &&
       typeof post.text === 'string' && (candidate.translated || post.text === candidate.text));
     const unique = [...new Map(matches.map(post => [post.id, post])).values()];
     if (unique.length !== 1) return null;
-    return { ...candidate, id: unique[0].id, text: unique[0].text, createdAt: unique[0].createdAt ?? unique[0].created_at,
+    return { ...candidate, id: unique[0].id, text: unique[0].text, createdAt: ctTimestampPostValue(unique[0]),
       href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
       avatar: ctProfileURL(unique[0].authorAvatar) || candidate.avatar,
       media: ctProfileMediaAssets(unique[0]) };
@@ -3785,7 +3995,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           if (!json || json.success === false || json.error || post?.id !== snapshot.id || post.hasLiked !== true ||
               post.isDeleted || post.status === 'MUTED' || post.isRepost || post.originalPostId ||
               post.authorUsername?.toLowerCase() !== snapshot.username.toLowerCase() || typeof post.text !== 'string') snapshot = null;
-          else snapshot = {...snapshot,text:post.text,createdAt:post.createdAt ?? post.created_at,
+          else snapshot = {...snapshot,text:post.text,createdAt:ctTimestampPostValue(post),
             media:ctProfileMediaAssets(post),avatar:ctProfileURL(post.authorAvatar) || snapshot.avatar};
         } else snapshot = null;
         const current = await getAuth();
@@ -3824,6 +4034,179 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         if (favoritesActive) renderFavoritesPanel();
       } catch { /* Native favorite actions remain available if a read fails. */ }
     }, 450);
+  }
+
+    // Inline replies have no creation ISO in the DOM. Verify a unique original
+  // author/body/age match against one complete native parent-replies GET before
+  // supplying a clock source. One opened container gets one bounded request;
+  // minute-by-minute clock updates never fetch replies again.
+  const ctReplyTimeBindings = new WeakMap();
+  const ctReplyTimeContainers = new WeakMap();
+  const ctReplyTimePending = new Set();
+
+  function ctReplyTimeUID() {
+    const uid = typeof ctNetworkState !== 'undefined' ? ctNetworkState.authUID : null;
+    return typeof uid === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(uid) ? uid : null;
+  }
+
+  function ctReplyTimeActive() {
+    return !document.hidden && (typeof ctPageActive === 'undefined' || ctPageActive);
+  }
+
+  function ctReplyTimeVisible(article) {
+    if (!article?.isConnected || article.closest('[aria-hidden="true"],[hidden],[data-ct-owned],[data-ct-local-ui]')) return false;
+    const bounds = article.getBoundingClientRect();
+    return bounds.height > 0 && bounds.width > 0 && bounds.bottom > 0 && bounds.top < innerHeight;
+  }
+
+  function ctReplyTimeCandidate(el) {
+    if (!el?.matches('span.text-tl-app-text-muted.shrink-0:not([title])') || el.closest('button,a,[role="button"],blockquote,[aria-label^="Quoted post"]')) return null;
+    const article = el.closest('article');
+    const inline = article?.closest('[id^="inline-replies-"]');
+    const inlineId = inline?.id.match(/^inline-replies-([A-Za-z0-9_-]{1,160})$/)?.[1];
+    const panel = !inline && article ? ctTimestampDetailContext(article) : null;
+    const container = inline || panel?.querySelector(':scope > div.min-h-0.flex-1.overflow-y-auto');
+    const parentId = inlineId || (panel ? location.pathname.match(/^\/(?:post|posts)\/([A-Za-z0-9_-]{1,160})\/?$/)?.[1] : null);
+    const header = el.parentElement;
+    const author = header?.querySelector(':scope > button.font-bold.truncate');
+    const separator = el.previousElementSibling;
+    const body = header?.nextElementSibling;
+    if (!article || !parentId || !ctReplyTimeAgeKey(el.textContent) || !header?.matches('div.flex.items-center.gap-1.min-w-0') ||
+        !author || !separator?.matches('span.text-tl-app-text-muted') || separator.textContent.trim() !== '·' ||
+        !header.querySelector('button > svg.lucide-ellipsis-vertical') ||
+        !body?.matches('p.whitespace-pre-wrap.break-words') || body.closest('article') !== article ||
+        [...article.querySelectorAll('button')].some(button => button.closest('article') === article &&
+          /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()))) return null;
+    const native = ctFavoriteCandidate(article);
+    if (!native || native.translated || native.parentId && native.parentId !== parentId ||
+        typeof native.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(native.username) ||
+        typeof native.text !== 'string' || native.text !== body.textContent) return null;
+    return { el, article, container, panel, inline: !!inline, parentId, body, author, username: native.username.toLowerCase(),
+      text: body.textContent, authorLabel: author.getAttribute('aria-label') || '', authorText: author.textContent,
+      initialText: el.textContent, observedAt: Date.now(), uid: ctReplyTimeUID(), path: location.pathname + location.search };
+  }
+
+  function ctReplyTimeSame(candidate, checkText = true) {
+    if (!ctReplyTimeActive() || !candidate.el.isConnected || candidate.uid !== ctReplyTimeUID() ||
+        candidate.path !== location.pathname + location.search || candidate.el.closest('article') !== candidate.article ||
+        candidate.el.closest('button,a,[role="button"],blockquote,[aria-label^="Quoted post"],[data-ct-owned],[data-ct-local-ui]') ||
+        (candidate.inline ? candidate.article.closest('[id^="inline-replies-"]') !== candidate.container ||
+          candidate.container.id !== 'inline-replies-' + candidate.parentId :
+          ctTimestampDetailContext(candidate.article) !== candidate.panel ||
+          candidate.panel?.querySelector(':scope > div.min-h-0.flex-1.overflow-y-auto') !== candidate.container) ||
+        candidate.el.parentElement?.nextElementSibling !== candidate.body ||
+        candidate.body.textContent !== candidate.text || !candidate.author.isConnected ||
+        (candidate.author.getAttribute('aria-label') || '') !== candidate.authorLabel ||
+        candidate.author.textContent !== candidate.authorText ||
+        [...candidate.article.querySelectorAll('button')].some(button => button.closest('article') === candidate.article &&
+          /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()))) return false;
+    const expectedText = candidate.lastOwnText ?? candidate.initialText;
+    if (checkText && candidate.el.textContent !== expectedText &&
+        (!ctReplyTimeAgeKey(expectedText) || ctReplyTimeAgeKey(candidate.el.textContent) !== ctReplyTimeAgeKey(expectedText))) return false;
+    return candidate.el.matches('span.text-tl-app-text-muted.shrink-0:not([title])') &&
+      candidate.author.closest('article') === candidate.article &&
+      (articleAuthor(candidate.article) || '').toLowerCase() === candidate.username;
+  }
+
+  function ctReplyTimeAgeKey(text) {
+    const value = text.trim();
+    const short = /^(\d+)([mhd])$/.exec(value);
+    const japanese = /^(\d+)(分|時間|日)前$/.exec(value);
+    const match = short || japanese;
+    if (match) return `${Number(match[1])}:${({ m: 'm', h: 'h', d: 'd', 分: 'm', 時間: 'h', 日: 'd' })[match[2]]}`;
+    return /^(?:Just now|たった今|今)$/.test(value) ? 'now' : '';
+  }
+
+  function ctReplyTimeSource(el) {
+    // Hidden-tab clock suspension does not discard an already verified date.
+    if (!ctReplyTimeActive()) return '';
+    const binding = ctReplyTimeBindings.get(el);
+    if (!binding || !ctReplyTimeSame(binding)) {
+      if (binding) ctReplyTimeBindings.delete(el);
+      return '';
+    }
+    return binding.createdAt;
+  }
+
+  function ctReplyTimeRendered(el, text) {
+    const binding = ctReplyTimeBindings.get(el);
+    if (binding && el.textContent === text && ctReplyTimeSame(binding, false)) binding.lastOwnText = text;
+  }
+
+  function ctReplyTimeCompletePosts(json, parentId) {
+    if (!json || json.success === false || json.error || !Array.isArray(json.replies) ||
+        json.replies.length > 50 || json.nextCursor !== null) return null;
+    const ids = new Set();
+    for (const post of json.replies) {
+      if (!post || typeof post !== 'object' || Array.isArray(post) ||
+          typeof post.id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(post.id) || ids.has(post.id) ||
+          typeof post.authorUsername !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(post.authorUsername) ||
+          typeof post.text !== 'string' || !ctTimestampPostValue(post) ||
+          (post.parentId != null && post.parentId !== parentId)) return null;
+      ids.add(post.id);
+    }
+    return json.replies;
+  }
+
+  function ctReplyTimeBind(candidate, posts) {
+    if (!ctReplyTimeSame(candidate) || !ctReplyTimeVisible(candidate.article)) return false;
+    const matches = posts.filter(post => !post.isDeleted && post.status !== 'MUTED' && !post.isRepost && !post.originalPostId &&
+      post.authorUsername.toLowerCase() === candidate.username && post.text === candidate.text &&
+      ctFavoriteRelativeTimeMatches(candidate.initialText, ctTimestampPostValue(post), candidate.observedAt));
+    if (matches.length !== 1) return false;
+    ctReplyTimeBindings.set(candidate.el, { ...candidate, id: matches[0].id, createdAt: ctTimestampPostValue(matches[0]) });
+    return true;
+  }
+
+  async function ctReplyTimeLoad(container, candidates) {
+    const first = candidates[0];
+    let record = ctReplyTimeContainers.get(container);
+    if (!record || record.uid !== first.uid || record.path !== first.path || record.parentId !== first.parentId) {
+      if (ctReplyTimePending.size >= 4) return;
+      // A node inserted after this complete response could be a newly added
+      // duplicate body. Do not assign it an older reply from the short cache.
+      const elements = new Set([...container.querySelectorAll('span.text-tl-app-text-muted.shrink-0:not([title])')].slice(0, 50));
+      record = { uid: first.uid, path: first.path, parentId: first.parentId, at: Date.now(), posts: null, pending: null, elements, usedElements: new WeakSet() };
+      ctReplyTimeContainers.set(container, record);
+      ctReplyTimePending.add(record);
+      record.pending = (async () => {
+        const auth = await getAuth();
+        if (!auth?.token || auth.uid !== record.uid || !ctReplyTimeSame(first) || ctReplyTimeContainers.get(container) !== record) return;
+        const json = await requestJSON(API_ORIGIN + '/api/posts/' + encodeURIComponent(record.parentId) + '/replies?limit=50',
+          { Authorization: `Bearer ${auth.token}` });
+        const current = await getAuth();
+        if (current?.uid !== record.uid || !ctReplyTimeSame(first) || ctReplyTimeContainers.get(container) !== record || Date.now() - record.at >= 60000) return;
+        record.posts = ctReplyTimeCompletePosts(json, record.parentId);
+      })().catch(() => {}).finally(() => { record.pending = null; ctReplyTimePending.delete(record); });
+    }
+    if (record.pending) await record.pending;
+    if (!record.posts || Date.now() - record.at >= 60000 || ctReplyTimeContainers.get(container) !== record) return;
+    let changed = false;
+    for (const candidate of candidates) if (record.elements.has(candidate.el) && !record.usedElements.has(candidate.el) && ctReplyTimeBind(candidate, record.posts)) {
+      record.usedElements.add(candidate.el); changed = true;
+    }
+    if (changed && typeof ctScheduleScan === 'function') ctScheduleScan();
+  }
+
+  function ctReplyTimesEnhance(root = document) {
+    if (!ctReplyTimeActive() || !ctReplyTimeUID()) return Promise.resolve();
+    const scope = root?.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const elements = new Set();
+    if (scope?.matches?.('span.text-tl-app-text-muted.shrink-0:not([title])')) elements.add(scope);
+    scope?.querySelectorAll?.('span.text-tl-app-text-muted.shrink-0:not([title])').forEach(el => elements.add(el));
+    const groups = new Map(); let count = 0;
+    for (const el of elements) {
+      if (count >= 20) break;
+      if (ctReplyTimeSource(el)) continue;
+      const candidate = ctReplyTimeCandidate(el);
+      if (!candidate || !ctReplyTimeVisible(candidate.article)) continue;
+      if (!groups.has(candidate.container)) {
+        if (groups.size >= 4) continue;
+        groups.set(candidate.container, []);
+      }
+      groups.get(candidate.container).push(candidate); count++;
+    }
+    return Promise.all([...groups].map(([container, candidates]) => ctReplyTimeLoad(container, candidates)));
   }
 
     // Recover server-confirmed Favorites through the two existing feed reads.
@@ -6903,9 +7286,7 @@ if (/^just\s+now$/i.test(t)) {
     if (!el?.matches('span[title]') || !el.closest('article') ||
         el.closest('button,a,[role="button"]') ||
         !el.classList.contains('text-tl-app-text-muted') || !el.classList.contains('hover:underline')) return false;
-    const title = el.getAttribute('title');
-    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(title) &&
-      Number.isFinite(Date.parse(title));
+    return !!ctTimestampParse(el.getAttribute('title'));
   }
 
   function isNativeReplyTimestamp(el) {
@@ -6991,9 +7372,7 @@ if (/^just\s+now$/i.test(t)) {
     if (!el?.matches('span.text-tl-app-text-muted[title]') ||
         !el.closest('article') || el.closest('button,a,[role="button"]') ||
         !/^(?:edited|編集済み)$/i.test(clean(el.textContent))) return false;
-    const title = el.getAttribute('title');
-    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(title) ||
-        !Number.isFinite(Date.parse(title))) return false;
+    if (!ctTimestampParse(el.getAttribute('title'))) return false;
     // Both native tweet and inline-reply headers place the indicator directly
     // after a separator, alongside their author button and creation timestamp.
     const header = el.parentElement;
@@ -7968,52 +8347,9 @@ if (/^just\s+now$/i.test(t)) {
 
 
   function patchExactPostTime(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const articles = [];
-    if (scope instanceof Element && scope.matches('article')) articles.push(scope);
-    scope.querySelectorAll?.('article').forEach(a => articles.push(a));
-
-    for (const article of articles) {
-      if (!article.isConnected) continue;
-
-      // Only add the X-style timestamp to the Tweet detail/conversation view.
-      // Feed cards keep their compact relative timestamp.
-      const path = location.pathname;
-      const isDetail = /\/status\/|\/post\/|\/posts\//i.test(path) ||
-        !!article.querySelector('[data-testid*="reply" i] textarea, textarea[placeholder*="reply" i]');
-      if (!isDetail) continue;
-      if (article.querySelector('.ct-detail-post-time')) continue;
-
-      const timeEl = article.querySelector('time[datetime]');
-      let date = timeEl ? new Date(timeEl.getAttribute('datetime') || '') : null;
-
-      if (!date || Number.isNaN(date.getTime())) {
-        const candidates = [...article.querySelectorAll('[title],[datetime]')];
-        for (const el of candidates) {
-          const raw = el.getAttribute('datetime') || el.getAttribute('title') || '';
-          const d = new Date(raw);
-          if (!Number.isNaN(d.getTime())) { date = d; break; }
-        }
-      }
-      if (!date || Number.isNaN(date.getTime())) continue;
-
-      const stamp = document.createElement('div');
-      stamp.className = 'ct-detail-post-time';
-      const timeText = new Intl.DateTimeFormat('ja-JP', {
-        hour:'2-digit', minute:'2-digit', hour12:false
-      }).format(date);
-      const dateText = new Intl.DateTimeFormat('ja-JP', {
-        year:'numeric', month:'long', day:'numeric'
-      }).format(date);
-      stamp.textContent = `${dateText} · ${timeText}`;
-
-      // Put it below the Tweet body/media and above the action row when possible.
-      const actions = [...article.querySelectorAll('button')].map(b => b.parentElement)
-        .find(el => el && /reply|返信|repost|retweet|リツイート|like|お気に入り/i.test(el.textContent || ''));
-      if (actions?.parentElement) actions.parentElement.insertBefore(stamp, actions);
-      else article.append(stamp);
-    }
+    ctTimestampPatchExactPostTime(root);
   }
+
 
   function patchProfileJoinedDate(root = document) {
     if (!/^\/(?:user\/|profile(?:\/|$))/.test(location.pathname)) return;
@@ -8097,6 +8433,7 @@ if (/^just\s+now$/i.test(t)) {
       patchComposeJapanese(root);
       patchNotificationFollowGrammar(root);
       patchAutoTranslation(root, 'ja');
+      ctReplyTimesEnhance(root);
       patchExactPostTime(root);
       patchInviteJoinedLabels(root);
       patchProfileJoinedDate(root);
@@ -8145,6 +8482,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.16.0 loaded'
+    '🐦 Classic Twitter JP v6.17.0 loaded'
   );
 })();

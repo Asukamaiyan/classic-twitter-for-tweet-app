@@ -1,5 +1,13 @@
 # Changelog
 
+## All distributions v6.17.0 — 2026-10-02
+
+- Separate each post's creation time from Edited tooltips, quotes and nested replies. Require the verified conversation panel for detail dates, refresh changed sources, and remove stale or unverified detail stamps.
+- Refresh native post and verified reply ages while visible, with minute-boundary updates and background/page lifecycle suspension. Keep Japanese time labels and English labels appropriate to each edition.
+- Verify title-less replies through one complete, bounded native parent-replies GET per opened container. Require a unique original author/body/age match; reject ambiguous, translated, incomplete and stale results. Clock updates send no API requests.
+- Parse explicit-zone creation timestamps with calendar validation and standard millisecond normalization. Keep API fractional timestamps and legacy local backup data; do not infer creation time from edits, parent posts or saved time.
+- Display browser-local dates and clock times in profile Media/Favorites. Prefer a valid native `created_at` alias, fall back to valid `createdAt`, and keep unknown dates out of time displays and date-range calculations.
+
 ## All distributions v6.16.0 — 2026-10-02
 
 - Remove Favorites search/filter/sort controls as requested. Display saved records directly with account-local counts, dated available-record range and read-only recovery scope/progress; retain pagination and backups.

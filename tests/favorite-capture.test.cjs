@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/favorite-capture.js'), 'utf8');
+const timestampSource = fs.readFileSync(require('node:path').join(__dirname, '../src/timestamps.js'), 'utf8');
 const date = '2026-09-30T07:00:00.000Z';
 function harness(t) {
   const dom = new JSDOM(`<article><button class="truncate font-bold">Alice</button>
@@ -28,7 +29,7 @@ function harness(t) {
   w.renderFavoritesPanel = () => {};
   w.ctProfileMediaAssets = post => post.media_assets || [];
   w.ctProfileURL = value => /^https:\/\//.test(value || '') ? value : '';
-  w.eval(`const API_ORIGIN='https://api.tweet.app'; const ctNetworkState={authUID:'account-a'};
+  w.eval(`const API_ORIGIN='https://api.tweet.app'; const ctNetworkState={authUID:'account-a'}; const CT_LOCALE='ja'; ${timestampSource}
     let favoritesActive=false; ${source}; window.identity=ctNetworkState;
     window.qa={ctFavoriteCandidate,ctResolveFavorite,ctCaptureFavoriteClick,ctRestoreVisibleFavorites,ctFavoriteRelativeTimeMatches};`);
   f.article = f.doc.querySelector('article');
@@ -148,4 +149,27 @@ test('loaded-Favorites recovery rejects an optimistic Like that the fresh detail
   f.button.setAttribute('aria-pressed','true');f.response={posts:[f.post()],post:{...f.post(),hasLiked:false}};
   const result=await f.w.qa.ctRestoreVisibleFavorites();assert.equal(result.saved,0);assert.equal(result.unresolved,1);
   assert.equal(f.saves.length,0);assert.match(f.requests.at(-1),/\/api\/posts\/post-a$/);
+});
+
+
+test('Favorite creation matching uses valid native snake_case before camelCase or edited time', async t => {
+  const f=harness(t);
+  f.response={posts:[{...f.post(),createdAt:'2026-09-29T07:00:00.000Z',created_at:date,editedAt:'2026-10-02T09:00:00Z'}]};
+  const item=await f.w.qa.ctResolveFavorite(f.candidate(),'account-a');
+  assert.equal(item.id,'post-a'); assert.equal(item.createdAt,date);
+});
+test('reply matching rejects ambiguous local-time and rolled-over dates instead of using the parent or edit date', async t => {
+  const f=harness(t); replyFixture(f);
+  const valid=new Date(Date.now()-2.5*3600000).toISOString();
+  f.response={replies:[{...f.post('reply-a'),text:'My reply',createdAt:'2026-02-30T07:00:00Z',editedAt:valid}]};
+  assert.equal(await f.w.qa.ctResolveFavorite(f.candidate(),'account-a'),null);
+  assert.equal(f.w.qa.ctFavoriteRelativeTimeMatches('2h','2026-10-02T12:00:00',Date.now()),false);
+  f.response={replies:[{...f.post('reply-a'),text:'My reply',created_at:'',createdAt:valid}]};
+  assert.equal((await f.w.qa.ctResolveFavorite(f.candidate(),'account-a')).createdAt,valid);
+});
+
+test('malformed exact candidate timestamps cannot match another invalid API creation timestamp', async t => {
+  const f=harness(t); f.response={posts:[{...f.post(),createdAt:'not-a-date'}]};
+  assert.equal(await f.w.qa.ctResolveFavorite({...f.candidate(),createdAt:'not-a-date'},'account-a'),null);
+  assert.equal(f.requests.length,0);
 });

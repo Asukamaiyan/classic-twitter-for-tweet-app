@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.16.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.17.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 全6版をGreasy Forkで6.16.0に更新済み。通常のインストールURLのコードが検証済みファイルと一致することも確認しました。
+**配布状況:** 6.17.0は全6版の公開確認中です。
 
 ## 導入・更新
 
@@ -54,6 +54,7 @@
 ## 主な機能
 
 - 星のお気に入り、四角に近いアイコン、スマホ・PCに合わせた表示と短い動き。「便利ツール」で標準表示に戻せます。
+- 投稿と確認できた返信の経過時間を更新し、詳細・写真動画・お気に入りに投稿日時を表示。ブラウザの時間帯を使い、編集日時や親投稿の日時を混ぜません。日時不明や曖昧な返信は推測しません。
 - 通知の種類フィルター、通知アイコンごとのプロフィール移動、鮮明なバッジ。標準の返信通知・投票・フォローバック操作を使います。
 - 写真の複数選択とスライド、プロフィールの写真・動画／お気に入り欄。拡大写真は画面中央に表示し、動画の全画面操作は同じプレーヤー・再生位置・音量を維持します。Safari版は写真・動画の長押しで配信ファイル情報を表示します。
 - 保存した検索・投稿リンク、任意のキーワードで折りたたみ、日本／世界ニュース、手動・任意の自動翻訳。自動翻訳は初期状態でオフです。
@@ -103,6 +104,8 @@ You need **a browser, a userscript manager, and one English script** from the ta
 **Enable only one edition. Disable the previous edition when switching.**
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
+
+Post and verified reply ages update as time passes. Creation dates use your browser’s time zone, with dates and clock times in conversation details and local Media/Favorites. Edit dates and parent-post dates are kept separate; unknown or ambiguous reply times are not guessed.
 
 Use Tools → Search older posts to recover currently confirmed Favorites through older For you/Following pages (up to 100 pages per run; pause/continue while the tab is visible). This covers returned timelines and cannot guarantee your entire history. Your profile displays saved Favorites directly, without search/filter/sort controls. It shows counts, saved Tweet date range, recovery coverage and progress, with same-account JSON backups/import. There is no 500-record eviction; storage failures require a backup before closing. Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync automatically across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Physical Android/Tampermonkey and Safari/Stay acceptance remain unverified.
 
