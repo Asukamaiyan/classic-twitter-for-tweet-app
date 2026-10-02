@@ -12,7 +12,7 @@
 
 **未検証:** 実Tampermonkey／Stayの更新適用、Safari＋Stay／Android Firefox実機、実サービスの新コードによる返信APIと通常の長時間操作。投稿・アップロード・お気に入り・投票・ミュート・フォローのサービス操作はしていません。サーバーの速度・通信制限・全お気に入り履歴の取得範囲は変更していません。
 
-**配布:** 6.18.0の検証済み6版をGitHub／Greasy Forkへ反映予定です。
+**配布:** GitHub [PR #16](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/16)の6.18.0と同じ検証済みコードを、Greasy Forkの全6版へ更新。各画面の6.18.0と導入・更新案内、既存の限定公開設定を確認しました。通常のインストールURLを独立取得し、全6版HTTP 200／6.18.0、Greasy Fork追加のdownloadURL／updateURLと改行・末尾空白だけを除いてローカルコードとSHA-256・全バイトが一致しました。
 
 ---
 
