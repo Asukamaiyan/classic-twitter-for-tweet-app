@@ -63,7 +63,7 @@ function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', red
       set(v) { value.set.call(this, v); if (this.type === 'file' && v === '') files.set(this, []); }, configurable: true
     });
   }
-  window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${source}\nwindow.qa={ctMediaEnhance,ctMediaUploads,ctMediaCarousels};`);
+  window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${source}\nwindow.qa={ctMediaEnhance,ctMediaUploads,ctMediaCarousels,ctMediaVideos,ctMediaEnhanceVideo};`);
   t.after(() => window.close());
   const f = { dom, window, document: window.document, qa: window.qa, uploads: [], submitted: 0, closed: 0 };
   f.enhance = () => f.qa.ctMediaEnhance();
@@ -383,4 +383,278 @@ test('viewer navigation follows an asynchronous native React src update without 
   assert.equal(image.src, images[1].src);
   next.click(); await settle(() => dialog.querySelector('[role="status"]').textContent === '3 / 3');
   assert.equal(image.src, images[2].src); assert.equal(next.disabled, true);
+});
+
+function nativeVideo(f, { paused = false, standard = true, safari = false, deny = false } = {}) {
+  const video = f.document.querySelector('video');
+  let playing = !paused, fullscreen = null;
+  const calls = { pause: 0, play: 0, request: 0, exit: 0 };
+  Object.defineProperties(video, {
+    paused: { configurable: true, get: () => !playing },
+    currentSrc: { configurable: true, get: () => video.src }
+  });
+  Object.defineProperty(f.document, 'fullscreenElement', { configurable: true, get: () => fullscreen });
+  video.currentTime = 12.5; video.muted = false; video.volume = .35; video.playbackRate = 1.5;
+  const nativePause = () => {
+    playing = false;
+    video.dispatchEvent(new f.window.Event('pause'));
+  };
+  video.pause = function () { calls.pause++; nativePause(); };
+  video.play = function () { calls.play++; playing = true; video.dispatchEvent(new f.window.Event('play')); return Promise.resolve(); };
+  const enter = () => {
+    fullscreen = video;
+    f.document.dispatchEvent(new f.window.Event('fullscreenchange'));
+  };
+  const exit = () => {
+    fullscreen = null;
+    f.document.dispatchEvent(new f.window.Event('fullscreenchange'));
+  };
+  if (standard) video.requestFullscreen = function () {
+    calls.request++;
+    if (deny) return Promise.reject(new Error('Denied'));
+    assert.equal(this, video);
+    enter();
+    return Promise.resolve();
+  };
+  if (safari) {
+    video.webkitEnterFullscreen = () => { calls.request++; video.dispatchEvent(new f.window.Event('webkitbeginfullscreen')); };
+    video.webkitExitFullscreen = () => { calls.exit++; video.dispatchEvent(new f.window.Event('webkitendfullscreen')); };
+  }
+  f.document.exitFullscreen = () => { calls.exit++; exit(); return Promise.resolve(); };
+  return { video, calls, enter, exit, nativePause, originalPause: video.pause,
+    enterWithoutEvent: () => { fullscreen = video; },
+    fullscreenEvent: () => f.document.dispatchEvent(new f.window.Event('fullscreenchange')),
+    nativePlay: () => { playing = true; video.dispatchEvent(new f.window.Event('play')); } };
+}
+function postedVideoMarkup(extra = '') {
+  return `<main><article><div id="video-shell" class="rounded-2xl overflow-hidden border bg-black">
+    <video src="https://media.tweet.app/test.mp4" class="w-full max-h-[31.875rem] object-contain" controls playsinline loop muted></video>
+    </div>${extra}</article></main>`;
+}
+test('fullscreen uses the original playing video without changing playback, source, sound or its parent', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f);
+  const video = player.video, shell = video.parentElement, time = video.currentTime, source = video.src;
+  f.enhance(); f.enhance();
+  assert.equal(f.document.querySelectorAll('.ct-media-video-fullscreen').length, 1);
+  assert.equal(f.document.querySelector('video'), video);
+  f.document.querySelector('.ct-media-video-fullscreen').click();
+  await Promise.resolve();
+  assert.equal(player.calls.request, 1);
+  assert.equal(player.calls.play, 0);
+  assert.equal(player.calls.pause, 0);
+  assert.equal(video.parentElement, shell);
+  assert.equal(video.src, source);
+  assert.equal(video.currentTime, time);
+  assert.equal(video.paused, false);
+  assert.equal(video.muted, false); assert.equal(video.volume, .35); assert.equal(video.playbackRate, 1.5);
+  assert.equal(video.controls, true);
+  player.exit();
+  assert.equal(video.pause, player.originalPause);
+  assert.equal(video.paused, false); assert.equal(video.currentTime, time);
+});
+test('paused media is never started by fullscreen and page pause calls still work', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f, { paused: true }); f.enhance();
+  f.document.querySelector('.ct-media-video-fullscreen').click();
+  await settle(() => !f.document.querySelector('.ct-media-video-fullscreen').disabled);
+  assert.equal(player.video.paused, true); assert.equal(player.calls.play, 0);
+  player.video.pause(); assert.equal(player.calls.pause, 1);
+  player.exit(); assert.equal(player.video.pause, player.originalPause);
+});
+test('the inline autoplay manager cannot pause an active fullscreen video while native controls can pause and resume it', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); f.enhance();
+  f.document.querySelector('.ct-media-video-fullscreen').click(); await Promise.resolve();
+  player.video.pause();
+  assert.equal(player.calls.pause, 0); assert.equal(player.video.paused, false);
+  player.nativePause();
+  assert.equal(player.video.paused, true);
+  player.video.pause(); assert.equal(player.calls.pause, 1);
+  player.nativePlay();
+  player.video.pause(); assert.equal(player.calls.pause, 1); assert.equal(player.video.paused, false);
+  player.exit();
+  player.video.pause(); assert.equal(player.calls.pause, 2); assert.equal(player.video.paused, true);
+  assert.equal(player.calls.play, 0, 'continuity must not be implemented by repeated play calls');
+});
+test('fullscreen entered from native controls also preserves the same playing node and restores the pause method on exit', t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); f.enhance();
+  player.enter(); player.video.pause();
+  assert.equal(player.calls.request, 0); assert.equal(player.calls.pause, 0); assert.equal(player.video.paused, false);
+  player.exit(); assert.equal(player.video.pause, player.originalPause);
+});
+test('a denied fullscreen request preserves playback and offers a localized standard-control fallback', async t => {
+  const f = harness(t, postedVideoMarkup(), { locale: 'en' }); const player = nativeVideo(f, { deny: true }); f.enhance();
+  const descriptor = Object.getOwnPropertyDescriptor(player.video, 'pause');
+  f.document.querySelector('.ct-media-video-fullscreen').click();
+  await settle(() => !f.document.querySelector('.ct-media-video-fullscreen').disabled);
+  assert.equal(player.video.paused, false); assert.equal(player.calls.play, 0); assert.equal(player.calls.pause, 0);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(player.video, 'pause'), descriptor);
+  assert.equal(f.document.querySelector('.ct-media-video-fullscreen').disabled, false);
+  assert.match(f.document.querySelector('.ct-media-video-status').textContent, /video player controls/);
+  assert.equal(f.qa.ctMediaVideos.get(player.video).guardTimer, null);
+});
+test('Safari fullscreen event paths preserve playback and restore the original pause method', t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f, { standard: false, safari: true }); f.enhance();
+  f.document.querySelector('.ct-media-video-fullscreen').click();
+  assert.equal(player.calls.request, 1); player.video.pause();
+  assert.equal(player.calls.pause, 0); assert.equal(player.video.paused, false);
+  player.video.webkitExitFullscreen();
+  assert.equal(player.video.pause, player.originalPause); assert.equal(player.video.paused, false);
+});
+test('background pauses remain allowed and a removed fullscreen post is stopped without replay', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); f.enhance();
+  f.document.querySelector('.ct-media-video-fullscreen').click(); await Promise.resolve();
+  Object.defineProperty(f.document, 'hidden', { configurable: true, value: true });
+  player.video.pause(); assert.equal(player.calls.pause, 1); assert.equal(player.video.paused, true);
+  Object.defineProperty(f.document, 'hidden', { configurable: true, value: false }); player.nativePlay();
+  player.video.remove(); f.enhance();
+  assert.equal(player.calls.pause, 2); assert.equal(player.calls.exit, 1);
+  assert.equal(player.video.pause, player.originalPause); assert.equal(f.qa.ctMediaVideos.size, 0);
+  assert.equal(player.calls.play, 0);
+});
+test('hiding the page releases the fullscreen guard and timer without forcing playback or reopening media', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); f.enhance();
+  f.document.querySelector('.ct-media-video-fullscreen').click(); await Promise.resolve();
+  const state = f.qa.ctMediaVideos.get(player.video); assert.ok(state.guardTimer);
+  Object.defineProperty(f.document, 'hidden', { configurable: true, value: true });
+  f.document.dispatchEvent(new f.window.Event('visibilitychange'));
+  assert.equal(player.video.pause, player.originalPause); assert.equal(state.guardTimer, null);
+  assert.equal(player.calls.play, 0); assert.equal(player.calls.request, 1);
+  player.video.pause(); assert.equal(player.video.paused, true);
+  Object.defineProperty(f.document, 'hidden', { configurable: true, value: false });
+  f.document.dispatchEvent(new f.window.Event('visibilitychange'));
+  assert.equal(player.video.paused, true); assert.equal(player.calls.play, 0);
+  player.exit(); assert.equal(player.video.pause, player.originalPause); assert.equal(state.guardTimer, null);
+});
+test('source, account and route changes invalidate fullscreen without preserving another media or account session', async t => {
+  for (const change of ['source', 'account', 'route']) {
+    const f = harness(t, postedVideoMarkup()); f.window.ctNetworkState = { authUID: 'account-one' };
+    const player = nativeVideo(f); f.enhance();
+    f.document.querySelector('.ct-media-video-fullscreen').click(); await Promise.resolve();
+    if (change === 'source') player.video.src = 'https://media.tweet.app/changed.mp4';
+    if (change === 'account') f.window.ctNetworkState.authUID = 'account-two';
+    if (change === 'route') f.window.history.pushState({}, '', '/user/another');
+    f.enhance();
+    assert.equal(player.video.pause, player.originalPause, change);
+    assert.equal(player.calls.exit, 1, change); assert.equal(player.video.paused, true, change);
+    assert.equal(player.calls.play, 0, change);
+  }
+});
+test('late completion or rejection of an earlier fullscreen request cannot terminate a newer session', async t => {
+  for (const stale of ['resolve', 'reject']) {
+    const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f);
+    const requests = [];
+    player.video.requestFullscreen = () => new Promise((resolve, reject) => requests.push({ resolve, reject }));
+    f.enhance(); const button = f.document.querySelector('.ct-media-video-fullscreen');
+    button.click();
+    player.video.src = 'https://media.tweet.app/next.mp4'; f.enhance();
+    assert.equal(button.disabled, false);
+    player.nativePlay(); button.click(); player.enter();
+    const guard = player.video.pause;
+    requests[0][stale](stale === 'reject' ? new Error('Old denied') : undefined);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(player.video.pause, guard, stale);
+    assert.equal(player.video.paused, false, stale);
+    assert.equal(player.calls.exit, 0, stale);
+    assert.equal(f.document.querySelector('.ct-media-video-status').hidden, true, stale);
+    requests[1].resolve(); await new Promise(resolve => setTimeout(resolve, 0));
+    player.video.pause(); assert.equal(player.video.paused, false, stale);
+    assert.equal(player.calls.exit, 0, stale);
+    player.exit(); assert.equal(player.video.pause, player.originalPause, stale);
+  }
+});
+test('a late fullscreen event from a cancelled request cannot reopen media after its source changed', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); let resolveRequest;
+  player.video.requestFullscreen = () => new Promise(resolve => { resolveRequest = resolve; });
+  f.enhance(); f.document.querySelector('.ct-media-video-fullscreen').click();
+  player.video.src = 'https://media.tweet.app/next.mp4'; f.enhance();
+  player.nativePlay(); player.enter();
+  assert.equal(player.video.paused, true); assert.equal(player.calls.exit, 1);
+  resolveRequest(); await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(player.video.pause, player.originalPause);
+  assert.equal(player.calls.play, 0); assert.equal(f.document.fullscreenElement, null);
+});
+test('cancelled fullscreen success before its queued entry event is stopped and cannot bind changed media', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); let resolveRequest;
+  player.video.requestFullscreen = () => new Promise(resolve => { resolveRequest = resolve; });
+  f.enhance(); f.document.querySelector('.ct-media-video-fullscreen').click();
+  player.video.src = 'https://media.tweet.app/next.mp4'; f.enhance();
+  player.nativePlay(); player.enterWithoutEvent(); resolveRequest();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const state = f.qa.ctMediaVideos.get(player.video);
+  assert.equal(player.calls.exit, 1); assert.equal(player.video.paused, true);
+  assert.equal(state.context, null); assert.equal(state.pauseGuard, null); assert.equal(state.guardTimer, null);
+  player.fullscreenEvent();
+  assert.equal(state.context, null); assert.equal(state.pauseGuard, null); assert.equal(state.guardTimer, null);
+  assert.equal(player.calls.play, 0); assert.equal(f.document.fullscreenElement, null);
+});
+test('a cancelled request that rejects leaves later native-control fullscreen available', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); let rejectRequest;
+  player.video.requestFullscreen = () => new Promise((_, reject) => { rejectRequest = reject; });
+  f.enhance(); f.document.querySelector('.ct-media-video-fullscreen').click();
+  player.video.src = 'https://media.tweet.app/next.mp4'; f.enhance(); rejectRequest(new Error('Old denied'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const state = f.qa.ctMediaVideos.get(player.video);
+  assert.equal(state.invalidatedFullscreen, false);
+  player.nativePlay(); player.enter(); player.video.pause();
+  assert.equal(player.video.paused, false); assert.equal(player.calls.exit, 0);
+  player.exit(); assert.equal(player.video.pause, player.originalPause);
+});
+test('a fullscreen event queued after hiding the page cannot recreate a guard or timer in the background', t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); f.enhance(); player.enter();
+  const state = f.qa.ctMediaVideos.get(player.video);
+  Object.defineProperty(f.document, 'hidden', { configurable: true, value: true });
+  f.document.dispatchEvent(new f.window.Event('visibilitychange')); player.fullscreenEvent();
+  assert.equal(state.context, null); assert.equal(state.pauseGuard, null); assert.equal(state.guardTimer, null);
+  assert.equal(player.video.pause, player.originalPause); assert.equal(player.calls.play, 0);
+  player.nativePause();
+  Object.defineProperty(f.document, 'hidden', { configurable: true, value: false });
+  f.document.dispatchEvent(new f.window.Event('visibilitychange'));
+  assert.equal(player.video.paused, true); assert.equal(player.calls.play, 0);
+  player.exit(); assert.equal(state.guardTimer, null);
+});
+test('an earlier exit event does not cancel a valid request still waiting to enter fullscreen', async t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f); let resolveRequest;
+  player.video.requestFullscreen = () => new Promise(resolve => { resolveRequest = resolve; });
+  f.enhance(); f.document.querySelector('.ct-media-video-fullscreen').click();
+  const state = f.qa.ctMediaVideos.get(player.video), context = state.context, sequence = state.requestSequence;
+  player.fullscreenEvent();
+  assert.equal(state.context, context); assert.equal(state.requestSequence, sequence); assert.equal(state.requesting, true);
+  player.enterWithoutEvent(); resolveRequest(); await new Promise(resolve => setTimeout(resolve, 0));
+  player.fullscreenEvent(); player.video.pause();
+  assert.equal(player.video.paused, false); assert.equal(player.calls.exit, 0);
+  player.exit(); assert.equal(player.video.pause, player.originalPause);
+});
+test('local profile video gets an inline fullscreen control but upload previews and unrelated videos are untouched', t => {
+  const f = harness(t, `<main><section data-ct-local-ui="profile"><div><video class="ct-profile-video" src="/local.mp4" controls playsinline></video></div></section>
+    <div class="w-full mt-3 space-y-3"><video id="upload-video" src="/upload.mp4" class="w-full object-contain" controls playsinline loop></video></div>
+    <video id="other-video" src="/other.mp4" controls></video></main>`);
+  const player = nativeVideo(f); f.document.querySelectorAll('video').forEach(video => { video.requestFullscreen ||= () => Promise.resolve(); });
+  f.enhance();
+  assert.equal(f.document.querySelectorAll('.ct-media-video-fullscreen').length, 1);
+  assert.ok(player.video.nextElementSibling.classList.contains('ct-media-video-inline-tools'));
+  assert.equal(f.document.getElementById('upload-video').classList.contains('ct-media-enhanced-video'), false);
+  assert.equal(f.document.getElementById('other-video').classList.contains('ct-media-enhanced-video'), false);
+});
+test('single native photos center in the visual viewport independently of carousel setup, while contained viewers keep their modal bounds', t => {
+  const f = harness(t, `<main></main><div class="fixed inset-0" role="dialog" aria-modal="true" aria-label="Media viewer" id="fixed">
+    <div><button aria-label="Close media viewer">Close</button></div><div><img alt="Media preview" src="/one.jpg"></div></div>
+    <div class="absolute inset-0" role="dialog" aria-modal="true" aria-label="Media viewer" id="contained">
+    <div><button aria-label="Close media viewer">Close</button></div><div><img alt="Media preview" src="/two.jpg"></div></div>`);
+  const viewport = new f.window.EventTarget(); Object.assign(viewport, { width: 390, height: 520, offsetTop: 34, offsetLeft: 2 });
+  Object.defineProperty(f.window, 'visualViewport', { configurable: true, value: viewport });
+  f.enhance();
+  const fixed = f.document.getElementById('fixed'), contained = f.document.getElementById('contained');
+  assert.ok(fixed.classList.contains('ct-media-viewport-viewer'));
+  assert.equal(fixed.style.getPropertyValue('--ct-media-view-height'), '520px');
+  assert.equal(fixed.style.getPropertyValue('--ct-media-view-top'), '34px');
+  assert.equal(fixed.querySelector('img').parentElement.className, 'ct-media-viewer-stage');
+  assert.equal(fixed.querySelectorAll('.ct-media-viewer-controls').length, 0);
+  assert.ok(contained.classList.contains('ct-media-centered-viewer'));
+  assert.equal(contained.classList.contains('ct-media-viewport-viewer'), false);
+  viewport.height = 390; viewport.offsetTop = 0; viewport.dispatchEvent(new f.window.Event('resize'));
+  assert.equal(fixed.style.getPropertyValue('--ct-media-view-height'), '390px');
+  const style = f.document.getElementById('ct-media-style').textContent;
+  assert.match(style, /align-items:center!important; justify-content:center!important/);
+  assert.match(style, /max\(env\(safe-area-inset-top\),env\(safe-area-inset-bottom\)\)/);
+  assert.match(style, /prefers-reduced-motion:reduce/);
+  assert.match(style, /hover:hover\) and \(pointer:fine/);
 });

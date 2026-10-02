@@ -77,3 +77,9 @@ Mediaの2つのGETは並行開始し、それぞれUID・route・sequenceを照�
 Keep historical recovery in Tools with a visible progress/status, Pause, Continue and Restart. Network work is explicit, paced, foreground-only and resumable per UID. Fresh post details verify hasLiked and canonical original IDs; feed coverage is described accurately.
 
 Use an inline, wrapping archive toolbar in the own-profile Favorites panel: text/author search, media selector, date order, JSON backup/import. Reuse the toolbar and existing media rows to retain IME, focus and playback; render progressive 50-row batches. Retain all stored records until actual quota, preserve temporary memory and offer backup before closing. Imports merge only the same UID, validate the entire bounded schema, and keep existing snapshots first.
+
+## 6.16.0 Direct Favorites and media continuity
+
+Favorites become a plain account-local saved timeline. Compact read-only metadata separates retained/displayed counts, dates of visible eligible Tweets and feed recovery coverage. History events update text while reusing rows and video nodes; this view never starts a scan. Existing backup and progressive rendering remain.
+
+Native and profile photo stages use a centered, contained layout with safe-area padding and visible-viewport tracking. Contained native viewers keep their modal boundary. Video fullscreen targets the existing video element and never reparents, clones, seeks or starts a paused clip. A per-element pause guard is active only for an actual, visible, same-source/context fullscreen playing session; native pause events remain authoritative. Exit/denial/context changes restore the exact method descriptor. Touch and pointer/focus feedback are separate; no global player or intersection-observer replacement is introduced.
