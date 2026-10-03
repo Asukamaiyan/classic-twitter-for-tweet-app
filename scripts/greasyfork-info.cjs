@@ -111,8 +111,8 @@ function render(edition) {
     : '';
   const current = japanese ? 'このページのスクリプト' : 'The script on this page';
   const features = japanese
-    ? '昔のTwitter風の表示、星のお気に入り、通知フィルター、写真スライドなどを追加。日本ニュースの通信を修正し、取得失敗時に「再試行」を表示。標準タブの選択変更に追従し、クラシックのタブ表示を維持します。投稿と確認できた返信の時刻を更新し、本文・名前・下書き・サイトのテーマを保持します。'
-    : 'Adds classic Twitter styling, star Favorites, notification filters and photo slides. Fixes Japanese news requests and adds Retry after a failed load. Follows native tab selection changes and keeps classic tab styling. Updates post and verified reply times, preserving post text, names, drafts and the site theme.';
+    ? '昔のTwitter風の表示、星のお気に入り、通知フィルターなどを追加。標準の拡大写真の横スワイプが指に追従し、滑らかに切り替わります。写真・動画／お気に入り欄の大きな説明枠を小さな行へ整理。取得範囲やバックアップは詳細を開いて利用できます。本文・名前・下書き・サイトのテーマを保持します。'
+    : 'Adds classic Twitter styling, star Favorites and notification filters. Native enlarged photo swipes follow your finger and settle smoothly. Media/Favorites replace large explanation blocks with a compact row; open its disclosure for coverage and backups. Preserves post text, names, drafts and the site theme.';
   const safariFeature = edition.platform === 'safari'
     ? japanese ? '<p>Safari版は写真・動画の長押しで配信ファイル情報も表示します。</p>' : '<p>The Safari edition also shows delivered media file information on a long press.</p>'
     : '';

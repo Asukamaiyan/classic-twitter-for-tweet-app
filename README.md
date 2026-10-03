@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.18.1** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.19.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** Greasy Forkの全6版で6.18.1を公開済みです。通常のインストールURLから取得したコードと、検証済みの生成コードが一致することを確認しました。
+**配布状況:** GitHubとGreasy Forkの全6版を6.19.0へ更新し、通常のコードURLと生成コードの一致を確認済みです。
 
 ## 導入・更新
 
@@ -51,7 +51,7 @@
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
 
-6.18.1では、日本ニュースの取得が早く失敗扱いになる通信処理を修正し、取得失敗時の **「再試行」** を追加しました。ニュースなどのタブを切り替えた後も選択と表示を揃え、クラシック表示で元の丸いタブが一瞬戻る問題も修正しました。
+6.19.0では、標準ツイートの複数写真を拡大した画面で横スワイプが指に追従し、次の写真へ滑らかに移ります。写真・動画／お気に入り欄の大きな説明と更新枠を小さな行に整理し、すぐにツイートが始まる表示にしました。
 
 ## 主な機能
 
@@ -65,7 +65,7 @@
 
 過去のお気に入りは **「便利ツール」→「過去の投稿から探す」**。おすすめ・フォロー中を過去へ順に確認し、1回100ページまで。画面を開いたまま使い、**「一時停止」「続きから探す」**で再開できます。サーバーで現在のお気に入り状態を確認して保存しますが、サービスが返すタイムラインの範囲なので、全履歴の取得は保証できません。今の画面の分だけなら「読み込み済みのお気に入りを復元」（1回40件まで）も使えます。
 
-プロフィールの **「お気に入り」** では、検索入力を置かず、保存件数・表示件数・投稿の日付範囲・復元の確認範囲と進捗、50件ずつの表示、**JSONバックアップ・取り込み**ができます。保存データはアカウント別。同じアカウントの別ブラウザへはJSONで手動移行できます。取り込みはTweet上の星・いいね状態を変更しません。500件を超えた古い保存を自動削除する制限を撤廃しました。ブラウザの保存容量を超えた場合は一時保持になるので、閉じる前にバックアップしてください。
+プロフィールの **「お気に入り」** は、保存／表示件数と更新を先頭の小さな行に表示。**「範囲・保存」** を開くと投稿の日付範囲・復元の確認範囲と進捗、**JSONバックアップ・取り込み**を利用できます。写真・動画の **「取得範囲」** も開閉表示です。検索入力は置かず、保存した投稿は50件ずつ表示します。エラーや保存失敗は折りたたまず表示します。保存データはアカウント別。同じアカウントの別ブラウザへはJSONで手動移行できます。取り込みはTweet上の星・いいね状態を変更しません。500件を超えた古い保存を自動削除する制限を撤廃しました。ブラウザの保存容量を超えた場合は一時保持になるので、閉じる前にバックアップしてください。
 
 動画の拡大ボタンはスマホで常に見える44pxの操作、PCではポインター・キーボードのフォーカスに合わせた表示です。一時停止中の動画は全画面にしても再生を開始しません。
 
@@ -105,13 +105,13 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.18.1 fixes premature Japanese news request failures and adds **Retry** after a failed load. Native tab changes reconcile the displayed panel, and classic tabs keep their appearance when Tweet replaces button classes. Release validation and publication are in progress; the verified published version is 6.18.0.
+Version 6.19.0 makes Tweet’s enlarged native photo swipes follow your finger and settle smoothly. Profile Media/Favorites use a compact count-and-refresh row, followed immediately by Tweets. All six distributions are published as 6.19.0; their usual code URLs match the generated release files.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 
 Post and verified reply ages update as time passes. Creation dates use your browser’s time zone, with dates and clock times in conversation details and local Media/Favorites. Edit dates and parent-post dates are kept separate; unknown or ambiguous reply times are not guessed.
 
-Use Tools → Search older posts to recover currently confirmed Favorites through older For you/Following pages (up to 100 pages per run; pause/continue while the tab is visible). This covers returned timelines and cannot guarantee your entire history. Your profile displays saved Favorites directly, without search/filter/sort controls. It shows counts, saved Tweet date range, recovery coverage and progress, with same-account JSON backups/import. There is no 500-record eviction; storage failures require a backup before closing. Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync automatically across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Physical Android/Tampermonkey and Safari/Stay acceptance remain unverified.
+Use Tools → Search older posts to recover currently confirmed Favorites through older For you/Following pages (up to 100 pages per run; pause/continue while the tab is visible). This covers returned timelines and cannot guarantee your entire history. Your profile displays saved Favorites directly, without search/filter/sort controls. Counts and Refresh stay in the top row; open **Details** for the saved Tweet date range, recovery coverage/progress and same-account JSON backups/import. Open **Coverage** in Media for its read limits. Errors and storage warnings stay visible. There is no 500-record eviction; storage failures require a backup before closing. Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync automatically across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Physical Android/Tampermonkey and Safari/Stay acceptance remain unverified.
 
 ## 開発
 

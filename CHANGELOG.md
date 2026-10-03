@@ -1,5 +1,13 @@
 # Changelog
 
+## All distributions v6.19.0 — 2026-10-04
+
+- Make enlarged native photo swipes follow horizontal finger movement through a frame-batched three-pane preview, with a short slide or return animation and restrained resistance at the first/last photo. Retain arrow buttons, keyboard controls, native image sources, nodes, close/backdrop and click handlers.
+- Support pointer capture with touch fallback, vertical movement and pinch-zoom boundaries, reduced-motion changes and cancellation. Bound native photo commits and discard obsolete image-load events; clean up gestures, frames and previews on hidden pages, removed viewers or changed route/account/photo sources.
+- Ignore height-only inline gallery resize notifications so an image load does not restart scrolling or undo a selected slide.
+- Replace profile Media/Favorites explanation and update blocks with a compact count/refresh/disclosure row before Tweets. Keep date/read ranges, recovery progress, backup/import and hidden-save explanations under native disclosures; show errors, storage warnings and split-backup actions outside them.
+- Preserve disclosure state, focus and playing video nodes through profile updates. Keep search/filter inputs absent, read-only recovery coverage, account-local saved data, pagination and native actions. All text controls retain 44px touch targets without frames or background cards.
+
 ## All distributions v6.18.1 — 2026-10-03
 
 - Resolve manager-provided `GM.xmlHttpRequest` sandbox bindings and wait for the actual news response when a Promise first returns an empty acknowledgement. Retain callback/Promise support, request deadlines and RSS response validation.

@@ -7,6 +7,13 @@ const root = path.join(__dirname, '..');
 const distributions = require('../scripts/distributions.cjs');
 const releaseVersion = require('../package.json').version;
 
+function closeFixture(dom) {
+  // JSDOM deletes document without firing pagehide. Run the normal lifecycle
+  // cleanup before close can queue mutations against the discarded window.
+  dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+  dom.window.close();
+}
+
 test('six editions preserve existing identifiers and share their platform implementation', () => {
   assert.deepEqual(distributions.map(({ file }) => file), [
     'classic-twitter-ja.user.js', 'classic-twitter-ja-safari.user.js', 'classic-twitter-ja-android.user.js',
@@ -54,7 +61,7 @@ for (const { beforeReady, firstFile, locale } of [
       </article><textarea id="public-tweet-input">My draft Home</textarea></main></body></html>`, {
       url: 'https://app.tweet.app/post/post-a', runScripts: 'outside-only', pretendToBeVisual: true
     });
-    t.after(() => dom.window.close());
+    t.after(() => closeFixture(dom));
     const { window } = dom;
     const document = window.document;
     const errors = [];
@@ -159,7 +166,7 @@ for (const { file, locale } of distributions) {
     await new Promise(resolve => setTimeout(resolve, 250));
     assert.equal(label.textContent, locale === 'en' ? 'Settings' : '設定');
     assert.deepEqual(errors, []);
-    dom.window.close();
+    closeFixture(dom);
   });
 }
 
@@ -245,6 +252,6 @@ for (const { file, locale } of distributions) {
       window.document.querySelector('[data-ct-news-region="world"]').click();
       assert.notEqual(window.getComputedStyle(native).display,'none');
       assert.deepEqual(errors,[]);
-    } finally { observer.disconnect(); window.close(); }
+    } finally { observer.disconnect(); closeFixture(dom); }
   });
 }

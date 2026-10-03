@@ -63,7 +63,8 @@ function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', red
       set(v) { value.set.call(this, v); if (this.type === 'file' && v === '') files.set(this, []); }, configurable: true
     });
   }
-  window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${source}\nwindow.qa={ctMediaEnhance,ctMediaUploads,ctMediaCarousels,ctMediaVideos,ctMediaEnhanceVideo};`);
+  window.ctNetworkState = {authUID:''};
+  window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${source}\nwindow.qa={ctMediaEnhance,ctMediaUploads,ctMediaCarousels,ctMediaVideos,ctMediaEnhanceVideo,network:ctNetworkState,get viewer(){return ctMediaViewer}};`);
   t.after(() => window.close());
   const f = { dom, window, document: window.document, qa: window.qa, uploads: [], submitted: 0, closed: 0 };
   f.enhance = () => f.qa.ctMediaEnhance();
@@ -383,6 +384,139 @@ test('viewer navigation follows an asynchronous native React src update without 
   assert.equal(image.src, images[1].src);
   next.click(); await settle(() => dialog.querySelector('[role="status"]').textContent === '3 / 3');
   assert.equal(image.src, images[2].src); assert.equal(next.disabled, true);
+});
+
+function motionViewer(t, options = {}) {
+  const f = harness(t, `<main>${galleryMarkup(3)}</main>`, options);
+  let reduceListener;
+  const reduce={matches:options.reduced===true,addEventListener:(name,cb)=>reduceListener=cb,removeEventListener:()=>reduceListener=null};
+  f.window.matchMedia=()=>reduce;
+  f.setReduced=value=>{reduce.matches=value;reduceListener?.()};
+  const frames = new Map(), timers = new Map(); let serial = 0, now = 0;
+  f.window.requestAnimationFrame = cb => { frames.set(++serial, cb); return serial; };
+  f.window.cancelAnimationFrame = id => frames.delete(id);
+  f.window.setTimeout = (cb, ms) => { timers.set(++serial, {cb, ms}); return serial; };
+  f.window.clearTimeout = id => timers.delete(id);
+  f.window.performance.now = () => now;
+  f.grid = f.document.getElementById('gallery'); geometry(f, f.grid, 390);
+  f.images = [...f.grid.querySelectorAll('img')];
+  f.native = nativeViewer(f, f.images); f.enhance(); f.images[0].click();
+  f.preview = f.native.dialog.querySelector('img');
+  f.stage = f.document.createElement('div'); f.preview.before(f.stage); f.stage.append(f.preview);
+  Object.defineProperty(f.stage, 'clientWidth', {value:390});
+  if (options.pointer) f.window.PointerEvent = f.window.MouseEvent;
+  f.enhance();
+  f.flushFrames = () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(cb=>cb()); };
+  f.tick = ms => { now += ms; for(const [id,timer] of [...timers]) if(timer.ms<=ms){ timers.delete(id);timer.cb(); } };
+  f.gesture = (type, x, y = 100, extra = {}) => {
+    const e = new f.window.Event(type, {bubbles:true,cancelable:true});
+    Object.defineProperties(e, {
+      touches:{value:[{clientX:x,clientY:y}]},changedTouches:{value:[{clientX:x,clientY:y}]},
+      clientX:{value:x},clientY:{value:y},pointerId:{value:7},isPrimary:{value:true},button:{value:0},...extra
+    }); f.preview.dispatchEvent(e); return e;
+  };
+  f.frames = frames; f.timers = timers;
+  return f;
+}
+test('photo follows horizontal touch movement once per frame, then settles with the native image and handler preserved', t => {
+  const f=motionViewer(t); const original=f.preview;
+  f.gesture('touchstart',240);f.gesture('touchmove',180);f.gesture('touchmove',120);
+  assert.equal(f.frames.size,1);assert.deepEqual(f.native.clicked,[0]);
+  f.flushFrames();const track=f.document.querySelector('.ct-media-photo-track');
+  assert.match(track.style.transform,/-120px/);
+  assert.equal(f.document.querySelector('.ct-media-photo-layer').getAttribute('aria-hidden'),'true');
+  f.gesture('touchend',100);assert.deepEqual(f.native.clicked,[0,1]);assert.equal(f.preview,original);
+  assert.equal(original.src,f.images[1].src);assert.equal(track.style.transform,'translate3d(-200%,0,0)');
+  assert.match(track.style.transition,/220ms/);f.tick(240);
+  original.dispatchEvent(new f.window.Event('load'));assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);
+  assert.equal(original.classList.contains('ct-media-photo-covered'),false);assert.equal(f.timers.size,0);
+});
+test('short slow drag settles back, first-photo resistance stays at the boundary, and vertical/pinch gestures are untouched', t => {
+  const f=motionViewer(t);
+  f.gesture('touchstart',200);f.gesture('touchmove',180);f.tick(500);f.gesture('touchend',180);
+  assert.deepEqual(f.native.clicked,[0]);assert.equal(f.document.querySelector('.ct-media-photo-track').style.transform,'translate3d(-100%,0,0)');
+  f.tick(240);f.gesture('touchstart',200);f.gesture('touchmove',300);f.flushFrames();
+  assert.match(f.document.querySelector('.ct-media-photo-track').style.transform,/22px/);
+  f.gesture('touchend',300);assert.deepEqual(f.native.clicked,[0]);f.tick(240);
+  f.gesture('touchstart',200);const vertical=f.gesture('touchmove',205,170);f.gesture('touchend',210,200);
+  assert.equal(vertical.defaultPrevented,false);assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);
+  f.gesture('touchstart',200);f.gesture('touchmove',100);f.gesture('touchmove',90,100,{touches:{value:[{},{}]}});
+  assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.deepEqual(f.native.clicked,[0]);
+});
+test('PointerEvent navigation suppresses only the following drag click and keeps close/backdrop controls', t => {
+  const f=motionViewer(t,{pointer:true});let photoClicks=0;f.preview.addEventListener('click',()=>photoClicks++);
+  f.gesture('pointerdown',240);f.gesture('pointermove',120);f.flushFrames();f.gesture('pointerup',100);
+  assert.deepEqual(f.native.clicked,[0,1]);f.preview.click();assert.equal(photoClicks,0);
+  f.native.dialog.querySelector('[aria-label="Close media viewer"]').click();f.enhance();
+  assert.equal(f.document.querySelector('[aria-label="Media viewer"]'),null);assert.equal(f.qa.viewer,null);
+  assert.equal(f.preview.classList.contains('ct-media-photo-covered'),false);assert.equal(f.timers.size,0);
+});
+test('reduced motion switches directly and canceled pointers remove presentation without choosing another photo', t => {
+  const reduced=motionViewer(t,{reduced:true});reduced.gesture('touchstart',200);reduced.gesture('touchmove',100);reduced.gesture('touchend',90);
+  assert.deepEqual(reduced.native.clicked,[0,1]);assert.equal(reduced.document.querySelector('.ct-media-photo-layer'),null);
+  const f=motionViewer(t,{pointer:true});f.gesture('pointerdown',200);f.gesture('pointermove',100);f.gesture('pointercancel',100);
+  assert.deepEqual(f.native.clicked,[0]);assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.frames.size,0);
+});
+test('route, account and source changes discard a photo gesture without invoking a stale native handler', t => {
+  for(const change of ['route','account','source']){
+    const f=motionViewer(t);f.gesture('touchstart',200);f.gesture('touchmove',100);
+    if(change==='route')f.window.history.pushState({},'', '/notifications');
+    if(change==='account')f.qa.network.authUID='new-account';
+    if(change==='source')f.images[1].src='https://media.tweet.app/replaced.jpg';
+    f.gesture('touchend',80);assert.deepEqual(f.native.clicked,[0]);assert.equal(f.qa.viewer,null);
+    assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.preview.classList.contains('ct-media-photo-covered'),false);
+    assert.ok(f.native.dialog.isConnected,'native dialog is retained');
+  }
+});
+test('backgrounding and image errors release the photo layer, animation frames and timers', t => {
+  const f=motionViewer(t);f.gesture('touchstart',200);f.gesture('touchmove',100);
+  Object.defineProperty(f.document,'hidden',{configurable:true,value:true});f.document.dispatchEvent(new f.window.Event('visibilitychange'));
+  assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.frames.size,0);
+  Object.defineProperty(f.document,'hidden',{configurable:true,value:false});f.gesture('touchstart',200);f.gesture('touchmove',100);f.gesture('touchend',90);f.tick(240);
+  f.preview.dispatchEvent(new f.window.Event('error'));assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.timers.size,0);
+});
+test('gallery height-only resize leaves an in-progress swipe alone and width resize aligns without smooth scrolling', t => {
+  const f=harness(t,`<main>${galleryMarkup(3)}</main>`);const grid=f.document.getElementById('gallery');geometry(f,grid,390);
+  let resize;f.window.ResizeObserver=class {constructor(cb){resize=cb}observe(){}disconnect(){}};f.enhance();
+  grid.scrollLeft=100;resize();resize();assert.equal(grid.lastScroll,undefined);assert.equal(grid.scrollLeft,100);
+  Object.defineProperty(grid,'clientWidth',{configurable:true,value:320});resize();assert.deepEqual({...grid.lastScroll},{left:0,behavior:'auto'});
+});
+test('release before the queued animation frame begins settling from the latest finger position', t => {
+  const f=motionViewer(t);f.gesture('touchstart',240);f.gesture('touchmove',160);
+  const track=f.document.querySelector('.ct-media-photo-track');let start;
+  track.getBoundingClientRect=()=>{start=track.style.transform;return {width:390}};
+  f.gesture('touchend',100);assert.match(start,/-140px/);assert.equal(f.frames.size,0);
+});
+test('asynchronous native commit locks repeated navigation and an old-source load cannot release its photo layer', t => {
+  const f=motionViewer(t);f.images[1].addEventListener('click',e=>{e.stopImmediatePropagation();f.native.clicked.push(1)},{capture:true});
+  const next=f.native.dialog.querySelector('.ct-media-viewer-controls button:last-child');next.click();next.click();
+  assert.deepEqual(f.native.clicked,[0,1]);assert.equal(next.disabled,true);f.tick(240);
+  f.preview.dispatchEvent(new f.window.Event('load'));assert.ok(f.document.querySelector('.ct-media-photo-layer'));
+  f.preview.src=f.images[1].src;f.preview.dispatchEvent(new f.window.Event('load'));f.enhance();
+  assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(next.disabled,false);
+  assert.equal(f.native.dialog.querySelector('[role="status"]').textContent,'2 / 3');
+});
+test('a native handler with no commit times out, restores navigation and follows a later commit, including reduced motion', t => {
+  for(const reduced of [false,true]) {
+    const f=motionViewer(t,{reduced});f.images[1].addEventListener('click',e=>e.stopImmediatePropagation(),{capture:true});
+    const next=f.native.dialog.querySelector('.ct-media-viewer-controls button:last-child');next.click();assert.equal(next.disabled,true);
+    f.tick(1600);assert.equal(next.disabled,false);assert.equal(f.qa.viewer.requestedIndex,null);
+    assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.native.dialog.querySelector('[role="status"]').textContent,'1 / 3');
+    f.preview.src=f.images[1].src;f.enhance();assert.equal(f.native.dialog.querySelector('[role="status"]').textContent,'2 / 3');
+  }
+});
+test('mouse pointer capture stays on the preview and its native drag ghost is prevented', t => {
+  const f=motionViewer(t,{pointer:true});let captured,released;
+  f.preview.setPointerCapture=id=>captured=id;f.preview.releasePointerCapture=id=>released=id;
+  f.gesture('pointerdown',240);const drag=f.gesture('dragstart',240);assert.equal(drag.defaultPrevented,true);
+  f.gesture('pointermove',100);assert.equal(captured,7);f.gesture('pointerup',90);assert.equal(released,7);
+  f.preview.click();assert.ok(f.native.dialog.isConnected);
+});
+test('changing reduced motion during a captured drag restores the photo and releases capture without navigation', t => {
+  const f=motionViewer(t,{pointer:true});let released=0;f.preview.setPointerCapture=()=>{};f.preview.releasePointerCapture=()=>released++;
+  f.gesture('pointerdown',240);f.gesture('pointermove',100);f.setReduced(true);
+  assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.frames.size,0);assert.equal(released,1);
+  f.gesture('pointerup',90);assert.deepEqual(f.native.clicked,[0]);
 });
 
 function nativeVideo(f, { paused = false, standard = true, safari = false, deny = false } = {}) {

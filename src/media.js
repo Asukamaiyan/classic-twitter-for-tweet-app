@@ -218,8 +218,8 @@
     state.index = ctMediaCarouselIndex(state);
     const count = `${state.index + 1} / ${state.slides.length}`;
     if (state.count.textContent !== count) state.count.textContent = count;
-    state.prev.disabled = state.index === 0;
-    state.next.disabled = state.index === state.slides.length - 1;
+    if (state.prev.disabled !== (state.index === 0)) state.prev.disabled = state.index === 0;
+    if (state.next.disabled !== (state.index === state.slides.length - 1)) state.next.disabled = state.index === state.slides.length - 1;
   }
   function ctMediaMoveCarousel(state, index) {
     state.index = Math.max(0, Math.min(state.slides.length - 1, index));
@@ -300,13 +300,22 @@
     grid.addEventListener('keydown', state.onKey);
     state.onClick = event => {
       const index = state.slides.findIndex(slide => slide.firstElementChild === event.target);
-      if (index >= 0) ctMediaPendingViewer = { state, index, at: Date.now() };
+      if (index >= 0) ctMediaPendingViewer = { state, index, at: Date.now(), context: ctMediaPhotoContext() };
     };
     grid.addEventListener('click', state.onClick, true);
     ctMediaApplyCarousel(state);
     grid.after(controls);
     if (typeof ResizeObserver === 'function') {
-      state.resize = new ResizeObserver(() => ctMediaMoveCarousel(state, state.index));
+      state.width = grid.clientWidth;
+      state.resize = new ResizeObserver(() => {
+        const width = grid.clientWidth;
+        if (!width || width === state.width) return;
+        state.width = width;
+        // Height-only image loads must not restart scrolling or undo a swipe.
+        const left = state.index * width;
+        if (typeof grid.scrollTo === 'function') grid.scrollTo({ left, behavior: 'auto' });
+        else grid.scrollLeft = left;
+      });
       state.resize.observe(grid);
     }
     ctMediaCarousels.set(grid, state);
@@ -316,11 +325,163 @@
     if (!ctMediaViewer) return;
     const viewer = ctMediaViewer;
     viewer.observer?.disconnect();
+    clearTimeout(viewer.requestTimer);
+    ctMediaResetPhotoMotion(viewer);
+    viewer.stage?.classList.remove('ct-media-swipe-stage');
     viewer.controls.remove();
     document.removeEventListener('keydown', viewer.onKey, true);
     viewer.dialog.removeEventListener('touchstart', viewer.onTouchStart);
+    viewer.dialog.removeEventListener('touchmove', viewer.onTouchMove);
     viewer.dialog.removeEventListener('touchend', viewer.onTouchEnd);
+    viewer.dialog.removeEventListener('touchcancel', viewer.onCancel);
+    for (const [name, handler] of [['pointerdown', viewer.onPointerStart], ['pointermove', viewer.onPointerMove],
+        ['pointerup', viewer.onPointerEnd], ['pointercancel', viewer.onCancel], ['lostpointercapture', viewer.onCancel],
+        ['click', viewer.onClick]]) if (handler) viewer.dialog.removeEventListener(name, handler, name === 'click');
+    document.removeEventListener('visibilitychange', viewer.onVisibility);
+    window.removeEventListener('pagehide', viewer.onPageHide);
+    viewer.dialog.removeEventListener('dragstart', viewer.onDragStart);
+    viewer.reduce?.removeEventListener?.('change', viewer.onReduce);
     ctMediaViewer = null;
+  }
+  function ctMediaPhotoContext() {
+    return `${location.pathname}${location.search}\n${typeof ctNetworkState !== 'undefined' ? ctNetworkState.authUID || '' : ''}`;
+  }
+  function ctMediaPhotoViewerValid(viewer) {
+    return viewer.dialog.isConnected && viewer.state.grid.isConnected && !document.hidden &&
+      viewer.context === ctMediaPhotoContext() && viewer.sources === ctMediaSlides(viewer.state.grid)
+        .map(slide => slide.firstElementChild.src).join('\n');
+  }
+  function ctMediaResetPhotoMotion(viewer) {
+    const touch = viewer.touch;
+    viewer.touch = null;
+    if (touch?.pointer != null) try { touch.capture?.releasePointerCapture(touch.pointer); } catch {}
+    const motion = viewer.motion;
+    if (motion) {
+      cancelAnimationFrame(motion.frame);
+      clearTimeout(motion.timer);
+      motion.image.removeEventListener('load', motion.loaded);
+      motion.image.removeEventListener('error', motion.loaded);
+      motion.image.classList.remove('ct-media-photo-covered');
+      motion.layer.remove();
+      viewer.motion = null;
+    }
+  }
+  function ctMediaPhotoLayer(viewer, target) {
+    if (viewer.motion) return viewer.motion;
+    const image = viewer.dialog.querySelector('img[alt="Media preview"]');
+    // Only add presentation inside the verified native stage; React keeps its
+    // image, src, click handlers, close button and backdrop throughout.
+    if (!viewer.stage || image?.parentElement !== viewer.stage ||
+        viewer.reduce?.matches) return null;
+    const layer = document.createElement('div');
+    layer.className = 'ct-media-photo-layer'; layer.dataset.ctLocalUi = 'photo-motion';
+    layer.setAttribute('aria-hidden', 'true');
+    const track = document.createElement('div'); track.className = 'ct-media-photo-track';
+    const slides = ctMediaSlides(viewer.state.grid);
+    for (const index of [target < viewer.index ? target : viewer.index - 1, viewer.index,
+        target > viewer.index ? target : viewer.index + 1]) {
+      const pane = document.createElement('div'); pane.className = 'ct-media-photo-pane';
+      const original = slides[index]?.firstElementChild;
+      if (original) {
+        const photo = document.createElement('img'); photo.alt = ''; photo.draggable = false;
+        photo.referrerPolicy = image.referrerPolicy; photo.src = original.src; pane.append(photo);
+      }
+      track.append(pane);
+    }
+    layer.append(track); viewer.stage.append(layer); image.classList.add('ct-media-photo-covered');
+    const motion = { layer, track, image, width: viewer.stage.clientWidth || window.innerWidth, frame: 0, timer: null };
+    viewer.motion = motion;
+    track.style.transform = 'translate3d(-100%,0,0)';
+    return motion;
+  }
+  function ctMediaPhotoOffset(viewer, offset) {
+    const motion = viewer.motion;
+    if (!motion) return;
+    motion.offset = offset;
+    if (motion.frame) return;
+    motion.frame = requestAnimationFrame(() => {
+      motion.frame = 0;
+      if (viewer.motion === motion) motion.track.style.transform = `translate3d(calc(-100% + ${motion.offset}px),0,0)`;
+    });
+  }
+  function ctMediaFinishPhoto(viewer, index, commit) {
+    if (!ctMediaPhotoViewerValid(viewer)) { ctMediaClearViewer(); return; }
+    const motion = viewer.motion;
+    const oldIndex = viewer.index;
+    const image = ctMediaSlides(viewer.state.grid)[index]?.firstElementChild;
+    if (commit && image) {
+      viewer.requestedIndex = index;
+      viewer.prev.disabled = viewer.next.disabled = true;
+      viewer.requestTimer = setTimeout(() => {
+        if (ctMediaViewer !== viewer) return;
+        viewer.requestedIndex = null;
+        ctMediaResetPhotoMotion(viewer);
+        ctMediaEnhanceViewer();
+      }, 1600);
+      image.click(); ctMediaEnhanceViewer();
+    }
+    if (!motion) return;
+    cancelAnimationFrame(motion.frame); motion.frame = 0;
+    if (motion.offset != null) motion.track.style.transform = `translate3d(calc(-100% + ${motion.offset}px),0,0)`;
+    // Establish the starting transform once, then let the compositor settle it.
+    motion.track.getBoundingClientRect();
+    motion.track.style.transition = 'transform 220ms cubic-bezier(.22,.68,0,1)';
+    motion.track.style.transform = `translate3d(${commit ? index > oldIndex ? '-200%' : '0%' : '-100%'},0,0)`;
+    motion.timer = setTimeout(() => {
+      if (viewer.motion !== motion) return;
+      if (!commit || !ctMediaPhotoViewerValid(viewer)) { ctMediaResetPhotoMotion(viewer); ctMediaEnhanceViewer(); return; }
+      // Keep the already visible destination until the native image loads.
+      // A bounded fallback also restores native errors instead of hiding them.
+      const release = () => {
+        if (viewer.motion !== motion) return;
+        ctMediaResetPhotoMotion(viewer);
+        ctMediaEnhanceViewer();
+      };
+      motion.loaded = () => { if (motion.image.src === image.src) release(); };
+      if (motion.image.src === image.src && motion.image.complete) motion.loaded();
+      else {
+        motion.image.addEventListener('load', motion.loaded);
+        motion.image.addEventListener('error', motion.loaded);
+        motion.timer = setTimeout(release, 1200);
+      }
+    }, 240);
+  }
+  function ctMediaStartPhotoGesture(viewer, event, point) {
+    if (!ctMediaPhotoViewerValid(viewer) || viewer.motion || viewer.requestedIndex != null || window.visualViewport?.scale > 1 ||
+        !event.target.matches?.('img[alt="Media preview"]')) return;
+    viewer.touch = { x: point.clientX, y: point.clientY, at: performance.now(), dx: 0, locked: false,
+      pointer: event.pointerId, width: viewer.stage?.clientWidth || window.innerWidth };
+  }
+  function ctMediaDragPhoto(viewer, event, point) {
+    const touch = viewer.touch;
+    if (!touch || !ctMediaPhotoViewerValid(viewer)) { ctMediaResetPhotoMotion(viewer); return; }
+    const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
+    if (!touch.locked) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { viewer.touch = null; return; }
+      if (Math.abs(dx) < 10 || Math.abs(dx) <= Math.abs(dy) * 1.5) return;
+      touch.locked = true;
+      ctMediaPhotoLayer(viewer, viewer.index + (dx < 0 ? 1 : -1));
+      if (event.pointerId != null) try { event.target.setPointerCapture(event.pointerId); touch.capture = event.target; } catch {}
+    }
+    touch.dx = dx;
+    if (event.cancelable) event.preventDefault();
+    const edge = viewer.index === 0 && dx > 0 || viewer.index === viewer.state.slides.length - 1 && dx < 0;
+    ctMediaPhotoOffset(viewer, edge ? dx * .22 : Math.max(-touch.width, Math.min(touch.width, dx)));
+  }
+  function ctMediaEndPhotoGesture(viewer, event, point) {
+    const touch = viewer.touch;
+    if (!touch) return;
+    // Older TouchEvent bridges may omit move; retain their completed swipe.
+    ctMediaDragPhoto(viewer, event, point);
+    viewer.touch = null;
+    if (!touch.locked) return;
+    const dx = point.clientX - touch.x;
+    const fast = Math.abs(dx) >= 24 && Math.abs(dx) / Math.max(1, performance.now() - touch.at) > .55;
+    const commit = fast || Math.abs(dx) >= Math.min(90, touch.width * .18);
+    const index = Math.max(0, Math.min(viewer.state.slides.length - 1, viewer.index + (dx < 0 ? 1 : -1)));
+    viewer.suppressClickUntil = Date.now() + 400;
+    ctMediaFinishPhoto(viewer, index, commit && index !== viewer.index);
+    if (touch.pointer != null) try { touch.capture?.releasePointerCapture(touch.pointer); } catch {}
   }
   function ctMediaViewport(dialog) {
     const viewport = window.visualViewport;
@@ -578,9 +739,17 @@
   }
   function ctMediaEnhanceViewer() {
     const active = ctMediaViewer;
-    if (active && (!active.dialog.isConnected || !active.state.grid.isConnected || !ctMediaSlides(active.state.grid).length)) ctMediaClearViewer();
+    if (active && !ctMediaPhotoViewerValid(active)) ctMediaClearViewer();
     const pending = ctMediaPendingViewer;
-    if (!pending || !pending.state.grid.isConnected || Date.now() - pending.at > 5000) return;
+    if (!pending || pending.context !== ctMediaPhotoContext() || document.hidden ||
+        !pending.state.grid.isConnected || Date.now() - pending.at > 5000) return;
+    // Native commits can arrive after our bounded request has expired. With no
+    // outstanding request, the native image is the authority for the counter.
+    if (ctMediaViewer?.state === pending.state && ctMediaViewer.requestedIndex == null) {
+      const source = ctMediaViewer.dialog.querySelector('img[alt="Media preview"]')?.src;
+      const actual = ctMediaSlides(pending.state.grid).findIndex(slide => slide.firstElementChild.src === source);
+      if (actual >= 0) pending.index = actual;
+    }
     const source = pending.state.slides[pending.index]?.firstElementChild?.src;
     if (!source) return;
     const dialog = [...document.querySelectorAll('div[role="dialog"][aria-modal="true"][aria-label="Media viewer"]')]
@@ -602,16 +771,23 @@
       count.setAttribute('aria-live', 'polite');
       controls.append(prev, count, next);
       controls.addEventListener('click', event => event.stopPropagation());
-      const viewer = { dialog, state: pending.state, controls, prev, next, count, index: pending.index };
+      const preview = dialog.querySelector('img[alt="Media preview"]');
+      const stage = preview?.parentElement !== dialog && preview?.parentElement?.parentElement === dialog ? preview.parentElement : null;
+      const viewer = { dialog, state: pending.state, controls, prev, next, count, index: pending.index,
+        stage, context: pending.context, sources: ctMediaSlides(pending.state.grid).map(slide => slide.firstElementChild.src).join('\n') };
+      viewer.reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+      viewer.onReduce = () => { if (viewer.reduce.matches) { ctMediaResetPhotoMotion(viewer); ctMediaEnhanceViewer(); } };
+      viewer.reduce?.addEventListener?.('change', viewer.onReduce);
+      stage?.classList.add('ct-media-swipe-stage');
       const move = index => {
         const slides = ctMediaSlides(viewer.state.grid);
-        if (!dialog.isConnected || !slides.length || !viewer.state.grid.isConnected) return;
+        if (!ctMediaPhotoViewerValid(viewer)) { ctMediaClearViewer(); return; }
+        if (viewer.motion || viewer.requestedIndex != null) return;
         index = Math.max(0, Math.min(slides.length - 1, index));
         if (index === viewer.index) return;
-        // Call the existing image handler so React owns the enlarged image too.
-        // Neither the image URL nor the native close/backdrop behavior is replaced.
-        slides[index].firstElementChild.click();
-        ctMediaEnhanceViewer();
+        ctMediaResetPhotoMotion(viewer);
+        ctMediaPhotoLayer(viewer, index);
+        ctMediaFinishPhoto(viewer, index, true);
       };
       prev.addEventListener('click', () => move(viewer.index - 1));
       next.addEventListener('click', () => move(viewer.index + 1));
@@ -623,20 +799,44 @@
         move(event.key === 'Home' ? 0 : event.key === 'End' ? viewer.state.slides.length - 1 :
           viewer.index + (event.key === 'ArrowRight' ? 1 : -1));
       };
-      viewer.onTouchStart = event => {
-        viewer.touch = event.touches.length === 1 && event.target.matches?.('img[alt="Media preview"]') ?
-          { x: event.touches[0].clientX, y: event.touches[0].clientY } : null;
+      viewer.onCancel = () => { if (viewer.touch) ctMediaResetPhotoMotion(viewer); };
+      viewer.onVisibility = () => { if (document.hidden) ctMediaResetPhotoMotion(viewer); };
+      viewer.onPageHide = () => ctMediaResetPhotoMotion(viewer);
+      viewer.onDragStart = event => { if (viewer.touch && event.target.matches?.('img[alt="Media preview"]')) event.preventDefault(); };
+      dialog.addEventListener('dragstart', viewer.onDragStart);
+      viewer.onClick = event => {
+        if (Date.now() < (viewer.suppressClickUntil || 0) &&
+            (event.target === viewer.stage || event.target.matches?.('img[alt="Media preview"]'))) {
+          event.preventDefault(); event.stopImmediatePropagation();
+        }
       };
-      viewer.onTouchEnd = event => {
-        const start = viewer.touch;
-        viewer.touch = null;
-        if (!start || event.changedTouches.length !== 1) return;
-        const dx = event.changedTouches[0].clientX - start.x;
-        const dy = event.changedTouches[0].clientY - start.y;
-        if (Math.abs(dx) >= 45 && Math.abs(dx) > Math.abs(dy) * 1.5) move(viewer.index + (dx < 0 ? 1 : -1));
-      };
-      dialog.addEventListener('touchstart', viewer.onTouchStart, { passive: true });
-      dialog.addEventListener('touchend', viewer.onTouchEnd, { passive: true });
+      if (typeof window.PointerEvent === 'function') {
+        viewer.onPointerStart = event => {
+          if (event.isPrimary === false) { ctMediaResetPhotoMotion(viewer); return; }
+          if (event.button === 0) ctMediaStartPhotoGesture(viewer, event, event);
+        };
+        viewer.onPointerMove = event => { if (viewer.touch?.pointer === event.pointerId) ctMediaDragPhoto(viewer, event, event); };
+        viewer.onPointerEnd = event => { if (viewer.touch?.pointer === event.pointerId) ctMediaEndPhotoGesture(viewer, event, event); };
+        for (const [name, handler] of [['pointerdown', viewer.onPointerStart], ['pointermove', viewer.onPointerMove],
+            ['pointerup', viewer.onPointerEnd], ['pointercancel', viewer.onCancel], ['lostpointercapture', viewer.onCancel]]) dialog.addEventListener(name, handler);
+      } else {
+        viewer.onTouchStart = event => {
+          if (event.touches.length === 1) ctMediaStartPhotoGesture(viewer, event, event.touches[0]);
+          else ctMediaResetPhotoMotion(viewer);
+        };
+        viewer.onTouchMove = event => {
+          if (event.touches.length === 1) ctMediaDragPhoto(viewer, event, event.touches[0]);
+          else ctMediaResetPhotoMotion(viewer);
+        };
+        viewer.onTouchEnd = event => { if (event.changedTouches.length === 1) ctMediaEndPhotoGesture(viewer, event, event.changedTouches[0]); };
+        dialog.addEventListener('touchstart', viewer.onTouchStart, { passive: true });
+        dialog.addEventListener('touchmove', viewer.onTouchMove, { passive: false });
+        dialog.addEventListener('touchend', viewer.onTouchEnd, { passive: true });
+        dialog.addEventListener('touchcancel', viewer.onCancel);
+      }
+      dialog.addEventListener('click', viewer.onClick, true);
+      document.addEventListener('visibilitychange', viewer.onVisibility);
+      window.addEventListener('pagehide', viewer.onPageHide);
       document.addEventListener('keydown', viewer.onKey, true);
       dialog.append(controls);
       ctMediaViewer = viewer;
@@ -647,10 +847,15 @@
       viewer.observer.observe(dialog, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     }
     ctMediaViewer.index = pending.index;
+    if (ctMediaViewer.requestedIndex === pending.index) {
+      ctMediaViewer.requestedIndex = null;
+      clearTimeout(ctMediaViewer.requestTimer);
+    }
     const count = `${pending.index + 1} / ${pending.state.slides.length}`;
     if (ctMediaViewer.count.textContent !== count) ctMediaViewer.count.textContent = count;
-    ctMediaViewer.prev.disabled = pending.index === 0;
-    ctMediaViewer.next.disabled = pending.index === pending.state.slides.length - 1;
+    const busy = !!ctMediaViewer.motion || ctMediaViewer.requestedIndex != null;
+    ctMediaViewer.prev.disabled = busy || pending.index === 0;
+    ctMediaViewer.next.disabled = busy || pending.index === pending.state.slides.length - 1;
   }
   function ctMediaStyles() {
     if (document.getElementById('ct-media-style')) return;
@@ -672,6 +877,12 @@
       .ct-media-centered-viewer > .ct-media-viewer-header button { pointer-events:auto; min-width:44px; min-height:44px; }
       .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
       .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
+      .ct-media-swipe-stage { touch-action:pan-y pinch-zoom; }
+      .ct-media-photo-covered { opacity:0!important; }
+      .ct-media-photo-layer { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+      .ct-media-photo-track { display:flex; width:100%; height:100%; will-change:transform; }
+      .ct-media-photo-pane { flex:0 0 100%; min-width:0; height:100%; display:flex; align-items:center; justify-content:center; box-sizing:border-box; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left)); }
+      .ct-media-photo-pane img { width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; user-select:none; }
       .ct-media-viewer-controls { position:absolute; left:0; right:0; bottom:0; z-index:2; flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
       .ct-media-viewer-controls button:hover:not(:disabled) { background:#ffffff26; }
       .ct-media-video-shell { position:relative; }
@@ -690,6 +901,7 @@
       .ct-media-upload-status button { flex-shrink:0; min-height:44px; padding:5px 10px; border:1px solid var(--color-tl-app-border,#b8c5d1); border-radius:8px; color:inherit; background:transparent; cursor:pointer; }
       .ct-media-upload-status [hidden] { display:none!important; }
       @media(prefers-reduced-motion:reduce) { .ct-media-carousel { scroll-behavior:auto!important; } .ct-media-video-fullscreen,.ct-media-centered-viewer,.ct-media-viewer-stage > img { animation:none!important; transition:none!important; } .ct-media-viewer-stage > img { transform:none!important; opacity:1!important; } }
+      @media(prefers-reduced-motion:reduce) { .ct-media-photo-track { transition:none!important; } }
     `;
     document.head.append(style);
   }
