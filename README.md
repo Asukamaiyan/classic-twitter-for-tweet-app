@@ -2,7 +2,7 @@
 
 **6.19.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 6.19.0は検証・公開準備中です。Greasy Forkで公開・コード一致を確認済みの版は6.18.1です。
+**配布状況:** GitHubとGreasy Forkの全6版を6.19.0へ更新し、通常のコードURLと生成コードの一致を確認済みです。
 
 ## 導入・更新
 
@@ -105,7 +105,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.19.0 makes Tweet’s enlarged native photo swipes follow your finger and settle smoothly. Profile Media/Favorites use a compact count-and-refresh row, followed immediately by Tweets. Release validation and publication are in progress; the verified published version is 6.18.1.
+Version 6.19.0 makes Tweet’s enlarged native photo swipes follow your finger and settle smoothly. Profile Media/Favorites use a compact count-and-refresh row, followed immediately by Tweets. All six distributions are published as 6.19.0; their usual code URLs match the generated release files.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 
