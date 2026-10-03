@@ -401,7 +401,7 @@ test('Media includes all media assets of own reply wrappers and rejects parent-p
   assert.equal(h.document.querySelectorAll('[data-ct-profile-post=reply-photo] img').length, 3);
   assert.ok(h.document.querySelector('[data-ct-profile-post=reply-video] video'));
   assert.equal(h.document.querySelector('[data-ct-profile-post=parent]'), null); assert.equal(h.document.querySelector('[data-ct-profile-post=foreign-reply]'), null);
-  assert.match(h.document.getElementById('ct-media-panel').textContent, /1 posts and 2 replies checked/);
+  assert.match(h.document.getElementById('ct-profile-media-count').getAttribute('aria-label'), /1 posts and 2 replies checked/);
 });
 
 test('reply Media uses each reply creation time, valid native aliases and no parent or wrapper timestamp', async t => {
@@ -548,7 +548,7 @@ test('bad mute records and invalid or repeating cursors never turn an incomplete
 test('explicit Favorite refresh clears snapshots while waiting and recent complete mute checks are reused briefly', async t => {
   const h = harness(t); await h.ready(); h.api.save(item('saved')); await h.select('favorites'); assert.deepEqual(favoriteRows(h), ['saved']);
   let release; h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { release = resolve; }) : undefined);
-  favoriteControl(h, 'Refresh view').click(); assert.deepEqual(favoriteRows(h), []); await tick();
+  favoriteControl(h, 'Refresh').click(); assert.deepEqual(favoriteRows(h), []); await tick();
   release({ success: true, users: [mutedUser('alice')], nextCursor: null }); await tick(); assert.deepEqual(favoriteRows(h), []);
   assert.equal(h.api.load().length, 1);
   h.override(null); h.muted([{ success: true, users: [], nextCursor: null }]); h.document.querySelector('[role=tab][aria-label=Tweets]').click();
@@ -567,7 +567,7 @@ test('late mute responses cannot affect another route or account and native cont
   release({ success: true, users: [mutedUser('bob')], nextCursor: null }); await tick();
   assert.deepEqual(favoriteRows(h), ['new']); assert.equal(h.api.state.favoriteMutes.uid, 'uid-other'); assert.equal(h.api.state.favoriteMutes.handles.size, 0);
   let late; h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { late = resolve; }) : undefined);
-  favoriteControl(h, 'Refresh view').click(); await tick(); h.route('/feed', 'other'); h.api.patch();
+  favoriteControl(h, 'Refresh').click(); await tick(); h.route('/feed', 'other'); h.api.patch();
   late({ success: true, users: [], nextCursor: null }); await tick();
   assert.equal(h.document.getElementById('ct-favorites-panel'), null); assert.equal(h.api.state.favoriteMutes, null);
   assert.equal(h.document.getElementById('native-timeline').hasAttribute('data-ct-profile-timeline-hidden'), false);
@@ -719,7 +719,7 @@ test('Favorites retain more than 500 records and mount progressively without reb
   assert.equal(favoriteRows(h).length, 100); assert.equal(h.document.querySelector('[data-ct-profile-post=archive-0]'), row);
   assert.equal(favoriteControl(h, 'Show 50 more'), more); assert.equal(h.document.activeElement, more);
   assert.equal(row.querySelector('video'), video); assert.equal(video.currentTime, 24);
-  assert.match(h.document.getElementById('ct-favorite-count').textContent, /621 saved for this account.*100 shown.*621 available/);
+  assert.match(h.document.getElementById('ct-favorite-count').getAttribute('aria-label'), /621 saved for this account.*100 shown.*621 available/);
   assert.equal(h.api.load().length, 621);
 });
 
@@ -737,7 +737,7 @@ test('Favorites simply display saved rows without search or filter controls and 
   assert.deepEqual(favoriteRows(h), ['new-video', 'middle', 'old-photo']);
   assert.equal(h.document.querySelector('[data-ct-profile-post=new-video] video'), video); assert.equal(video.currentTime, 9);
   assert.equal(button.closest('[data-ct-favorite-tools]'), tools); assert.equal(h.document.activeElement, button);
-  assert.match(h.document.getElementById('ct-favorite-count').textContent, /3 saved for this account.*3 shown.*3 available/);
+  assert.match(h.document.getElementById('ct-favorite-count').getAttribute('aria-label'), /3 saved for this account.*3 shown.*3 available/);
   assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /For you and Following.*\nChecking \(For you\).*3 pages.*60 posts checked.*2 recovered/);
   assert.match(h.document.getElementById('ct-favorite-range').textContent, /2020.*2026.*3 dated/);
   assert.equal(h.calls.length, before); assert.equal(h.api.load().length, 3);
@@ -754,7 +754,7 @@ test('Favorites counts and date range cover displayable saves while keeping mute
   h.history({ source: 'following', pages: 8, scanned: 160, recovered: 9, paused: true });
   assert.equal(favoriteRows(h).length, 100); assert.ok(!favoriteRows(h).includes('hidden'));
   assert.doesNotMatch(h.document.getElementById('ct-favorites-panel').textContent, /secret needle/);
-  assert.match(h.document.getElementById('ct-favorite-count').textContent, /106 saved for this account.*100 shown.*105 available/);
+  assert.match(h.document.getElementById('ct-favorite-count').getAttribute('aria-label'), /106 saved for this account.*100 shown.*105 available/);
   assert.match(h.document.getElementById('ct-favorite-range').textContent, /2020.*2026.*105 dated/);
   assert.doesNotMatch(h.document.getElementById('ct-favorite-range').textContent, /1900/);
   assert.equal(h.api.load().length, 106);
@@ -900,7 +900,7 @@ test('Favorites quota warnings follow the affected UID and remain visible after 
 test('Favorites show account-local recovery coverage without claiming that the whole history is complete', async t => {
   const h = harness(t, { locale: 'ja' }); await h.ready(); h.api.save(item('unknown-date')); await h.select('favorites');
   assert.equal(h.document.getElementById('ct-favorite-query'), null); assert.equal(h.document.getElementById('ct-favorite-type'), null); assert.equal(h.document.getElementById('ct-favorite-sort'), null);
-  assert.match(h.document.getElementById('ct-favorite-count').textContent, /このアカウントに保存済み1件.*表示1件.*表示対象1件/);
+  assert.match(h.document.getElementById('ct-favorite-count').getAttribute('aria-label'), /このアカウントに保存済み1件.*表示1件.*表示対象1件/);
   assert.match(h.document.getElementById('ct-favorite-range').textContent, /日付未確認/);
   assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /おすすめ・フォロー中.*サービスが返す投稿.*\n.*未確認/);
   const calls = h.calls.length;
@@ -911,7 +911,7 @@ test('Favorites show account-local recovery coverage without claiming that the w
   h.history({ source: 'following', pages: 12, scanned: 240, recovered: 7, error: 'network', paused: true });
   assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /確認を中断（フォロー中）/);
   h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.route('/profile', 'other'); await h.ready(); await h.select('favorites');
-  assert.match(h.document.getElementById('ct-favorite-count').textContent, /保存済み0件.*表示0件/);
+  assert.match(h.document.getElementById('ct-favorite-count').getAttribute('aria-label'), /保存済み0件.*表示0件/);
   assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /未確認/);
   assert.doesNotMatch(h.document.getElementById('ct-favorite-history-scope').textContent, /240|7件/);
   assert.equal(h.calls.slice(calls).filter(url => url.startsWith('/api/posts')).length, 0);
@@ -947,4 +947,106 @@ test('local profile videos gain shared fullscreen handling only after mounting a
   const video = h.document.querySelector('video'); assert.ok(mounted.has(video)); video.currentTime = 16;
   h.history({ source: 'following', pages: 2, scanned: 40, recovered: 1, paused: true });
   assert.equal(h.document.querySelector('video'), video); assert.equal(video.currentTime, 16); assert.equal(mounted.size, 1);
+});
+
+test('normal Media and Favorites start with one compact toolbar followed immediately by Tweets in both locales', async t => {
+  for (const locale of ['ja', 'en']) {
+    const h = harness(t, { locale }); await h.ready(); h.api.save(item('favorite'));
+    h.pages([{ posts: [post('photo')], nextCursor: null }]); await h.select('media');
+    let panel = h.document.getElementById('ct-media-panel');
+    assert.ok(panel.firstElementChild.hasAttribute('data-ct-media-tools'));
+    assert.equal(panel.firstElementChild.nextElementSibling.dataset.ctProfilePost, 'photo');
+    assert.equal(panel.querySelector('.ct-profile-details').open, false);
+    assert.match(h.document.getElementById('ct-profile-media-count').getAttribute('aria-label'), locale === 'ja' ? /投稿1件・返信0件を確認/ : /1 posts and 0 replies checked/);
+    await h.select('favorites'); panel = h.document.getElementById('ct-favorites-panel');
+    assert.ok(panel.firstElementChild.hasAttribute('data-ct-favorite-tools'));
+    assert.equal(panel.firstElementChild.nextElementSibling.dataset.ctProfilePost, 'favorite');
+    assert.equal(panel.querySelector('.ct-profile-details').open, false);
+    const count = h.document.getElementById('ct-favorite-count');
+    assert.equal(count.textContent, locale === 'ja' ? '保存1件 · 表示1/1件' : '1 saved · 1/1 shown');
+    assert.equal(count.title, count.getAttribute('aria-label')); assert.equal(count.getAttribute('role'), 'status');
+    assert.equal(panel.querySelector('input:not([type=file]),select'), null);
+    for (const control of [h.document.getElementById('ct-favorite-refresh'), panel.querySelector('summary')]) {
+      const style = h.window.getComputedStyle(control);
+      assert.equal(style.minHeight, '44px');
+      assert.ok(control.textContent.trim());
+    }
+    const style = h.window.getComputedStyle(h.document.getElementById('ct-favorite-refresh'));
+    assert.equal(style.borderTopWidth, '0px'); assert.equal(style.backgroundColor, 'rgba(0, 0, 0, 0)');
+  }
+});
+
+test('Favorite coverage and backup disclosure keeps its native open state, focus and video through progress changes', async t => {
+  const h = harness(t); await h.ready();
+  h.api.save(item('video', { createdAt: '2026-01-01T00:00:00Z', media: [{ type: 'video', url: 'https://media.example/movie.mp4', poster: '' }] }));
+  await h.select('favorites'); const panel = h.document.getElementById('ct-favorites-panel');
+  const details = panel.querySelector('details'); const summary = details.querySelector('summary');
+  const calls = h.calls.length; summary.click(); await tick(); summary.focus();
+  assert.equal(details.open, true); assert.equal(h.document.activeElement, summary);
+  assert.ok(details.contains(h.document.getElementById('ct-favorite-range')));
+  assert.ok(details.contains(h.document.getElementById('ct-favorite-history-scope')));
+  assert.ok(details.contains(h.document.getElementById('ct-favorite-export')));
+  assert.ok(details.contains(h.document.getElementById('ct-favorite-import')));
+  const video = panel.querySelector('video'); video.currentTime = 15;
+  h.history({ source: 'following', pages: 8, scanned: 160, recovered: 4, busy: true });
+  assert.equal(panel.querySelector('details'), details); assert.equal(details.open, true);
+  assert.equal(h.document.activeElement, summary); assert.equal(panel.querySelector('video'), video); assert.equal(video.currentTime, 15);
+  assert.match(h.document.getElementById('ct-favorite-history-scope').textContent, /8 pages.*160 posts checked.*4 recovered/);
+  assert.equal(h.calls.length, calls); summary.click(); await tick(); assert.equal(details.open, false);
+});
+
+test('Media keeps coverage disclosure and video while a later reply response updates counts', async t => {
+  const h = harness(t); await h.ready(); let release;
+  h.pages([{ posts: [post('video', [{ media_type: 'video', public_url: 'https://media.example/movie.mp4' }])], nextCursor: null }]);
+  h.override(endpoint => endpoint.pathname.endsWith('/replies') ? new Promise(resolve => { release = resolve; }) : undefined);
+  await h.select('media'); const panel = h.document.getElementById('ct-media-panel');
+  const tools = panel.firstElementChild; const details = tools.querySelector('details'); const summary = details.querySelector('summary');
+  summary.click(); await tick(); summary.focus(); const video = panel.querySelector('video'); video.currentTime = 11;
+  release({ replies: [{ post: post('reply', undefined, { parentId: 'parent' }) }] }); await tick();
+  assert.equal(panel.firstElementChild, tools); assert.equal(tools.querySelector('details'), details); assert.equal(details.open, true);
+  assert.equal(h.document.activeElement, summary); assert.equal(panel.querySelector('video'), video); assert.equal(video.currentTime, 11);
+  assert.equal(panel.querySelector('[data-ct-profile-post=reply]').isConnected, true);
+  assert.match(h.document.getElementById('ct-profile-media-count').getAttribute('aria-label'), /1 posts and 1 replies checked/);
+});
+
+test('empty and failed profile loads retain readable status and an explicit retry outside collapsed details', async t => {
+  const h = harness(t); await h.ready(); await h.select('favorites');
+  let panel = h.document.getElementById('ct-favorites-panel');
+  assert.equal(panel.querySelector('.ct-profile-empty').getAttribute('role'), 'status');
+  assert.match(panel.querySelector('.ct-profile-empty').textContent, /No Favorites saved yet/);
+  h.api.save(item('saved')); h.override(endpoint => endpoint.pathname === '/api/users/muted' ? null : undefined);
+  h.document.getElementById('ct-favorite-refresh').click(); await tick();
+  const error = panel.querySelector(':scope > .ct-profile-status[role=status]');
+  assert.match(error.textContent, /Muted accounts could not be checked/); assert.equal(error.closest('details'), null);
+  assert.equal(panel.querySelector('details').open, false); assert.equal(h.document.getElementById('ct-favorite-count').textContent, '1 saved · Not checked');
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /muted accounts not checked/);
+  const retry = favoriteControl(h, 'Try again'); assert.ok(error.contains(retry));
+  assert.equal(h.window.getComputedStyle(retry).minHeight, '44px');
+  h.override(null); retry.click(); await tick(); assert.deepEqual(favoriteRows(h), ['saved']);
+  assert.equal(panel.firstElementChild.nextElementSibling.dataset.ctProfilePost, 'saved');
+  h.override(endpoint => endpoint.pathname.endsWith('/posts') ? null : undefined); await h.select('media');
+  panel = h.document.getElementById('ct-media-panel');
+  assert.match(panel.querySelector(':scope > .ct-profile-status[role=status]').textContent, /could not be loaded/);
+  assert.equal(panel.querySelector('.ct-profile-empty').getAttribute('role'), 'status');
+  assert.match(panel.querySelector('.ct-profile-empty').textContent, /could not be loaded.*try again/);
+  assert.ok([...panel.querySelectorAll(':scope > .ct-profile-status button')].some(button => button.textContent === 'Try again'));
+});
+
+test('long backup errors and storage warnings remain visible outside details and preserve complete text', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('saved')); await h.select('favorites');
+  const panel = h.document.getElementById('ct-favorites-panel'); const view = h.api.state.favoriteView;
+  const text = 'Backup failed <script> & '.repeat(80); view.message = text; view.error = true; h.api.render();
+  const message = h.document.getElementById('ct-favorite-backup-status');
+  assert.equal(message.textContent, text); assert.equal(message.querySelector('script'), null);
+  assert.equal(message.closest('details'), null); assert.equal(panel.querySelector('details').open, false);
+  assert.equal(message.getAttribute('role'), 'status'); assert.equal(message.getAttribute('aria-live'), 'polite');
+  assert.equal(h.window.getComputedStyle(message).overflowWrap, 'anywhere');
+  h.api.state.dirtyMemory.add('uid-viewer'); h.api.render();
+  const warning = h.document.getElementById('ct-favorite-storage-status');
+  assert.match(warning.textContent, /Browser storage is unavailable.*Save a backup before closing/);
+  assert.equal(warning.closest('details'), null); assert.equal(warning.getAttribute('role'), 'status');
+  view.message = ''; view.error = false; h.api.state.dirtyMemory.delete('uid-viewer'); h.api.render();
+  assert.equal(message.textContent, ''); assert.equal(warning.textContent, '');
+  assert.equal(h.window.getComputedStyle(message).display, 'none'); assert.equal(h.window.getComputedStyle(warning).display, 'none');
+  assert.equal(panel.firstElementChild.nextElementSibling.dataset.ctProfilePost, 'saved');
 });

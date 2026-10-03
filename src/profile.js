@@ -212,17 +212,29 @@
       .ct-profile-tab[aria-selected=true]{color:var(--color-tl-app-text,#14171a);font-weight:700}
       .ct-profile-tab[aria-selected=true]:after{content:'';position:absolute;bottom:0;width:28px;height:4px;border-radius:2px;background:#55acee}
       .ct-profile-tab[data-ct-profile-tab=favorites] svg{color:#ffac33}
-      .ct-profile-tab:focus-visible,.ct-profile-control:focus-visible,.ct-profile-photo:focus-visible{outline:2px solid #55acee;outline-offset:-3px}
+      .ct-profile-tab:focus-visible,.ct-profile-control:focus-visible,.ct-profile-details>summary:focus-visible,.ct-profile-photo:focus-visible{outline:2px solid #55acee;outline-offset:-3px}
       [data-ct-profile-panel]{position:relative!important;inset:auto!important;max-height:none!important;width:auto!important;max-width:100%;padding:0!important;margin:0!important;border:0!important;border-radius:0!important;background:inherit!important;color:inherit;box-shadow:none!important;z-index:auto!important}
-      .ct-profile-status{padding:12px 16px;border-bottom:1px solid var(--color-tl-app-border,#8b98a544);font-size:12px;color:var(--color-tl-app-text-muted,#657786);line-height:1.6}
+      .ct-profile-status{padding:6px 16px;font-size:12px;color:var(--color-tl-app-text-muted,#657786);line-height:1.45;overflow-wrap:anywhere}
       .ct-profile-empty{padding:32px 16px;text-align:center;color:var(--color-tl-app-text-muted,#657786);font-size:14px}
-      .ct-profile-control{min-height:44px;padding:8px 14px;border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;background:transparent;color:inherit;font:inherit;cursor:pointer;margin:4px 0}
+      .ct-profile-control{min-height:44px;max-width:100%;padding:8px;border:0;border-radius:0;background:transparent;color:#55acee;font:inherit;line-height:20px;cursor:pointer;margin:0;overflow-wrap:anywhere}
+      .ct-profile-control:hover{color:var(--color-tl-app-text,#14171a);text-decoration:underline}
       .ct-profile-control:disabled{cursor:wait;opacity:.6}
-      .ct-favorite-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+      .ct-profile-toolbar{display:flex;flex-wrap:wrap;column-gap:8px;row-gap:0;align-items:center;min-width:0;padding:0 12px;border-bottom:1px solid var(--color-tl-app-border,#8b98a544);font-size:12px;color:var(--color-tl-app-text-muted,#657786);line-height:1.45}
+      .ct-profile-toolbar-count{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .ct-profile-toolbar>.ct-profile-control{flex:none}
+      .ct-profile-details{min-width:0;max-width:100%}
+      .ct-profile-details>summary{box-sizing:border-box;min-height:44px;padding:12px 8px;line-height:20px;list-style-position:inside;color:#55acee;cursor:pointer;overflow-wrap:anywhere}
+      .ct-profile-details>summary:hover{text-decoration:underline}
+      .ct-profile-details[open]{flex-basis:100%}
+      .ct-profile-detail-body{padding:0 4px 8px;overflow-wrap:anywhere}
+      .ct-profile-detail-body>div{margin:0 0 6px}
+      .ct-profile-detail-actions{display:flex;flex-wrap:wrap;column-gap:8px;row-gap:0}
+      .ct-profile-toolbar [hidden]{display:none!important}
       .ct-favorite-tools input[type=file]{display:none}
-      .ct-favorite-tools .ct-profile-control{margin:0}
-      .ct-favorite-summary{flex-basis:100%;overflow-wrap:anywhere}
-      #ct-favorite-backup-status[data-error=true]{color:var(--color-tl-app-danger,#c23636)}
+      .ct-favorite-summary{flex-basis:100%;min-width:0;overflow-wrap:anywhere}
+      .ct-favorite-summary:empty{display:none}
+      #ct-favorite-backup-status,#ct-favorite-storage-status{padding:6px 4px}
+      #ct-favorite-backup-status[data-error=true],#ct-favorite-storage-status{color:var(--color-tl-app-danger,#c23636)}
       .ct-profile-row{display:flex;gap:12px;padding:16px;border-bottom:1px solid var(--color-tl-app-border,#8b98a544)}
       .ct-profile-avatar{width:40px;height:40px;flex:none;border-radius:4px;object-fit:cover}
       .ct-profile-row-main{min-width:0;flex:1}
@@ -509,6 +521,11 @@
   }
   function ctProfileStatus(text) {
     const el = document.createElement('div'); el.className = 'ct-profile-status'; el.textContent = text; return el;
+  }
+  function ctProfileToolbarSummary(el, text, description = text) {
+    if (el.textContent !== text) el.textContent = text;
+    if (el.getAttribute('aria-label') !== description) el.setAttribute('aria-label', description);
+    if (el.title !== description) el.title = description;
   }
   function ctProfileControl(text, action) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'ct-profile-control';
@@ -807,7 +824,16 @@
   function ctProfileFavoriteTools(panel, view) {
     const previous = panel.querySelector(':scope > [data-ct-favorite-tools]');
     if (previous?.ctFavoriteView === view) return previous;
-    const tools = ctProfileStatus(''); tools.dataset.ctFavoriteTools = ''; tools.classList.add('ct-favorite-tools'); tools.ctFavoriteView = view;
+    const tools = document.createElement('div'); tools.className = 'ct-profile-toolbar ct-favorite-tools';
+    tools.dataset.ctFavoriteTools = ''; tools.ctFavoriteView = view;
+    const count = document.createElement('div'); count.id = 'ct-favorite-count'; count.className = 'ct-profile-toolbar-count'; count.setAttribute('role', 'status');
+    const update = ctProfileControl(ctProfileText('更新', 'Refresh'), () => ctProfileLoadFavoriteMutes(true));
+    update.id = 'ct-favorite-refresh'; update.setAttribute('aria-label', ctProfileText('お気に入りの表示を更新', 'Refresh Favorites view'));
+    const details = document.createElement('details'); details.className = 'ct-profile-details';
+    const summary = document.createElement('summary'); summary.textContent = ctProfileText('範囲・保存', 'Details');
+    summary.setAttribute('aria-label', ctProfileText('お気に入りの取得範囲と保存操作', 'Favorites coverage and backup actions'));
+    const body = document.createElement('div'); body.className = 'ct-profile-detail-body';
+    details.append(summary, body); tools.append(count, update, details);
     const download = ctProfileControl(ctProfileText('バックアップを保存', 'Save local backup'), async () => {
       if (!ctProfileFavoriteViewCurrent(view)) return;
       try {
@@ -845,14 +871,17 @@
       } catch (error) { ctProfileFavoriteMessage(view, ctProfileFavoriteBackupError(error), true); }
       finally { view.busy = false; file.value = ''; if (ctProfileFavoriteViewCurrent(view)) renderFavoritesPanel(); }
     });
-    tools.append(download, importButton, file);
+    const actions = document.createElement('div'); actions.className = 'ct-profile-detail-actions'; actions.append(download, importButton, file);
+    const explanation = document.createElement('div'); explanation.textContent = ctProfileText('このブラウザに保存したお気に入りです。便利ツールで過去のタイムラインから復元できます。全履歴の復元は保証できません。', 'Favorites saved in this browser. Use Tools to restore Favorites from the past timeline. Coverage of the entire past history is not guaranteed.');
     const note = document.createElement('div'); note.className = 'ct-favorite-summary'; note.textContent = ctProfileText('このアカウントのブラウザ内保存データです。バックアップの取り込みはTweet上のお気に入りを変更しません。', 'Browser-local data for this account. Importing a backup does not change Favorites on Tweet.');
-    const count = document.createElement('div'); count.id = 'ct-favorite-count'; count.className = 'ct-favorite-summary'; count.setAttribute('role', 'status');
     const range = document.createElement('div'); range.id = 'ct-favorite-range'; range.className = 'ct-favorite-summary';
     const history = document.createElement('div'); history.id = 'ct-favorite-history-scope'; history.className = 'ct-favorite-summary'; history.style.whiteSpace = 'pre-line'; history.setAttribute('role', 'status');
+    const hidden = document.createElement('div'); hidden.id = 'ct-favorite-hidden-status'; hidden.className = 'ct-favorite-summary';
+    body.append(range, history, hidden, explanation, note, actions);
     const message = document.createElement('div'); message.id = 'ct-favorite-backup-status'; message.className = 'ct-favorite-summary'; message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
-    const parts = document.createElement('div'); parts.id = 'ct-favorite-backup-parts'; parts.className = 'ct-favorite-summary';
-    tools.append(note, count, range, history, message, parts); return tools;
+    const storage = document.createElement('div'); storage.id = 'ct-favorite-storage-status'; storage.className = 'ct-favorite-summary'; storage.setAttribute('role', 'status'); storage.setAttribute('aria-live', 'polite');
+    const parts = document.createElement('div'); parts.id = 'ct-favorite-backup-parts'; parts.className = 'ct-favorite-summary ct-profile-detail-actions';
+    tools.append(message, storage, parts); return tools;
   }
   function renderFavoritesPanel() {
     if (!favoritesActive || ctProfileState.active !== 'favorites') return;
@@ -873,13 +902,16 @@
     const rows = ctProfileExistingRows(panel);
     const focused = panel.contains(document.activeElement) ? document.activeElement : null;
     const content = [];
-    content.push(ctProfileStatus(ctProfileText('このブラウザに保存したお気に入りです。便利ツールで過去のタイムラインから復元できます。全履歴の復元は保証できません。', 'Favorites saved in this browser. Use Tools to restore Favorites from the past timeline. Coverage of the entire past history is not guaranteed.')));
     const tools = ctProfileFavoriteTools(panel, view);
+    tools.querySelector('#ct-favorite-refresh').disabled = muted.busy;
     const importButton = tools.querySelector('#ct-favorite-import');
     if (importButton.disabled !== view.busy) importButton.disabled = view.busy;
     const message = tools.querySelector('#ct-favorite-backup-status');
     if (message.textContent !== view.message) message.textContent = view.message;
     if (message.dataset.error !== String(view.error)) message.dataset.error = String(view.error);
+    const storage = tools.querySelector('#ct-favorite-storage-status');
+    const storageText = storageError ? ctProfileText('ブラウザに保存できませんでした。この画面を閉じる前にバックアップを保存してください。', 'Browser storage is unavailable. Save a backup before closing this page.') : '';
+    if (storage.textContent !== storageText) storage.textContent = storageText;
     const historyNode = tools.querySelector('#ct-favorite-history-scope'); const historyText = ctProfileFavoriteHistoryText(history);
     if (historyNode.textContent !== historyText) historyNode.textContent = historyText;
     const partControls = tools.querySelector('#ct-favorite-backup-parts');
@@ -898,40 +930,42 @@
         }));
     }
     content.push(tools);
-    const controls = ctProfileStatus('');
-    const update = ctProfileControl(ctProfileText('表示を更新', 'Refresh view'), () => ctProfileLoadFavoriteMutes(true));
-    update.disabled = muted.busy; controls.append(update); content.push(controls);
     if (legacy.length) {
       const migration = ctProfileStatus(ctProfileText('以前の保存データがあります。使用中のアカウントのものか確認して取り込めます。', 'Older saved data is available. Import it if it belongs to this account.'));
-      migration.append(document.createElement('br'), ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.push(migration);
+      migration.append(ctProfileControl(ctProfileText('以前の保存データを取り込む', 'Import older saved data'), () => ctProfileImportFavorites(uid))); content.push(migration);
     }
-    if (storageError) content.push(ctProfileStatus(ctProfileText('ブラウザに保存できませんでした。この画面を閉じる前にバックアップを保存してください。', 'Browser storage is unavailable. Save a backup before closing this page.')));
     if (!muted.done) {
+      const hidden = tools.querySelector('#ct-favorite-hidden-status'); if (hidden.textContent) hidden.textContent = '';
       const count = tools.querySelector('#ct-favorite-count');
-      const summary = ctProfileText(`このアカウントに保存済み${items.length}件 · 表示前にミュート一覧を確認しています`, `${items.length} saved for this account · Checking muted accounts before display`);
-      if (count.textContent !== summary) count.textContent = summary;
-      const range = tools.querySelector('#ct-favorite-range'); const rangeText = ctProfileText('保存した投稿の日付範囲：ミュート一覧を確認中', 'Saved Tweet date range: checking muted accounts');
+      const summary = ctProfileText(`このアカウントに保存済み${items.length}件 · 表示前にミュート一覧の確認が必要です`, `${items.length} saved for this account · Muted accounts must be checked before display`);
+      const phase = muted.busy ? ctProfileText('確認中', 'Checking') : ctProfileText('未確認', 'Not checked');
+      ctProfileToolbarSummary(count, ctProfileText(`保存${items.length}件 · ${phase}`, `${items.length} saved · ${phase}`), summary);
+      const range = tools.querySelector('#ct-favorite-range'); const rangeText = muted.busy ?
+        ctProfileText('保存した投稿の日付範囲：ミュート一覧を確認中', 'Saved Tweet date range: checking muted accounts') :
+        ctProfileText('保存した投稿の日付範囲：ミュート一覧が未確認', 'Saved Tweet date range: muted accounts not checked');
       if (range.textContent !== rangeText) range.textContent = rangeText;
       const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート一覧を確認中…', 'Checking muted accounts…') :
         muted.error || ctProfileText('ミュート一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted accounts have been checked.'));
       waiting.setAttribute('role', 'status');
-      if (!muted.busy) waiting.append(document.createElement('br'), ctProfileControl(
+      if (!muted.busy) waiting.append(ctProfileControl(
         muted.error ? ctProfileText('再試行', 'Try again') : ctProfileText('続きを確認', 'Continue checking'), () => ctProfileLoadFavoriteMutes()));
       content.push(waiting);
     } else {
       const unmuted = items.filter(item => item.username && !muted.handles.has(item.username));
-      if (unmuted.length < items.length) content.push(ctProfileStatus(ctProfileText(
+      const hidden = tools.querySelector('#ct-favorite-hidden-status');
+      const hiddenText = unmuted.length < items.length ? ctProfileText(
         `ミュートした作者や作者を確認できない投稿${items.length - unmuted.length}件を非表示にしています。保存データは保持しています。`,
-        `${items.length - unmuted.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`)));
+        `${items.length - unmuted.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`) : '';
+      if (hidden.textContent !== hiddenText) hidden.textContent = hiddenText;
       const matching = unmuted.sort((a, b) => b.savedAt - a.savedAt);
       const visible = matching.slice(0, view.limit);
       const count = tools.querySelector('#ct-favorite-count');
       const summary = ctProfileText(`このアカウントに保存済み${items.length}件 · 表示${visible.length}件／表示対象${matching.length}件`, `${items.length} saved for this account · ${visible.length} shown / ${matching.length} available`);
-      if (count.textContent !== summary) count.textContent = summary;
+      ctProfileToolbarSummary(count, ctProfileText(`保存${items.length}件 · 表示${visible.length}/${matching.length}件`, `${items.length} saved · ${visible.length}/${matching.length} shown`), summary);
       const range = tools.querySelector('#ct-favorite-range'); const rangeText = ctProfileFavoriteDateRange(matching);
       if (range.textContent !== rangeText) range.textContent = rangeText;
       if (!visible.length) {
-        const empty = document.createElement('p'); empty.className = 'ct-profile-empty';
+        const empty = document.createElement('p'); empty.className = 'ct-profile-empty'; empty.setAttribute('role', 'status');
         empty.textContent = items.length ? ctProfileText('表示できるお気に入りはありません。', 'No Favorites to display.') :
           ctProfileText('まだお気に入りがありません。ツイートの星を押すとここに保存されます。', 'No Favorites saved yet. Favorite a Tweet with the star to save it here.');
         content.push(empty);
@@ -1081,20 +1115,34 @@
     const rows = ctProfileExistingRows(ctProfileState.panel);
     const focused = ctProfileState.panel.contains(document.activeElement) ? document.activeElement : null;
     const content = [];
-    const note = ctProfileStatus(ctProfileText(`投稿${state.scanned}件・返信${state.replyScanned}件を確認 · 写真・動画`, `${state.scanned} posts and ${state.replyScanned} replies checked · Photos and videos`));
-    const scope = document.createElement('div');
-    scope.textContent = ctProfileText('返信は最新100件まで含みます。以前のツイートは下から読み込めます。', 'Includes up to the latest 100 replies. Load older Tweets below.');
-    note.append(scope, document.createElement('br'), ctProfileControl(ctProfileText('更新', 'Refresh'), () => ctProfileLoadMedia(true)));
-    note.querySelector('button').disabled = state.busy; content.push(note);
+    let tools = ctProfileState.panel.querySelector(':scope > [data-ct-media-tools]');
+    if (tools?.ctMediaState !== state) {
+      tools = document.createElement('div'); tools.className = 'ct-profile-toolbar'; tools.dataset.ctMediaTools = ''; tools.ctMediaState = state;
+      const count = document.createElement('div'); count.className = 'ct-profile-toolbar-count'; count.id = 'ct-profile-media-count'; count.setAttribute('role', 'status');
+      const update = ctProfileControl(ctProfileText('更新', 'Refresh'), () => ctProfileLoadMedia(true));
+      update.setAttribute('aria-label', ctProfileText('写真・動画を更新', 'Refresh photos and videos'));
+      const details = document.createElement('details'); details.className = 'ct-profile-details';
+      const summary = document.createElement('summary'); summary.textContent = ctProfileText('取得範囲', 'Coverage');
+      const scope = document.createElement('div'); scope.className = 'ct-profile-detail-body';
+      scope.textContent = ctProfileText('返信は最新100件まで含みます。以前のツイートは下から読み込めます。', 'Includes up to the latest 100 replies. Load older Tweets below.');
+      details.append(summary, scope); tools.append(count, update, details);
+    }
+    ctProfileToolbarSummary(tools.querySelector('#ct-profile-media-count'),
+      ctProfileText(`投稿${state.scanned}件 · 返信${state.replyScanned}件`, `${state.scanned} posts · ${state.replyScanned} replies`),
+      ctProfileText(`投稿${state.scanned}件・返信${state.replyScanned}件を確認 · 写真・動画`, `${state.scanned} posts and ${state.replyScanned} replies checked · Photos and videos`));
+    tools.querySelector('button').disabled = state.busy; content.push(tools);
+    if (state.error) {
+      const error = ctProfileStatus(state.error); error.setAttribute('role', 'status'); content.push(error);
+    }
     for (const item of state.items) content.push(ctProfileReuseRow(item, rows));
     if (!state.items.length) {
       const empty = document.createElement('p'); empty.className = 'ct-profile-empty'; empty.setAttribute('role', 'status');
       empty.textContent = state.busy ? ctProfileText('写真・動画を読み込み中…', 'Loading photos and videos…') :
+        state.error ? ctProfileText('写真・動画を取得できませんでした。再試行できます。', 'Photos and videos could not be loaded. You can try again.') :
         state.done && !state.error ? ctProfileText('写真・動画のあるツイートはありません。', 'No Tweets with photos or videos.') :
           ctProfileText('ここまでの投稿には写真・動画がありません。以前の投稿を確認できます。', 'No photos or videos in the posts checked so far. You can check older posts.');
       content.push(empty);
     }
-    if (state.error) content.push(ctProfileStatus(state.error));
     if (!state.done || state.error) {
       const footer = ctProfileStatus('');
       const next = ctProfileControl(state.busy ? ctProfileText('読み込み中…', 'Loading…') :
