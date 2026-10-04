@@ -111,8 +111,8 @@ function render(edition) {
     : '';
   const current = japanese ? 'このページのスクリプト' : 'The script on this page';
   const features = japanese
-    ? '昔のTwitter風の表示、星のお気に入り、通知フィルターなどを追加。標準の拡大写真の横スワイプが指に追従し、滑らかに切り替わります。写真・動画／お気に入り欄の大きな説明枠を小さな行へ整理。取得範囲やバックアップは詳細を開いて利用できます。本文・名前・下書き・サイトのテーマを保持します。'
-    : 'Adds classic Twitter styling, star Favorites and notification filters. Native enlarged photo swipes follow your finger and settle smoothly. Media/Favorites replace large explanation blocks with a compact row; open its disclosure for coverage and backups. Preserves post text, names, drafts and the site theme.';
+    ? '昔のTwitter風の表示、星のお気に入り、通知フィルターなどを追加。写真のズーム中に画像が縮む問題と、2本指操作で写真が切り替わる問題を修正。通常の横スワイプは指に追従します。写真・動画／お気に入りは小さな行から表示し、取得範囲・バックアップは詳細にまとめています。本文・名前・下書き・サイトのテーマを保持します。'
+    : 'Adds classic Twitter styling, star Favorites and notification filters. Fixes photos shrinking during zoom and photo switching during a second-finger gesture. Normal photo swipes follow your finger. Media/Favorites start with a compact row; open its details for coverage and backups. Preserves post text, names, drafts and the site theme.';
   const safariFeature = edition.platform === 'safari'
     ? japanese ? '<p>Safari版は写真・動画の長押しで配信ファイル情報も表示します。</p>' : '<p>The Safari edition also shows delivered media file information on a long press.</p>'
     : '';

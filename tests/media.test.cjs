@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(path.join(__dirname, '../src/media.js'), 'utf8');
+const photoViewport = fs.readFileSync(path.join(__dirname, '../src/photo-viewport.js'), 'utf8');
 
 function uploadMarkup(kind = 'home') {
   const submit = `<button id="${kind === 'modal' ? 'public-modal-tweet-submit-btn' : kind === 'reply' ? 'reply-submit' : 'public-tweet-submit-btn'}">Post</button>`;
@@ -40,12 +41,17 @@ test('2.1 poll toggle does not disable multi-photo recognition or replace native
   await settle(()=>f.document.querySelector('.ct-media-upload-status')?.textContent.includes('2枚を追加'));
   assert.equal(f.document.querySelector('textarea').value,'A draft');
 });
-function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', reduced = false } = {}) {
+function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', reduced = false, viewport = null } = {}) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>${html}</body></html>`, {
     url: 'https://app.tweet.app/feed', runScripts: 'outside-only', pretendToBeVisual: true
   });
   const { window } = dom;
   window.matchMedia = () => ({ matches: reduced });
+  if (viewport) {
+    const visual = new window.EventTarget();
+    Object.assign(visual, {width:390,height:844,offsetTop:0,offsetLeft:0,scale:1}, viewport);
+    Object.defineProperty(window, 'visualViewport', {configurable:true,value:visual});
+  }
   if (transfer) {
     window.DataTransfer = class {
       constructor() {
@@ -64,7 +70,7 @@ function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', red
     });
   }
   window.ctNetworkState = {authUID:''};
-  window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${source}\nwindow.qa={ctMediaEnhance,ctMediaUploads,ctMediaCarousels,ctMediaVideos,ctMediaEnhanceVideo,network:ctNetworkState,get viewer(){return ctMediaViewer}};`);
+  window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${photoViewport}\n${source}\nwindow.qa={ctMediaEnhance,ctMediaUploads,ctMediaCarousels,ctMediaVideos,ctMediaEnhanceVideo,network:ctNetworkState,get viewer(){return ctMediaViewer}};`);
   t.after(() => window.close());
   const f = { dom, window, document: window.document, qa: window.qa, uploads: [], submitted: 0, closed: 0 };
   f.enhance = () => f.qa.ctMediaEnhance();
@@ -791,4 +797,72 @@ test('single native photos center in the visual viewport independently of carous
   assert.match(style, /max\(env\(safe-area-inset-top\),env\(safe-area-inset-bottom\)\)/);
   assert.match(style, /prefers-reduced-motion:reduce/);
   assert.match(style, /hover:hover\) and \(pointer:fine/);
+});
+
+function photoViewportFixture(f, values = {}) {
+  const viewport = f.window.visualViewport || new f.window.EventTarget();
+  Object.assign(viewport, {width:390,height:844,offsetTop:0,offsetLeft:0,scale:1}, values);
+  Object.defineProperty(f.window, 'visualViewport', {configurable:true,value:viewport});
+  f.enhance();
+  return viewport;
+}
+test('native photo zoom retains layout size and position through 2x, 4x and browser pan, then refits after zoom-out', t => {
+  const f=harness(t, '<div class="fixed" role="dialog" aria-modal="true" aria-label="Media viewer"><div><button aria-label="Close media viewer">Close</button></div><div><img alt="Media preview" src="/photo.jpg"></div></div>');
+  const v=photoViewportFixture(f), d=f.document.querySelector('[role=dialog]'), img=d.querySelector('img');
+  const original=d.style.cssText;
+  for(const values of [{scale:2,width:195,height:422,offsetLeft:60,offsetTop:100},{scale:4,width:97.5,height:211,offsetLeft:90,offsetTop:180}]) {
+    Object.assign(v,values);v.dispatchEvent(new f.window.Event('resize'));v.dispatchEvent(new f.window.Event('scroll'));f.enhance();
+    assert.equal(d.style.cssText,original);assert.equal(d.querySelector('img'),img);assert.equal(img.getAttribute('src'),'/photo.jpg');
+    assert.equal(d.classList.contains('ct-media-photo-zoomed'),true);
+  }
+  Object.assign(v,{scale:1,width:390,height:740,offsetLeft:0,offsetTop:0});v.dispatchEvent(new f.window.Event('resize'));
+  assert.equal(d.style.getPropertyValue('--ct-media-view-height'),'740px');assert.equal(d.classList.contains('ct-media-photo-zoomed'),false);
+});
+test('a photo opened while already zoomed starts at unscaled bounds rather than the shrinking viewport', t => {
+  const f=harness(t,'<div class="fixed" role="dialog" aria-modal="true" aria-label="Media viewer"><div><img alt="Media preview" src="/photo.jpg"></div></div>');
+  photoViewportFixture(f,{scale:2,width:195,height:422,offsetLeft:100,offsetTop:200});const d=f.document.querySelector('[role=dialog]');
+  assert.equal(d.style.getPropertyValue('--ct-media-view-width'),'390px');assert.equal(d.style.getPropertyValue('--ct-media-view-height'),'844px');
+  assert.equal(d.style.getPropertyValue('--ct-media-view-top'),'0px');assert.equal(d.style.getPropertyValue('--ct-media-view-left'),'0px');
+});
+test('zoom beginning mid-swipe cancels touch and pointer movement without a native photo switch, even before viewport events', t => {
+  for(const pointer of [false,true]) {
+    const f=motionViewer(t,{pointer,viewport:{}});const v=photoViewportFixture(f);const names=pointer?['pointerdown','pointermove','pointerup']:['touchstart','touchmove','touchend'];
+    f.gesture(names[0],280);f.gesture(names[1],200);f.flushFrames();assert.ok(f.qa.viewer.motion);
+    Object.assign(v,{scale:2,width:195,height:422});const move=f.gesture(names[1],80);f.gesture(names[2],70);f.tick(1800);
+    assert.equal(move.defaultPrevented,false);assert.deepEqual(f.native.clicked,[0]);assert.equal(f.qa.viewer.touch,null);assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);
+  }
+});
+test('viewport zoom cancels an existing captured drag immediately and allows horizontal browser panning', t => {
+  const f=motionViewer(t,{pointer:true,viewport:{}});const v=photoViewportFixture(f);let released=0;
+  f.preview.setPointerCapture=()=>{};f.preview.releasePointerCapture=()=>released++;
+  f.gesture('pointerdown',280);f.gesture('pointermove',160);f.flushFrames();
+  Object.assign(v,{scale:2,width:195,height:422});v.dispatchEvent(new f.window.Event('resize'));
+  assert.equal(released,1);assert.equal(f.qa.viewer.touch,null);assert.equal(f.qa.viewer.motion,null);
+  f.gesture('pointerup',80);f.gesture('pointerdown',280);const move=f.gesture('pointermove',80);f.gesture('pointerup',80);
+  assert.equal(move.defaultPrevented,false);assert.deepEqual(f.native.clicked,[0]);assert.ok(f.native.dialog.classList.contains('ct-media-photo-zoomed'));
+  assert.match(f.document.getElementById('ct-media-style').textContent,/\.ct-media-photo-zoomed \.ct-media-swipe-stage \{ touch-action:pan-x pan-y pinch-zoom/);
+});
+test('multi-pointer pinch remains canceled until every finger lifts and a new gesture starts', t => {
+  const f=motionViewer(t,{pointer:true,viewport:{}});photoViewportFixture(f);
+  f.gesture('pointerdown',280);f.gesture('pointermove',200);f.flushFrames();
+  const secondary={pointerId:{value:8},isPrimary:{value:false},pointerType:{value:'touch'}};
+  f.gesture('pointerdown',160,100,secondary);f.gesture('pointerup',180);
+  const move=f.gesture('pointermove',40,100,secondary);f.gesture('pointerup',40,100,secondary);
+  assert.equal(move.defaultPrevented,false);assert.deepEqual(f.native.clicked,[0]);assert.equal(f.qa.viewer.pointers.size,0);assert.equal(f.qa.viewer.pinch,false);
+  f.gesture('pointerdown',280);f.gesture('pointermove',120);f.gesture('pointerup',90);f.tick(240);assert.deepEqual(f.native.clicked,[0,1]);
+});
+test('touch fallback does not turn the remaining finger of a pinch into a swipe', t => {
+  const f=motionViewer(t,{viewport:{}});photoViewportFixture(f);
+  f.gesture('touchstart',280);f.gesture('touchmove',200);
+  f.gesture('touchstart',160,100,{touches:{value:[{clientX:200,clientY:100},{clientX:160,clientY:100}]}});
+  f.gesture('touchend',200,100,{touches:{value:[{clientX:160,clientY:100}]}});
+  const move=f.gesture('touchmove',40);f.gesture('touchend',40,100,{touches:{value:[]}});
+  assert.equal(move.defaultPrevented,false);assert.deepEqual(f.native.clicked,[0]);assert.equal(f.qa.viewer.pinch,false);
+  f.gesture('touchstart',280);f.gesture('touchend',90,100,{touches:{value:[]}});f.tick(240);assert.deepEqual(f.native.clicked,[0,1]);
+});
+test('unzoomed viewport resize cancels stale drag geometry while fresh swipes continue to work', t => {
+  const f=motionViewer(t,{pointer:true,viewport:{}});const v=photoViewportFixture(f);
+  f.gesture('pointerdown',280);f.gesture('pointermove',200);f.flushFrames();v.height=600;v.dispatchEvent(new f.window.Event('resize'));
+  f.gesture('pointerup',90);assert.deepEqual(f.native.clicked,[0]);assert.equal(f.qa.viewer.motion,null);
+  f.gesture('pointerdown',280);f.gesture('pointerup',90);f.tick(240);assert.deepEqual(f.native.clicked,[0,1]);
 });

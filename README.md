@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.19.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.19.1** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** GitHubとGreasy Forkの全6版を6.19.0へ更新し、通常のコードURLと生成コードの一致を確認済みです。
+**配布状況:** 公開中は6.19.0です。6.19.1は写真のズーム修正を検証中で、まだ公開していません。6.19.0の全6版は通常のコードURLと生成コードの一致を確認済みです。
 
 ## 導入・更新
 
@@ -51,7 +51,7 @@
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
 
-6.19.0では、標準ツイートの複数写真を拡大した画面で横スワイプが指に追従し、次の写真へ滑らかに移ります。写真・動画／お気に入り欄の大きな説明と更新枠を小さな行に整理し、すぐにツイートが始まる表示にしました。
+6.19.1では、写真のズーム中に画像が縮んで拡大を打ち消す問題を修正。ズームや2本指の操作が始まると写真切り替えを解除し、拡大した写真を縦横に動かせます。プロフィールの元写真が更新・削除された場合も古い拡大画面を閉じます。指に追従する横スワイプと、写真・動画／お気に入り欄の小さな行は維持しています。
 
 ## 主な機能
 
@@ -105,7 +105,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.19.0 makes Tweet’s enlarged native photo swipes follow your finger and settle smoothly. Profile Media/Favorites use a compact count-and-refresh row, followed immediately by Tweets. All six distributions are published as 6.19.0; their usual code URLs match the generated release files.
+Version 6.19.1 fixes photos shrinking during zoom. Starting zoom or a second-finger gesture cancels photo switching, and enlarged photos allow horizontal and vertical panning. A profile photo viewer closes when its source is replaced or removed. Finger-following swipes and the compact Media/Favorites row remain. The published release is still 6.19.0; 6.19.1 is under validation and has not been published. The usual code URLs for all six 6.19.0 editions match their generated files.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 

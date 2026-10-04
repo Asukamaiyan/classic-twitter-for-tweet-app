@@ -5,6 +5,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(path.join(__dirname, '../src/profile.js'), 'utf8');
 const timestamps = fs.readFileSync(path.join(__dirname, '../src/timestamps.js'), 'utf8');
+const photoViewport = fs.readFileSync(path.join(__dirname, '../src/photo-viewport.js'), 'utf8');
 function client(user = 'viewer', labels = ['Tweets', 'Replies', 'Reposts']) {
   return `<div class="overflow-hidden"><img src="https://images.example/cover.jpg" alt="Cover"></div><div><div class="mt-3 flex flex-col gap-1"><h2 class="font-extrabold"><span>${user}</span></h2><p class="text-tl-app-text-muted">@${user}</p></div><p class="mt-3 text-tl-app-text leading-relaxed">Profile bio</p></div>
     <div role="tablist" class="flex border-b border-tl-app-border">${labels.map((label, index) => `<button type="button" role="tab" aria-label="${label}" aria-selected="${index === 0}"><span><svg></svg>${index === 0 ? '<span class="native-underline"></span>' : ''}</span></button>`).join('')}</div>
@@ -40,7 +41,7 @@ function harness(t, options = {}) {
     assert.equal(endpoint.searchParams.get('limit'), '24');
     return pages[Number(endpoint.searchParams.get('cursor') || 0)] || { posts: [], nextCursor: null };
   };
-  window.eval(`const CT_LOCALE='${options.locale || 'en'}'; const KEY={favorites:'legacy.favorites'}; const API_ORIGIN='https://api.tweet.app'; let favoritesActive=false; let ctPageActive=true; ${timestamps} ${source}
+  window.eval(`const CT_LOCALE='${options.locale || 'en'}'; const KEY={favorites:'legacy.favorites'}; const API_ORIGIN='https://api.tweet.app'; let favoritesActive=false; let ctPageActive=true; ${photoViewport} ${timestamps} ${source}
     window.profile={patch:patchFavoriteProfileTab, close:closeFavoritesPanel, render:renderFavoritesPanel, media:ctProfileLoadMedia, mutes:ctProfileLoadFavoriteMutes, state:ctProfileState,
     save:ctProfileSaveFavorite, remove:ctProfileRemoveFavorite, remember:ctProfileRememberLikedPosts, load:ctProfileLoadFavorites, import:ctProfileImportFavorites, assets:ctProfileMediaAssets,
     context:ctProfileContext, viewerClose:ctProfileCloseViewer, backup:ctProfileFavoriteBackup, backupParts:ctProfileFavoriteBackupParts, importBackup:ctProfileImportFavoriteBackup, setActive:value=>{ctPageActive=value;}};`);
@@ -919,7 +920,7 @@ test('Favorites show account-local recovery coverage without claiming that the w
 
 test('photo dialog centers a stage in the current visual viewport and removes viewport listeners on close', async t => {
   const h = harness(t); await h.ready(); const viewport = new h.window.EventTarget();
-  Object.assign(viewport, { width: 390, height: 844, offsetTop: 12, offsetLeft: 0 });
+  Object.assign(viewport, { width: 390, height: 844, offsetTop: 12, offsetLeft: 0, scale: 1 });
   Object.defineProperty(h.window, 'visualViewport', { configurable: true, value: viewport });
   h.window.HTMLDialogElement.prototype.showModal = function() { this.setAttribute('open', ''); };
   h.window.HTMLDialogElement.prototype.close = function() { this.removeAttribute('open'); };
@@ -932,12 +933,87 @@ test('photo dialog centers a stage in the current visual viewport and removes vi
   assert.equal(h.window.getComputedStyle(dialog.querySelector('.ct-profile-viewer-stage')).placeItems, 'center');
   assert.equal(dialog.style.getPropertyValue('--ct-photo-view-height'), '844px');
   assert.equal(dialog.style.getPropertyValue('--ct-photo-view-width'), '390px');
+  const bounds = () => ['width', 'height', 'top', 'left'].map(name => dialog.style.getPropertyValue('--ct-photo-view-' + name));
+  const before = bounds();
+  Object.assign(viewport, { scale: 2, width: 195, height: 422, offsetTop: 80, offsetLeft: 35 }); viewport.dispatchEvent(new h.window.Event('resize'));
+  assert.deepEqual(bounds(), before);
+  Object.assign(viewport, { scale: 4, width: 97.5, height: 211, offsetTop: 130, offsetLeft: 70 }); viewport.dispatchEvent(new h.window.Event('resize'));
+  viewport.offsetTop = 160; viewport.offsetLeft = 92; viewport.dispatchEvent(new h.window.Event('scroll')); h.window.dispatchEvent(new h.window.Event('resize'));
+  assert.deepEqual(bounds(), before); assert.equal(dialog.querySelector('img').src, 'https://images.example/photo.jpg');
+  viewport.scale = 1;
   viewport.height = 600; viewport.width = 320; viewport.offsetTop = 6; viewport.dispatchEvent(new h.window.Event('resize'));
   assert.equal(dialog.style.getPropertyValue('--ct-photo-view-height'), '600px'); assert.equal(dialog.style.getPropertyValue('--ct-photo-view-width'), '320px');
   assert.equal(dialog.style.getPropertyValue('--ct-photo-view-top'), '6px');
   dialog.querySelector('[aria-label=Close]').click(); assert.equal(h.document.activeElement, trigger);
   viewport.height = 500; viewport.dispatchEvent(new h.window.Event('resize'));
   assert.equal(dialog.style.getPropertyValue('--ct-photo-view-height'), '600px'); assert.equal(h.document.querySelector('dialog'), null);
+});
+
+test('profile photo opened during pinch uses layout bounds and resumes keyboard or browser resize fitting after zoom ends', async t => {
+  const h = harness(t); await h.ready(); const viewport = new h.window.EventTarget();
+  Object.assign(viewport, { width: 195, height: 300, offsetTop: 120, offsetLeft: 45, scale: 2 });
+  Object.defineProperty(h.window, 'visualViewport', { configurable: true, value: viewport });
+  Object.defineProperty(h.document.documentElement, 'clientWidth', { configurable: true, value: 390 });
+  h.window.HTMLDialogElement.prototype.showModal = function() { this.setAttribute('open', ''); };
+  h.window.HTMLDialogElement.prototype.close = function() { this.removeAttribute('open'); };
+  h.api.save(item('photo', { media: [{ type: 'image', url: 'https://images.example/photo.jpg', poster: '' }] })); await h.select('favorites');
+  h.document.querySelector('.ct-profile-photo').click(); const dialog = h.document.querySelector('dialog');
+  const bounds = () => ['width', 'height', 'top', 'left'].map(name => dialog.style.getPropertyValue('--ct-photo-view-' + name));
+  assert.deepEqual(bounds(), ['390px', '600px', '0px', '0px']);
+  Object.assign(viewport, { scale: 3, width: 130, height: 200, offsetTop: 200, offsetLeft: 80 }); viewport.dispatchEvent(new h.window.Event('scroll'));
+  assert.deepEqual(bounds(), ['390px', '600px', '0px', '0px']);
+  Object.assign(viewport, { scale: 1, width: 390, height: 720, offsetTop: 14, offsetLeft: 0 }); viewport.dispatchEvent(new h.window.Event('resize'));
+  assert.deepEqual(bounds(), ['390px', '720px', '14px', '0px']);
+  viewport.height = 480; viewport.offsetTop = 80; viewport.dispatchEvent(new h.window.Event('resize'));
+  assert.deepEqual(bounds(), ['390px', '480px', '80px', '0px']);
+  viewport.width = 320; viewport.height = 600; viewport.offsetTop = 0; h.window.dispatchEvent(new h.window.Event('resize'));
+  assert.deepEqual(bounds(), ['320px', '600px', '0px', '0px']);
+});
+
+test('profile photo route, account and pagehide cleanup removes all fit callbacks without changing the detached dialog', async t => {
+  for (const kind of ['route', 'account', 'pagehide']) {
+    const h = harness(t); await h.ready(); const viewport = new h.window.EventTarget();
+    Object.assign(viewport, { width: 390, height: 844, offsetTop: 0, offsetLeft: 0, scale: 1 });
+    const active = new Set(); const windowActive = new Set();
+    const add = viewport.addEventListener.bind(viewport), remove = viewport.removeEventListener.bind(viewport);
+    viewport.addEventListener = (name, listener, options) => { active.add(listener); add(name, listener, options); };
+    viewport.removeEventListener = (name, listener, options) => { remove(name, listener, options); if (name === 'resize') active.delete(listener); };
+    const windowAdd = h.window.addEventListener.bind(h.window), windowRemove = h.window.removeEventListener.bind(h.window);
+    h.window.addEventListener = (name, listener, options) => { if (name === 'resize') windowActive.add(listener); windowAdd(name, listener, options); };
+    h.window.removeEventListener = (name, listener, options) => { if (name === 'resize') windowActive.delete(listener); windowRemove(name, listener, options); };
+    Object.defineProperty(h.window, 'visualViewport', { configurable: true, value: viewport });
+    h.window.HTMLDialogElement.prototype.showModal = function() { this.setAttribute('open', ''); };
+    h.window.HTMLDialogElement.prototype.close = function() { this.removeAttribute('open'); };
+    h.api.save(item('photo', { media: [{ type: 'image', url: 'https://images.example/photo.jpg', poster: '' }] })); await h.select('favorites');
+    h.document.querySelector('.ct-profile-photo').click(); const dialog = h.document.querySelector('dialog');
+    const previous = dialog.getAttribute('style'); assert.equal(active.size, 1); assert.equal(windowActive.size, 1);
+    if (kind === 'route') { h.route('/user/alice', 'alice'); h.api.patch(); }
+    else if (kind === 'account') { h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.api.patch(); }
+    else h.window.dispatchEvent(new h.window.Event('pagehide'));
+    await tick(); assert.equal(h.api.state.viewer, null); assert.equal(dialog.isConnected, false);
+    assert.equal(active.size, 0); assert.equal(windowActive.size, 0);
+    viewport.width = 320; viewport.height = 500; viewport.dispatchEvent(new h.window.Event('resize')); viewport.dispatchEvent(new h.window.Event('scroll')); h.window.dispatchEvent(new h.window.Event('resize'));
+    assert.equal(dialog.getAttribute('style'), previous);
+  }
+});
+
+test('profile photo sources or removed triggers close stale viewers while ordinary reused metadata keeps them open', async t => {
+  for (const change of ['replace', 'remove', 'gallery']) {
+    const h = harness(t); await h.ready();
+    h.window.HTMLDialogElement.prototype.showModal = function() { this.setAttribute('open', ''); };
+    h.window.HTMLDialogElement.prototype.close = function() { this.removeAttribute('open'); };
+    h.api.save(item('photo', { createdAt: '2026-01-01T00:00:00Z', media: [{ type: 'image', url: 'https://images.example/original.jpg', poster: '' }] })); await h.select('favorites');
+    const trigger = h.document.querySelector('.ct-profile-photo'); trigger.click(); const dialog = h.document.querySelector('dialog');
+    const viewer = h.api.state.viewer; const time = h.document.querySelector('.ct-profile-time'); time.textContent = 'Updated display time';
+    h.history({ source: 'following', pages: 2, scanned: 40, recovered: 1, busy: true });
+    assert.equal(h.api.state.viewer, viewer); assert.equal(dialog.isConnected, true); assert.equal(trigger.isConnected, true);
+    assert.equal(h.document.querySelector('.ct-profile-time'), time); assert.equal(time.textContent, 'Updated display time');
+    if (change === 'replace') h.api.save(item('photo', { createdAt: '2026-01-01T00:00:00Z', media: [{ type: 'image', url: 'https://images.example/replaced.jpg', poster: '' }] }));
+    else if (change === 'remove') h.api.remove('photo');
+    else { trigger.querySelector('img').src = 'https://images.example/changed.jpg'; h.history({ source: 'following', pages: 3, scanned: 60, recovered: 1, busy: true }); }
+    assert.equal(h.api.state.viewer, null); assert.equal(dialog.isConnected, false);
+    assert.equal(h.document.activeElement, change === 'gallery' ? trigger : h.document.getElementById('ct-favorites-tab'));
+  }
 });
 
 test('local profile videos gain shared fullscreen handling only after mounting and keep their existing nodes', async t => {

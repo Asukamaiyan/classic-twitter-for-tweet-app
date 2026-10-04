@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Android
 // @namespace    https://tweet.app/
-// @version      6.19.0
+// @version      6.19.1
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -2518,7 +2518,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.19.0';
+    document.documentElement.dataset.ctActiveVersion = '6.19.1';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -2946,6 +2946,38 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ctTimestampRefreshRelative(clocks);
   }
 
+    // Keep photos in layout coordinates while the browser magnifies and pans
+  // them. Refitting to the shrinking visual viewport would cancel the zoom.
+  const ctPhotoViewportBounds = new WeakMap();
+  function ctPhotoViewportZoomed() {
+    const scale = window.visualViewport?.scale;
+    return Number.isFinite(scale) && scale > 1.001;
+  }
+  function ctPhotoViewportFit(dialog, prefix) {
+    const viewport = window.visualViewport;
+    const zoomed = ctPhotoViewportZoomed();
+    let bounds = ctPhotoViewportBounds.get(dialog);
+    if (!zoomed || !bounds) {
+      const scale = zoomed ? viewport.scale : 1;
+      bounds = {
+        width: zoomed ? document.documentElement.clientWidth || viewport.width * scale || window.innerWidth : viewport?.width || window.innerWidth,
+        height: (viewport?.height || window.innerHeight) * scale,
+        top: zoomed ? 0 : viewport?.offsetTop || 0,
+        left: zoomed ? 0 : viewport?.offsetLeft || 0
+      };
+      ctPhotoViewportBounds.set(dialog, bounds);
+    }
+    let changed = false;
+    for (const [name, value] of Object.entries(bounds)) {
+      if (!Number.isFinite(value) || value < 0) continue;
+      const property = prefix + name, pixels = value + 'px';
+      if (dialog.style.getPropertyValue(property) !== pixels) {
+        dialog.style.setProperty(property, pixels); changed = true;
+      }
+    }
+    return { zoomed, changed };
+  }
+
     // Profile additions use Tweet's verified posts GET. Favorites are browser-local
   // snapshots, scoped to the signed-in account; no favorite-history endpoint is assumed.
   const ctProfileState = {
@@ -3217,7 +3249,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     viewer.cleanup?.();
     try { viewer.dialog.close(); } catch {}
     viewer.dialog.remove();
-    if (viewer.trigger?.isConnected) viewer.trigger.focus({ preventScroll: true });
+    const trigger = viewer.trigger?.isConnected ? viewer.trigger :
+      ctProfileState.tablist?.querySelector('button[role="tab"][aria-selected="true"]');
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
   }
   function ctProfileOpenViewer(images, index, trigger) {
     ctProfileCloseViewer();
@@ -3255,15 +3289,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     dialog.addEventListener('cancel', event => { event.preventDefault(); ctProfileCloseViewer(); });
     nav.append(previous, count, next, close); dialog.append(stage, nav); document.body.append(dialog);
     const viewport = window.visualViewport;
-    const fit = () => {
-      const dimensions = viewport ? { width: viewport.width, height: viewport.height, top: viewport.offsetTop, left: viewport.offsetLeft } :
-        { width: window.innerWidth, height: window.innerHeight, top: 0, left: 0 };
-      for (const [name, value] of Object.entries(dimensions)) {
-        if (Number.isFinite(value) && value >= 0) dialog.style.setProperty('--ct-photo-view-' + name, value + 'px');
-      }
-    };
+    const fit = () => ctPhotoViewportFit(dialog, '--ct-photo-view-');
     viewport?.addEventListener('resize', fit); viewport?.addEventListener('scroll', fit); window.addEventListener('resize', fit);
-    ctProfileState.viewer = { dialog, trigger, cleanup: () => {
+    ctProfileState.viewer = { dialog, trigger, gallery: trigger.closest('.ct-profile-gallery'),
+      sources: images.map(image => image.url).join('\n'), cleanup: () => {
       viewport?.removeEventListener('resize', fit); viewport?.removeEventListener('scroll', fit); window.removeEventListener('resize', fit);
     } };
     fit();
@@ -3545,6 +3574,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     for (const node of content) {
       if (node === next) next = next.nextSibling;
       else panel.insertBefore(node, next);
+    }
+    const viewer = ctProfileState.viewer;
+    if (viewer && (!viewer.trigger?.isConnected || !viewer.gallery?.isConnected ||
+        viewer.sources !== [...viewer.gallery.querySelectorAll(':scope > .ct-profile-photo > img')].map(image => image.src).join('\n'))) {
+      ctProfileCloseViewer();
     }
     if (typeof ctMediaEnhanceVideo === 'function') {
       for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
@@ -5801,6 +5835,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       viewer.motion = null;
     }
   }
+  function ctMediaCancelPhotoGesture(viewer) {
+    if (viewer.touch?.locked || viewer.pinch) viewer.suppressClickUntil = Date.now() + 400;
+    ctMediaResetPhotoMotion(viewer);
+  }
   function ctMediaPhotoLayer(viewer, target) {
     if (viewer.motion) return viewer.motion;
     const image = viewer.dialog.querySelector('img[alt="Media preview"]');
@@ -5882,14 +5920,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }, 240);
   }
   function ctMediaStartPhotoGesture(viewer, event, point) {
-    if (!ctMediaPhotoViewerValid(viewer) || viewer.motion || viewer.requestedIndex != null || window.visualViewport?.scale > 1 ||
+    if (!ctMediaPhotoViewerValid(viewer) || viewer.motion || viewer.requestedIndex != null || ctPhotoViewportZoomed() || viewer.pinch ||
         !event.target.matches?.('img[alt="Media preview"]')) return;
     viewer.touch = { x: point.clientX, y: point.clientY, at: performance.now(), dx: 0, locked: false,
       pointer: event.pointerId, width: viewer.stage?.clientWidth || window.innerWidth };
   }
   function ctMediaDragPhoto(viewer, event, point) {
     const touch = viewer.touch;
-    if (!touch || !ctMediaPhotoViewerValid(viewer)) { ctMediaResetPhotoMotion(viewer); return; }
+    if (!touch) return;
+    if (!ctMediaPhotoViewerValid(viewer)) { ctMediaClearViewer(); return; }
+    if (ctPhotoViewportZoomed() || viewer.pinch) { ctMediaCancelPhotoGesture(viewer); return; }
     const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
     if (!touch.locked) {
       if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { viewer.touch = null; return; }
@@ -5908,6 +5948,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!touch) return;
     // Older TouchEvent bridges may omit move; retain their completed swipe.
     ctMediaDragPhoto(viewer, event, point);
+    if (viewer.touch !== touch) return;
     viewer.touch = null;
     if (!touch.locked) return;
     const dx = point.clientX - touch.x;
@@ -5919,21 +5960,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (touch.pointer != null) try { touch.capture?.releasePointerCapture(touch.pointer); } catch {}
   }
   function ctMediaViewport(dialog) {
-    const viewport = window.visualViewport;
-    const values = {
-      '--ct-media-view-top': `${viewport?.offsetTop || 0}px`,
-      '--ct-media-view-left': `${viewport?.offsetLeft || 0}px`,
-      '--ct-media-view-width': `${viewport?.width || window.innerWidth}px`,
-      '--ct-media-view-height': `${viewport?.height || window.innerHeight}px`
-    };
-    for (const [key, value] of Object.entries(values)) {
-      if (dialog.style.getPropertyValue(key) !== value) dialog.style.setProperty(key, value);
+    const fit = ctPhotoViewportFit(dialog, '--ct-media-view-');
+    dialog.classList.toggle('ct-media-photo-zoomed', fit.zoomed);
+    if (ctMediaViewer?.dialog === dialog && (fit.zoomed || fit.changed)) {
+      ctMediaCancelPhotoGesture(ctMediaViewer); ctMediaEnhanceViewer();
     }
   }
   function ctMediaCenterViewers() {
     for (const [dialog, state] of ctMediaCenteredViewers) {
       if (dialog.isConnected && dialog.querySelector('img[alt="Media preview"]')) continue;
-      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer');
+      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed');
       state.stage.classList.remove('ct-media-viewer-stage');
       state.header?.classList.remove('ct-media-viewer-header');
       for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
@@ -6209,7 +6245,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const preview = dialog.querySelector('img[alt="Media preview"]');
       const stage = preview?.parentElement !== dialog && preview?.parentElement?.parentElement === dialog ? preview.parentElement : null;
       const viewer = { dialog, state: pending.state, controls, prev, next, count, index: pending.index,
-        stage, context: pending.context, sources: ctMediaSlides(pending.state.grid).map(slide => slide.firstElementChild.src).join('\n') };
+        stage, pointers: new Set(), pinch: false, context: pending.context,
+        sources: ctMediaSlides(pending.state.grid).map(slide => slide.firstElementChild.src).join('\n') };
       viewer.reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)');
       viewer.onReduce = () => { if (viewer.reduce.matches) { ctMediaResetPhotoMotion(viewer); ctMediaEnhanceViewer(); } };
       viewer.reduce?.addEventListener?.('change', viewer.onReduce);
@@ -6234,9 +6271,17 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         move(event.key === 'Home' ? 0 : event.key === 'End' ? viewer.state.slides.length - 1 :
           viewer.index + (event.key === 'ArrowRight' ? 1 : -1));
       };
-      viewer.onCancel = () => { if (viewer.touch) ctMediaResetPhotoMotion(viewer); };
-      viewer.onVisibility = () => { if (document.hidden) ctMediaResetPhotoMotion(viewer); };
-      viewer.onPageHide = () => ctMediaResetPhotoMotion(viewer);
+      viewer.onCancel = event => {
+        if (event.type === 'lostpointercapture') {
+          if (viewer.touch?.pointer === event.pointerId) ctMediaCancelPhotoGesture(viewer);
+          return;
+        }
+        viewer.pointers.delete(event.pointerId);
+        if (!viewer.pointers.size) viewer.pinch = false;
+        ctMediaCancelPhotoGesture(viewer);
+      };
+      viewer.onPageHide = () => { ctMediaCancelPhotoGesture(viewer); viewer.pointers.clear(); viewer.pinch = false; };
+      viewer.onVisibility = () => { if (document.hidden) viewer.onPageHide(); };
       viewer.onDragStart = event => { if (viewer.touch && event.target.matches?.('img[alt="Media preview"]')) event.preventDefault(); };
       dialog.addEventListener('dragstart', viewer.onDragStart);
       viewer.onClick = event => {
@@ -6247,23 +6292,37 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       };
       if (typeof window.PointerEvent === 'function') {
         viewer.onPointerStart = event => {
-          if (event.isPrimary === false) { ctMediaResetPhotoMotion(viewer); return; }
+          if (event.pointerType !== 'mouse') {
+            viewer.pointers.add(event.pointerId);
+            if (event.isPrimary === false || viewer.pointers.size > 1) {
+              viewer.pinch = true; ctMediaCancelPhotoGesture(viewer); return;
+            }
+          }
           if (event.button === 0) ctMediaStartPhotoGesture(viewer, event, event);
         };
         viewer.onPointerMove = event => { if (viewer.touch?.pointer === event.pointerId) ctMediaDragPhoto(viewer, event, event); };
-        viewer.onPointerEnd = event => { if (viewer.touch?.pointer === event.pointerId) ctMediaEndPhotoGesture(viewer, event, event); };
+        viewer.onPointerEnd = event => {
+          viewer.pointers.delete(event.pointerId);
+          if (viewer.pinch) ctMediaCancelPhotoGesture(viewer);
+          else if (viewer.touch?.pointer === event.pointerId) ctMediaEndPhotoGesture(viewer, event, event);
+          if (!viewer.pointers.size) viewer.pinch = false;
+        };
         for (const [name, handler] of [['pointerdown', viewer.onPointerStart], ['pointermove', viewer.onPointerMove],
             ['pointerup', viewer.onPointerEnd], ['pointercancel', viewer.onCancel], ['lostpointercapture', viewer.onCancel]]) dialog.addEventListener(name, handler);
       } else {
         viewer.onTouchStart = event => {
-          if (event.touches.length === 1) ctMediaStartPhotoGesture(viewer, event, event.touches[0]);
-          else ctMediaResetPhotoMotion(viewer);
+          if (event.touches.length === 1 && !viewer.pinch) ctMediaStartPhotoGesture(viewer, event, event.touches[0]);
+          else { viewer.pinch = true; ctMediaCancelPhotoGesture(viewer); }
         };
         viewer.onTouchMove = event => {
-          if (event.touches.length === 1) ctMediaDragPhoto(viewer, event, event.touches[0]);
-          else ctMediaResetPhotoMotion(viewer);
+          if (event.touches.length === 1 && !viewer.pinch) ctMediaDragPhoto(viewer, event, event.touches[0]);
+          else { viewer.pinch = true; ctMediaCancelPhotoGesture(viewer); }
         };
-        viewer.onTouchEnd = event => { if (event.changedTouches.length === 1) ctMediaEndPhotoGesture(viewer, event, event.changedTouches[0]); };
+        viewer.onTouchEnd = event => {
+          if (viewer.pinch) ctMediaCancelPhotoGesture(viewer);
+          else if (event.changedTouches.length === 1) ctMediaEndPhotoGesture(viewer, event, event.changedTouches[0]);
+          if (!event.touches?.length) viewer.pinch = false;
+        };
         dialog.addEventListener('touchstart', viewer.onTouchStart, { passive: true });
         dialog.addEventListener('touchmove', viewer.onTouchMove, { passive: false });
         dialog.addEventListener('touchend', viewer.onTouchEnd, { passive: true });
@@ -6313,6 +6372,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
       .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
       .ct-media-swipe-stage { touch-action:pan-y pinch-zoom; }
+      .ct-media-photo-zoomed .ct-media-swipe-stage { touch-action:pan-x pan-y pinch-zoom; }
       .ct-media-photo-covered { opacity:0!important; }
       .ct-media-photo-layer { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
       .ct-media-photo-track { display:flex; width:100%; height:100%; will-change:transform; }

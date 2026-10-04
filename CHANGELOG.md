@@ -1,5 +1,13 @@
 # Changelog
 
+## All distributions v6.19.1 — 2026-10-04
+
+- Share photo viewport fitting between native and profile viewers. Keep the last unzoomed layout dimensions and position during visual zoom/panning, avoiding image shrinkage that cancels magnification; resume ordinary viewport/keyboard fitting when zoom returns to its normal scale.
+- Initialize a viewer opened while already zoomed from layout dimensions rather than the shrunken visual viewport. Retain centered photos, safe areas, native image sources and handlers.
+- Cancel photo switching when zoom begins during a swipe or another pointer/touch joins it. Keep cancellation until all participating touches end, release capture and temporary motion, and allow horizontal and vertical panning while zoomed.
+- Close a profile photo viewer after its gallery source is replaced or its trigger/gallery is removed. Preserve ordinary row reuse and metadata/progress updates; restore focus to the connected trigger or selected profile tab.
+- Preserve account-local Favorites, backups, compact controls, post content and drafts. Add no Tweet API, userscript grant or connection host.
+
 ## All distributions v6.19.0 — 2026-10-04
 
 - Make enlarged native photo swipes follow horizontal finger movement through a frame-batched three-pane preview, with a short slide or return animation and restrained resistance at the first/last photo. Retain arrow buttons, keyboard controls, native image sources, nodes, close/backdrop and click handlers.
