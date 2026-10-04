@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.19.0
+// @version      6.19.1
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,7 @@
   /* @include runtime */
   /* @include presentation */
   /* @include timestamps */
+  /* @include photo-viewport */
   /* @include profile */
   /* @include favorite-capture */
   /* @include reply-times */

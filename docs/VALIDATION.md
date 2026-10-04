@@ -1,3 +1,22 @@
+# 6.19.1 検証記録
+
+確認日: 2026-10-04（日本時間）。日本語・英語各3環境、計6版。
+
+- `profile` **75件成功、失敗0件**。通常表示の390×844をscale 2→4→panでも保持し、scale 1へ戻ると通常の画面・キーボードresizeへ追従。拡大済みで初めて開く場合、close／画面・アカウント変更／pagehide後のcallback解除も確認しました。
+- 元写真のソース置換、元ボタン撤去、接続中galleryのソース不一致で拡大画面を閉じることを確認。正常な日時表示・復元進捗更新は同じviewerを保持。接続中の元ボタン、撤去済みなら選択中タブへフォーカスを戻します。独立したdiffレビューで公開を妨げる問題は見つかりませんでした。
+- `media` **60件成功、失敗0件**。通常／拡大中のviewport fitting、スワイプ途中の拡大、2本指pointer／touchから1本へ戻る操作、capture解除と元写真保持を含めて確認しました。
+- 6.19.0固定ソースと修正版の外部JSDOM再現で、旧プロフィールviewerはscale 2で195px、scale 4で97.5pxへ縮み、新版は390pxを保持。表示位置もpanで再フィットしなくなりました。`outputs/release-6.19.1/profile-zoom-before.json`、`profile-zoom-after.json`、再現fixtureを保存しました。これはCSS入力と寸法モデルの検証です。
+- 実ChromiumのCDP `Emulation.setPageScaleFactor` による拡大率模擬では、旧6.19.0の標準viewerはscale 2／VisualViewport幅195pxでdialog幅195px・画像幅171pxへ縮小。新版は通常時のdialog幅390px・画像幅366pxを保持しました。ズーム中の計算済み `touch-action` は `manipulation`（縦横移動とピンチを許可）です。CDPの拡大率変更は実機の指操作とは区別します。
+- 実ブラウザで全6生成版の標準／プロフィールviewerを確認し、実際の倍率2・3でも固定枠を保持しました。倍率4の要求はIABで実際には3へ制限されました。倍率4の検証は上記DOM回帰テストの結果で、実ブラウザの倍率4としては扱いません。独立した135件のmedia/profileテストも成功。全6版のメタデータと生成コードの全バイト一致を独立監査しました。
+- 全体の `npm run check` **581件成功、失敗0件**。全6生成版のビルド・構文検査を含みます。320×740・390×844・1280×900の画面幅で2倍拡大時の写真枠を保持。実ブラウザの合成pointerによるスワイプ途中にpage scaleを変更し、写真切り替えを中断、元写真保持、残った移動入力をpreventDefaultしないことを確認しました。これは実機の指操作ではありません。
+- 証跡は作業ディレクトリの `outputs/release-6.19.1/full-check.txt`、`browser-audit.json`、`photo.jpg` に保存しました。
+
+**未検証:** 実Tampermonkey／Stayの更新適用、Safari＋Stay／Android Firefox実機、実際のピンチ操作、ズーム中の画面回転、通常の長時間操作は未検証です。IABでは `Input.synthesizePinchGesture` が非対応でした。実サービスへの投稿・アップロード・お気に入り・投票・ミュート・フォロー変更はしていません。
+
+**配布:** GitHubの[PR #19](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/19)とGreasy Forkの全6版を6.19.1へ更新しました。実装commit `8a49a8b9b9358eb6f09d580e72146a35ae76895c` に対するGitHub CI 2件成功。Greasy Forkの公開画面の版番号・導入案内見出しを全6版で確認。匿名の通常コードURL取得で全6版とも6.19.1、Greasy Forkが付加する更新URL等を除き全バイト・SHA256一致を独立確認しました。`public-code-checks.json`、`github-ci.json`、公開画面の `release.jpg` を作業ディレクトリの `outputs/release-6.19.1/` に保存しました。確認用の画面・サーバーは終了し、ブラウザの画面幅・拡大率を復元しました。
+
+---
+
 # 6.19.0 検証記録
 
 確認日: 2026-10-04（日本時間）。日本語・英語各3環境、計6版。

@@ -269,7 +269,9 @@
     viewer.cleanup?.();
     try { viewer.dialog.close(); } catch {}
     viewer.dialog.remove();
-    if (viewer.trigger?.isConnected) viewer.trigger.focus({ preventScroll: true });
+    const trigger = viewer.trigger?.isConnected ? viewer.trigger :
+      ctProfileState.tablist?.querySelector('button[role="tab"][aria-selected="true"]');
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
   }
   function ctProfileOpenViewer(images, index, trigger) {
     ctProfileCloseViewer();
@@ -307,15 +309,10 @@
     dialog.addEventListener('cancel', event => { event.preventDefault(); ctProfileCloseViewer(); });
     nav.append(previous, count, next, close); dialog.append(stage, nav); document.body.append(dialog);
     const viewport = window.visualViewport;
-    const fit = () => {
-      const dimensions = viewport ? { width: viewport.width, height: viewport.height, top: viewport.offsetTop, left: viewport.offsetLeft } :
-        { width: window.innerWidth, height: window.innerHeight, top: 0, left: 0 };
-      for (const [name, value] of Object.entries(dimensions)) {
-        if (Number.isFinite(value) && value >= 0) dialog.style.setProperty('--ct-photo-view-' + name, value + 'px');
-      }
-    };
+    const fit = () => ctPhotoViewportFit(dialog, '--ct-photo-view-');
     viewport?.addEventListener('resize', fit); viewport?.addEventListener('scroll', fit); window.addEventListener('resize', fit);
-    ctProfileState.viewer = { dialog, trigger, cleanup: () => {
+    ctProfileState.viewer = { dialog, trigger, gallery: trigger.closest('.ct-profile-gallery'),
+      sources: images.map(image => image.url).join('\n'), cleanup: () => {
       viewport?.removeEventListener('resize', fit); viewport?.removeEventListener('scroll', fit); window.removeEventListener('resize', fit);
     } };
     fit();
@@ -597,6 +594,11 @@
     for (const node of content) {
       if (node === next) next = next.nextSibling;
       else panel.insertBefore(node, next);
+    }
+    const viewer = ctProfileState.viewer;
+    if (viewer && (!viewer.trigger?.isConnected || !viewer.gallery?.isConnected ||
+        viewer.sources !== [...viewer.gallery.querySelectorAll(':scope > .ct-profile-photo > img')].map(image => image.src).join('\n'))) {
+      ctProfileCloseViewer();
     }
     if (typeof ctMediaEnhanceVideo === 'function') {
       for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
