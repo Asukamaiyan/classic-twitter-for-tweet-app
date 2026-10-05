@@ -266,6 +266,7 @@
     const viewer = ctProfileState.viewer;
     if (!viewer) return;
     ctProfileState.viewer = null;
+    if (typeof ctMediaReleasePhotoQuality === 'function') ctMediaReleasePhotoQuality(viewer.dialog);
     viewer.cleanup?.();
     try { viewer.dialog.close(); } catch {}
     viewer.dialog.remove();
@@ -317,6 +318,7 @@
     } };
     fit();
     show();
+    if (typeof ctMediaAttachPhotoQuality === 'function') ctMediaAttachPhotoQuality(dialog, img);
     try { dialog.showModal(); close.focus(); } catch { ctProfileCloseViewer(); }
   }
   function ctProfileRestoreNative() {

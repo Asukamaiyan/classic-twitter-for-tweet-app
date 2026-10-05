@@ -6,6 +6,7 @@
   const ctMediaCarousels = new Map();
   const ctMediaCenteredViewers = new Map();
   const ctMediaVideos = new Map();
+  const ctMediaPhotoQuality = new Map();
   let ctMediaViewportBound = false;
   let ctMediaTransferSupported;
   let ctMediaPendingViewer = null;
@@ -13,6 +14,62 @@
   const ctMediaPhotoAccept = 'image/jpeg,image/png,image/webp';
 
   function ctMediaJapanese() { return CT_LOCALE === 'ja'; }
+  function ctMediaQualityURL(value) {
+    if (typeof value !== 'string' || value.length > 4000) return '';
+    try {
+      const url = new URL(value, location.href);
+      return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+    } catch { return ''; }
+  }
+  function ctMediaResolution(width, height) {
+    return Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0
+      ? `${width} × ${height}` : '';
+  }
+  function ctMediaReleasePhotoQuality(dialog) {
+    const state = ctMediaPhotoQuality.get(dialog);
+    if (!state) return;
+    state.observer.disconnect();
+    state.image.removeEventListener('load', state.update);
+    state.image.removeEventListener('error', state.update);
+    state.tools.remove(); ctMediaPhotoQuality.delete(dialog);
+  }
+  function ctMediaAttachPhotoQuality(dialog, image) {
+    if (!dialog?.isConnected || image?.tagName !== 'IMG' || !dialog.contains(image)) return;
+    const old = ctMediaPhotoQuality.get(dialog);
+    if (old?.image === image) { old.update(); return; }
+    ctMediaReleasePhotoQuality(dialog); ctMediaStyles();
+    const tools = document.createElement('div');
+    tools.className = 'ct-media-photo-quality'; tools.dataset.ctLocalUi = 'media-quality';
+    const open = document.createElement('a');
+    open.target = '_blank'; open.rel = 'noopener noreferrer'; open.referrerPolicy = 'no-referrer';
+    open.textContent = ctMediaJapanese() ? '配信画像を開く ↗' : 'Open image ↗';
+    open.setAttribute('aria-label', ctMediaJapanese() ? '配信画像を新しいタブで開く' : 'Open delivered image in a new tab');
+    const resolution = document.createElement('span'); resolution.className = 'ct-media-photo-resolution';
+    resolution.title = ctMediaJapanese() ? '読み込んだ画像のサイズ' : 'Size of the loaded image';
+    tools.append(open, resolution);
+    tools.addEventListener('click', event => event.stopPropagation());
+    const state = { image, tools, open, resolution, source: '' };
+    state.update = () => {
+      const source = ctMediaQualityURL(image.getAttribute('src') || '');
+      if (source !== state.source) {
+        state.source = source; resolution.textContent = ''; resolution.hidden = true;
+      }
+      if (source) { if (open.href !== source) open.href = source; }
+      else open.removeAttribute('href');
+      open.hidden = !source;
+      // currentSrc can still describe the previous photo during a native src
+      // change. Never attach that earlier photo's dimensions to the new link.
+      const current = image.currentSrc;
+      const dimensions = source && image.complete && (!current || ctMediaQualityURL(current) === source)
+        ? ctMediaResolution(image.naturalWidth, image.naturalHeight) : '';
+      if (resolution.textContent !== dimensions) resolution.textContent = dimensions;
+      resolution.hidden = !dimensions; tools.hidden = !source;
+    };
+    state.observer = new MutationObserver(state.update);
+    state.observer.observe(image, { attributes: true, attributeFilter: ['src', 'srcset', 'sizes'] });
+    image.addEventListener('load', state.update); image.addEventListener('error', state.update);
+    dialog.append(tools); ctMediaPhotoQuality.set(dialog, state); state.update();
+  }
   function ctMediaCanTransfer() {
     if (ctMediaTransferSupported !== undefined) return ctMediaTransferSupported;
     try {
@@ -339,8 +396,10 @@
         ['click', viewer.onClick]]) if (handler) viewer.dialog.removeEventListener(name, handler, name === 'click');
     document.removeEventListener('visibilitychange', viewer.onVisibility);
     window.removeEventListener('pagehide', viewer.onPageHide);
+    window.removeEventListener('pageshow', viewer.onPageShow);
     viewer.dialog.removeEventListener('dragstart', viewer.onDragStart);
     viewer.reduce?.removeEventListener?.('change', viewer.onReduce);
+    ctMediaClearPhotoDecode(viewer);
     ctMediaViewer = null;
   }
   function ctMediaPhotoContext() {
@@ -370,6 +429,37 @@
     if (viewer.touch?.locked || viewer.pinch) viewer.suppressClickUntil = Date.now() + 400;
     ctMediaResetPhotoMotion(viewer);
   }
+  function ctMediaClearPhotoDecode(viewer) {
+    // Detached decoded images belong only to this visible viewer. A promise
+    // completing after close/source/account changes cannot revive that viewer.
+    viewer.decodedPhotos?.clear();
+  }
+  function ctMediaWarmPhotoDecode(viewer) {
+    if (!ctMediaPhotoViewerValid(viewer) || viewer.pageActive === false || viewer.reduce?.matches || ctPhotoViewportZoomed()) {
+      ctMediaClearPhotoDecode(viewer); return;
+    }
+    const slides = ctMediaSlides(viewer.state.grid);
+    const wanted = new Set([viewer.index - 1, viewer.index, viewer.index + 1].filter(index => slides[index]));
+    const photos = viewer.decodedPhotos ||= new Map();
+    for (const index of photos.keys()) if (!wanted.has(index)) photos.delete(index);
+    const preview = viewer.dialog.querySelector('img[alt="Media preview"]');
+    for (const index of wanted) {
+      const source = slides[index].firstElementChild.src;
+      if (photos.get(index)?.source === source) continue;
+      const image = document.createElement('img');
+      image.alt = ''; image.draggable = false; image.decoding = 'async';
+      image.referrerPolicy = preview?.referrerPolicy || ''; image.src = source;
+      const entry = { image, source, ready: typeof image.decode !== 'function' };
+      photos.set(index, entry);
+      if (entry.ready) continue; // Older engines retain the existing behavior.
+      try {
+        Promise.resolve(image.decode()).then(() => {
+          if (photos.get(index) !== entry || !ctMediaPhotoViewerValid(viewer)) return;
+          entry.ready = image.complete && image.naturalWidth > 0;
+        }, () => {});
+      } catch {}
+    }
+  }
   function ctMediaPhotoLayer(viewer, target) {
     if (viewer.motion) return viewer.motion;
     const image = viewer.dialog.querySelector('img[alt="Media preview"]');
@@ -377,18 +467,23 @@
     // image, src, click handlers, close button and backdrop throughout.
     if (!viewer.stage || image?.parentElement !== viewer.stage ||
         viewer.reduce?.matches) return null;
+    ctMediaWarmPhotoDecode(viewer);
+    const slides = ctMediaSlides(viewer.state.grid);
+    // Do not cover a decoded native photo with a freshly created, still blank
+    // image. If preparation is incomplete, the native click remains available.
+    if (!viewer.decodedPhotos?.get(viewer.index)?.ready ||
+        (slides[target] && !viewer.decodedPhotos.get(target)?.ready)) return null;
     const layer = document.createElement('div');
     layer.className = 'ct-media-photo-layer'; layer.dataset.ctLocalUi = 'photo-motion';
     layer.setAttribute('aria-hidden', 'true');
     const track = document.createElement('div'); track.className = 'ct-media-photo-track';
-    const slides = ctMediaSlides(viewer.state.grid);
     for (const index of [target < viewer.index ? target : viewer.index - 1, viewer.index,
         target > viewer.index ? target : viewer.index + 1]) {
       const pane = document.createElement('div'); pane.className = 'ct-media-photo-pane';
       const original = slides[index]?.firstElementChild;
       if (original) {
-        const photo = document.createElement('img'); photo.alt = ''; photo.draggable = false;
-        photo.referrerPolicy = image.referrerPolicy; photo.src = original.src; pane.append(photo);
+        const decoded = viewer.decodedPhotos.get(index);
+        if (decoded?.ready && decoded.source === original.src) pane.append(decoded.image);
       }
       track.append(pane);
     }
@@ -503,6 +598,7 @@
       dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed');
       state.stage.classList.remove('ct-media-viewer-stage');
       state.header?.classList.remove('ct-media-viewer-header');
+      ctMediaReleasePhotoQuality(dialog);
       for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
       ctMediaCenteredViewers.delete(dialog);
     }
@@ -519,6 +615,7 @@
       dialog.classList.toggle('ct-media-viewport-viewer', dialog.classList.contains('fixed'));
       stage.classList.add('ct-media-viewer-stage');
       header?.classList.add('ct-media-viewer-header');
+      ctMediaAttachPhotoQuality(dialog, image);
       ctMediaCenteredViewers.set(dialog, { stage, header });
       ctMediaViewport(dialog);
     }
@@ -647,9 +744,12 @@
     button.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>';
     const status = document.createElement('span');
     status.className = 'ct-media-video-status'; status.setAttribute('role', 'status'); status.hidden = true;
-    controls.append(button, status);
+    const resolution = document.createElement('span');
+    resolution.className = 'ct-media-video-resolution'; resolution.hidden = true;
+    resolution.title = ctMediaJapanese() ? '読み込んだ動画のサイズ' : 'Size of the loaded video';
+    controls.append(resolution, button, status);
     controls.addEventListener('click', event => event.stopPropagation());
-    const state = { video, shell, controls, button, status, context: null, pauseGuard: null,
+    const state = { video, shell, controls, button, status, resolution, context: null, pauseGuard: null,
       guardTimer: null, webkitFullscreen: false, requesting: false, requestSequence: 0, pendingRequests: new Set(),
       invalidatedFullscreen: false };
     button.addEventListener('click', () => {
@@ -703,7 +803,19 @@
     state.onWebkitEnd = () => { state.webkitFullscreen = false; ctMediaVideoEnd(state); };
     state.onPause = () => { state.intentPlaying = false; };
     state.onPlay = () => { if (ctMediaVideoFullscreen(state) && ctMediaVideoContextMatches(state)) state.intentPlaying = true; };
-    state.onInvalid = () => { if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true); };
+    state.onQuality = () => {
+      const source = ctMediaQualityURL(video.src);
+      const dimensions = source && video.readyState >= 1 &&
+        (!video.currentSrc || ctMediaQualityURL(video.currentSrc) === source)
+        ? ctMediaResolution(video.videoWidth, video.videoHeight) : '';
+      if (resolution.textContent !== dimensions) resolution.textContent = dimensions;
+      resolution.hidden = !dimensions;
+    };
+    state.onQualityReset = () => { resolution.textContent = ''; resolution.hidden = true; };
+    state.onInvalid = () => {
+      if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
+      state.onQuality();
+    };
     state.onPageHide = () => ctMediaVideoEnd(state, true);
     state.onVisibility = () => {
       if (document.hidden) ctMediaVideoEnd(state);
@@ -717,11 +829,16 @@
     video.addEventListener('play', state.onPlay);
     video.addEventListener('emptied', state.onInvalid);
     video.addEventListener('loadstart', state.onInvalid);
+    video.addEventListener('loadedmetadata', state.onQuality);
+    video.addEventListener('resize', state.onQuality);
+    video.addEventListener('emptied', state.onQualityReset);
+    video.addEventListener('loadstart', state.onQualityReset);
     window.addEventListener('pagehide', state.onPageHide);
     state.observer = new MutationObserver(state.onInvalid);
     state.observer.observe(video, { attributes: true, attributeFilter: ['src'], childList: true, subtree: true });
     shell.classList.add('ct-media-video-shell'); video.classList.add('ct-media-enhanced-video'); video.after(controls);
     ctMediaVideos.set(video, state);
+    state.onQuality();
   }
   function ctMediaRemoveVideo(state) {
     ctMediaVideoEnd(state, true);
@@ -734,6 +851,10 @@
     state.video.removeEventListener('play', state.onPlay);
     state.video.removeEventListener('emptied', state.onInvalid);
     state.video.removeEventListener('loadstart', state.onInvalid);
+    state.video.removeEventListener('loadedmetadata', state.onQuality);
+    state.video.removeEventListener('resize', state.onQuality);
+    state.video.removeEventListener('emptied', state.onQualityReset);
+    state.video.removeEventListener('loadstart', state.onQualityReset);
     window.removeEventListener('pagehide', state.onPageHide);
     state.controls.remove(); state.shell.classList.remove('ct-media-video-shell');
     state.video.classList.remove('ct-media-enhanced-video');
@@ -779,7 +900,10 @@
         stage, pointers: new Set(), pinch: false, context: pending.context,
         sources: ctMediaSlides(pending.state.grid).map(slide => slide.firstElementChild.src).join('\n') };
       viewer.reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-      viewer.onReduce = () => { if (viewer.reduce.matches) { ctMediaResetPhotoMotion(viewer); ctMediaEnhanceViewer(); } };
+      viewer.onReduce = () => {
+        if (viewer.reduce.matches) { ctMediaResetPhotoMotion(viewer); ctMediaClearPhotoDecode(viewer); }
+        ctMediaEnhanceViewer();
+      };
       viewer.reduce?.addEventListener?.('change', viewer.onReduce);
       stage?.classList.add('ct-media-swipe-stage');
       const move = index => {
@@ -811,8 +935,13 @@
         if (!viewer.pointers.size) viewer.pinch = false;
         ctMediaCancelPhotoGesture(viewer);
       };
-      viewer.onPageHide = () => { ctMediaCancelPhotoGesture(viewer); viewer.pointers.clear(); viewer.pinch = false; };
-      viewer.onVisibility = () => { if (document.hidden) viewer.onPageHide(); };
+      viewer.onPageHide = () => {
+        viewer.pageActive = false;
+        ctMediaCancelPhotoGesture(viewer); ctMediaClearPhotoDecode(viewer);
+        viewer.pointers.clear(); viewer.pinch = false;
+      };
+      viewer.onPageShow = () => { viewer.pageActive = true; ctMediaWarmPhotoDecode(viewer); };
+      viewer.onVisibility = () => { if (document.hidden) viewer.onPageHide(); else viewer.onPageShow(); };
       viewer.onDragStart = event => { if (viewer.touch && event.target.matches?.('img[alt="Media preview"]')) event.preventDefault(); };
       dialog.addEventListener('dragstart', viewer.onDragStart);
       viewer.onClick = event => {
@@ -862,6 +991,7 @@
       dialog.addEventListener('click', viewer.onClick, true);
       document.addEventListener('visibilitychange', viewer.onVisibility);
       window.addEventListener('pagehide', viewer.onPageHide);
+      window.addEventListener('pageshow', viewer.onPageShow);
       document.addEventListener('keydown', viewer.onKey, true);
       dialog.append(controls);
       ctMediaViewer = viewer;
@@ -872,6 +1002,7 @@
       viewer.observer.observe(dialog, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     }
     ctMediaViewer.index = pending.index;
+    ctMediaWarmPhotoDecode(ctMediaViewer);
     if (ctMediaViewer.requestedIndex === pending.index) {
       ctMediaViewer.requestedIndex = null;
       clearTimeout(ctMediaViewer.requestTimer);
@@ -900,6 +1031,11 @@
       .ct-media-viewport-viewer { inset:auto!important; top:var(--ct-media-view-top,0)!important; left:var(--ct-media-view-left,0)!important; width:var(--ct-media-view-width,100vw)!important; height:var(--ct-media-view-height,100dvh)!important; }
       .ct-media-centered-viewer > .ct-media-viewer-header { position:absolute!important; top:0; left:0; right:0; z-index:2; padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left))!important; pointer-events:none; }
       .ct-media-centered-viewer > .ct-media-viewer-header button { pointer-events:auto; min-width:44px; min-height:44px; }
+      .ct-media-photo-quality { position:absolute; top:max(12px,env(safe-area-inset-top)); right:max(12px,env(safe-area-inset-right)); z-index:3; display:flex; align-items:center; flex-wrap:wrap; gap:8px; max-width:calc(100% - 88px); color:#fff; font:12px/1.4 system-ui,sans-serif; }
+      .ct-media-photo-quality a { display:inline-flex; align-items:center; min-height:44px; padding:0 8px; color:inherit; background:#0009; border-radius:4px; text-decoration:none; }
+      .ct-media-photo-quality a:focus-visible { outline:3px solid #fff; outline-offset:2px; }
+      .ct-media-photo-resolution { padding:5px 8px; background:#0009; border-radius:4px; white-space:nowrap; }
+      .ct-media-photo-quality[hidden],.ct-media-photo-quality [hidden] { display:none!important; }
       .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
       .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
       .ct-media-swipe-stage { touch-action:pan-y pinch-zoom; }
@@ -912,7 +1048,8 @@
       .ct-media-viewer-controls { position:absolute; left:0; right:0; bottom:0; z-index:2; flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
       .ct-media-viewer-controls button:hover:not(:disabled) { background:#ffffff26; }
       .ct-media-video-shell { position:relative; }
-      .ct-media-video-tools { position:absolute; top:4px; right:4px; z-index:1; }
+      .ct-media-video-tools { position:absolute; top:4px; right:4px; z-index:1; display:flex; align-items:center; gap:4px; }
+      .ct-media-video-resolution { padding:5px 7px; border-radius:4px; background:#0009; color:#fff; white-space:nowrap; font:12px/1.4 system-ui,sans-serif; }
       .ct-media-video-inline-tools { position:relative; top:auto; right:auto; display:flex; justify-content:flex-end; margin-top:-4px; margin-bottom:4px; }
       .ct-media-video-fullscreen { display:flex; align-items:center; justify-content:center; width:44px; height:44px; padding:0; border:0; border-radius:50%; background:#0009; color:#fff; cursor:pointer; opacity:.8; transition:background 120ms ease-out,opacity 120ms ease-out; }
       .ct-media-video-fullscreen:hover,.ct-media-video-fullscreen:focus-visible { opacity:1; background:#000c; }
@@ -933,6 +1070,9 @@
   }
   function ctMediaEnhance(root = document) {
     ctMediaStyles();
+    for (const [dialog, state] of ctMediaPhotoQuality) {
+      if (!dialog.isConnected || !state.image.isConnected || !dialog.contains(state.image)) ctMediaReleasePhotoQuality(dialog);
+    }
     for (const state of ctMediaVideos.values()) {
       if (!state.video.isConnected) ctMediaRemoveVideo(state);
       else if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);

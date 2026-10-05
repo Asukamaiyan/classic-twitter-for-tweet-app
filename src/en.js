@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.20.0
+// @version      6.21.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -24,6 +24,7 @@
   if (document.documentElement?.dataset.ctActiveVersion) return;
   const CT_LOCALE = 'en';
   /* @include network */
+  /* @include browser-notifications */
   /* @include enhancements */
   /* @include translation */
   /* @include classic */
@@ -948,5 +949,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.19.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.21.0 loaded');
 })();

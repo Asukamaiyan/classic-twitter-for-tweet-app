@@ -96,6 +96,7 @@ test('legacy GM request is GET-only, finite, cookie-free and returns parsed JSON
   assert.equal((await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}`, Cookie: 'never-send' })).value, 4);
   assert.equal(options.method, 'GET'); assert.equal(options.timeout, 25);
   assert.equal(options.redirect, 'error'); assert.equal(options.anonymous, true);
+  assert.equal(options.responseType, 'text');
   assert.equal(options.headers.Authorization, `Bearer ${tokenA}`);
   assert.equal(options.headers.Cookie, undefined);
 });
@@ -134,6 +135,91 @@ test('throwing GM transport returns null without duplicate fetch', async () => {
   const c = harness({ GM_xmlhttpRequest() { throw new Error('not available'); },
     fetch() { throw new Error('must not retry with a second transport'); } });
   assert.equal(await c.network.requestJSON(apiURL), null);
+});
+
+test('Stay text response fallback supports missing or unavailable responseText', async () => {
+  for (const response of [
+    { status: 200, response: '{"ok":true}' },
+    { status: 200, responseText: null, response: '{"ok":true}' },
+    { status: 200, get responseText() { throw new Error('unavailable'); }, response: '{"ok":true}' }
+  ]) {
+    const c = harness({ GM_xmlhttpRequest(options) { queueMicrotask(() => options.onload(response)); } });
+    assert.equal((await c.network.requestJSON(apiURL)).ok, true);
+  }
+});
+
+test('zero-status acknowledgement and partial Promise wait for the actual callback', async () => {
+  for (const ack of [{ status: 0 }, { status: 200, readyState: 2, responseText: '{}' }]) {
+    let callbacks = 0;
+    const c = harness({ GM_xmlhttpRequest(options) {
+      setTimeout(() => { callbacks++; options.onload({ status: 200, response: '{"ok":true}' }); }, 5);
+      return Promise.resolve(ack);
+    } });
+    assert.equal((await c.network.requestJSON(apiURL)).ok, true);
+    assert.equal(callbacks, 1);
+  }
+});
+
+test('incomplete Promise acknowledgements without callbacks remain bounded and abort', async () => {
+  for (const ack of [{ status: 0 }, { status: 200, readyState: 3 }]) {
+    let aborts = 0;
+    const c = harness({ GM_xmlhttpRequest() {
+      const pending = Promise.resolve(ack); pending.abort = () => aborts++;
+      return pending;
+    } });
+    assert.equal(await c.network.requestJSON(apiURL), null);
+    assert.equal(aborts, 1);
+  }
+});
+
+test('response text is bounded and structured or malformed manager values are rejected', async () => {
+  for (const response of [
+    { status: 200, response: { ok: true } },
+    { status: 200, response: new Blob(['{}']) },
+    { status: 200, response: '<html>' },
+    { status: 200, response: ' '.repeat(2 * 1024 * 1024 + 1) },
+    { status: 200, responseText: {}, response: '{}' },
+    { status: 200, responseText: 'bad', response: '{}' },
+    { status: 200, responseText: '', response: '{}' }
+  ]) {
+    const c = harness({ GM_xmlhttpRequest(options) { options.onload(response); } });
+    assert.equal(await c.network.requestJSON(apiURL), null);
+  }
+});
+
+test('both manager final URLs must match the requested endpoint exactly', async () => {
+  for (const extra of [
+    { finalUrl: 'https://api.tweet.app/api/posts' },
+    { responseURL: 'https://api.tweet.app/api/posts' },
+    { finalUrl: apiURL, responseURL: 'https://other.test/api/users/by-username/alice' },
+    { finalUrl: apiURL + '?other=1' },
+    { responseURL: 'https://name:password@api.tweet.app/api/users/by-username/alice' }
+  ]) {
+    const c = harness({ GM_xmlhttpRequest(options) { options.onload({ status: 200, response: '{}', ...extra }); } });
+    assert.equal(await c.network.requestJSON(apiURL), null);
+  }
+  const c = harness({ GM_xmlhttpRequest(options) {
+    options.onload({ status: 200, response: '{"ok":true}',
+      finalUrl: 'https://API.TWEET.APP:443/api/users/by-username/alice', responseURL: apiURL });
+  } });
+  assert.equal((await c.network.requestJSON(apiURL)).ok, true);
+});
+
+test('fetch also rejects another endpoint on the same API host', async () => {
+  const c = harness({ fetch: async () => ({ ok: true, url: 'https://api.tweet.app/api/posts', text: async () => '{}' }) });
+  assert.equal(await c.network.requestJSON(apiURL), null);
+});
+
+test('late callback and Promise cannot replace the first completed result', async () => {
+  let onload;
+  const c = harness({ GM_xmlhttpRequest(options) {
+    onload = options.onload;
+    options.onload({ status: 200, response: '{"first":true}' });
+    return Promise.resolve({ status: 200, response: '{"first":false}' });
+  } });
+  const result = await c.network.requestJSON(apiURL);
+  onload({ status: 200, response: '{"first":false}' });
+  assert.equal(result.first, true);
 });
 
 test('fetch has an abort deadline, redirect denial and no ambient cookies', async () => {

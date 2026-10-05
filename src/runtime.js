@@ -678,6 +678,7 @@
         ctRememberScanContexts(root);
         scan(root);
       }
+      ctBrowserNotifications?.refresh();
       ctTools?.refresh();
     }
     finally { ctScanning = false; ctObserve(); }
@@ -691,12 +692,14 @@
   }
 
   let ctTools = null;
+  let ctBrowserNotifications = null;
 
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.20.0';
+    document.documentElement.dataset.ctActiveVersion = '6.21.0';
     ctStarted = true;
+    ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
@@ -705,6 +708,7 @@
     });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
+      browserNotifications: ctBrowserNotifications,
       restoreVisibleFavorites: ctRestoreVisibleFavorites,
       getFavoriteHistoryStatus: ctFavoriteHistoryStatus,
       runFavoriteHistory: ctRunFavoriteHistory,

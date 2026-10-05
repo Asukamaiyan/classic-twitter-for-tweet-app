@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.20.0
+// @version      6.21.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -70,11 +70,18 @@
         try { controller?.abort(); } catch {}
       }, ctNetworkState.requestTimeout);
       const parse = response => {
-        if (!response || !(response.status >= 200 && response.status < 300) ||
-            (response.finalUrl && !ctAllowedAPIURL(response.finalUrl))) return null;
         try {
-          if (typeof response.responseText !== 'string' || response.responseText.length > 2 * 1024 * 1024) return null;
-          return JSON.parse(response.responseText);
+          if (!response || !(response.status >= 200 && response.status < 300)) return null;
+          for (const key of ['finalUrl', 'responseURL']) {
+            if (response[key] && ctAllowedAPIURL(response[key]) !== target) return null;
+          }
+          // Stay may return text in `response`, or expose an unavailable
+          // responseText getter. Do not accept manager-specific objects/blobs.
+          let body;
+          try { body = response.responseText; } catch {}
+          if (body == null) body = response.response;
+          if (typeof body !== 'string' || body.length > 2 * 1024 * 1024) return null;
+          return JSON.parse(body);
         } catch {
           return null;
         }
@@ -91,6 +98,7 @@
           handle = gmRequest({
             method: 'GET', url: target, headers: requestHeaders,
             timeout: ctNetworkState.requestTimeout, redirect: 'error', anonymous: true,
+            responseType: 'text',
             onload: response => finish(parse(response)),
             onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null)
           });
@@ -98,7 +106,11 @@
             Promise.resolve(handle).then(response => {
               // An acknowledgement is not the response. Some bridges resolve
               // first, then deliver the HTTP result through onload.
-              if (response && typeof response === 'object' && 'status' in response) finish(parse(response));
+              try {
+                if (response && typeof response === 'object' &&
+                    Number.isFinite(response.status) && response.status > 0 &&
+                    (response.readyState == null || response.readyState === 4)) finish(parse(response));
+              } catch { finish(null); }
             }, () => finish(null));
           }
         } catch {
@@ -111,9 +123,9 @@
         method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
         ...(controller ? { signal: controller.signal } : {})
       })).then(async response => {
-        if (!response?.ok || (response.url && !ctAllowedAPIURL(response.url))) return null;
+        if (!response?.ok || (response.url && ctAllowedAPIURL(response.url) !== target)) return null;
         const body = await response.text();
-        if (body.length > 2 * 1024 * 1024) return null;
+        if (typeof body !== 'string' || body.length > 2 * 1024 * 1024) return null;
         try { return JSON.parse(body); } catch { return null; }
       }).then(finish, () => finish(null));
     });
@@ -309,8 +321,317 @@
     return promise;
   }
 
+  /* Optional page-open alerts. Reads native navigation only; no API polling or Push subscription. */
+function createBrowserNotifications({ locale = 'ja' } = {}) {
+  const ja = locale.startsWith('ja');
+  const copy = ja ? {
+    off: 'オフ', on: 'このタブで通知します。', other: '別のタブが通知を担当しています。',
+    preparing: '通知の対応状況を確認中…', permission: '通知の許可を確認中…',
+    unsupported: 'このブラウザはページ内からの通知に対応していません。',
+    insecure: '通知にはHTTPSで開いたページが必要です。',
+    locks: 'このブラウザでは複数タブの通知重複を防げないため利用できません。',
+    mobile: 'スマホの通知には、対応するWebアプリと有効なサービスワーカーが必要です。Safariの通常タブでは利用できません。',
+    signIn: 'Tweetにログインしてから設定してください。',
+    denied: 'ブラウザで通知が許可されていません。ブラウザの通知設定を確認してください。',
+    gesture: 'この画面のスイッチを押して通知を許可してください。',
+    count: '通知数を確実に確認できるまで待機します（99+は対象外）。',
+    paused: '画面が停止している間は通知しません。',
+    storage: '設定を保存できませんでした。この画面では通知を停止しました。',
+    failed: '通知を表示できませんでした。ブラウザの通知設定を確認してください。',
+    title: 'Tweet', body: 'Tweetに新しい通知があります。'
+  } : {
+    off: 'Off', on: 'This tab will show alerts.', other: 'Another tab is handling alerts.',
+    preparing: 'Checking notification support…', permission: 'Waiting for notification permission…',
+    unsupported: 'This browser cannot show notifications from this page.',
+    insecure: 'Notifications require an HTTPS page.',
+    locks: 'Alerts are unavailable because duplicate notifications across tabs cannot be prevented here.',
+    mobile: 'Mobile notifications need a supported web app and an active service worker. Regular Safari tabs are not supported.',
+    signIn: 'Sign in to Tweet before changing this setting.',
+    denied: 'Browser notifications are not allowed. Check your browser notification settings.',
+    gesture: 'Use the switch on this screen to allow notifications.',
+    count: 'Waiting for a reliable unread count (99+ is excluded).',
+    paused: 'Alerts stop while this page is suspended.',
+    storage: 'Could not save this setting. Alerts have stopped on this page.',
+    failed: 'Could not display a notification. Check your browser notification settings.',
+    title: 'Tweet', body: 'You have a new notification on Tweet.'
+  };
+  const prefix = 'ct-browser-notifications-v1:';
+  // A late worker completion must never replace or close a newer controller's
+  // notification, even after ownership moves between tabs for the same account.
+  const instance = globalThis.crypto?.randomUUID?.() ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const alertTag = (handle, token) => `ct-native-notifications:${handle}:${instance}:${token}`;
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '') ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent || '') ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let account = null, enabled = false, busy = false, active = true, destroyed = false;
+  let generation = 0, baseline = null, timer = null, notification = null, swAlert = null, issue = '';
+  let owner = false, releaseOwner = null, lockPending = false, lastLockAttempt = 0, lastAlert = 0, readyAt = 0;
+  let backend = mobile ? null : 'window', probing = false, registration = null;
+  let observed = [], signature = '';
+  const observer = new MutationObserver(() => refresh());
+
+  function identity() {
+    const handles = [];
+    for (const button of document.querySelectorAll('aside button[aria-label="Account menu"]')) {
+      if (button.closest('[data-ct-local-ui],[data-ct-owned],article')) continue;
+      const block = [...button.children].find(el => el.matches('div.flex-1.min-w-0'));
+      const label = block && [...block.children].find(el => el.matches('p') &&
+        el.classList.contains('text-[0.8125rem]') && el.classList.contains('text-tl-app-text-muted') && el.classList.contains('truncate'));
+      const handle = label?.textContent.trim();
+      if (handle && /^@[a-zA-Z0-9_.-]{1,80}$/.test(handle)) handles.push(handle.slice(1).toLowerCase());
+    }
+    const unique = [...new Set(handles)];
+    return unique.length === 1 ? unique[0] : null;
+  }
+
+  function controls() {
+    const found = [];
+    for (const svg of document.querySelectorAll('aside nav svg[data-icon],nav[aria-label="Mobile navigation"] > div > button > svg[data-icon]')) {
+      if (!/^(bell|bell-filled)$/.test(svg.getAttribute('data-icon') || '') ||
+          svg.closest('[data-ct-local-ui],[data-ct-owned],article')) continue;
+      const size = svg.getAttribute('width');
+      if (size !== svg.getAttribute('height')) continue;
+      const button = svg.closest('button');
+      if (!button) continue;
+      if (size === '18' && svg.parentElement?.matches('span.relative.flex') && svg.parentElement.parentElement === button &&
+          button.matches('.w-full.flex.items-center.gap-3\\.5.px-4.py-3.text-left') &&
+          [...button.children].some(el => el.matches('span') && /^(Notifications|通知)$/.test(el.textContent.trim()))) {
+        found.push({ button, host: svg.parentElement, root: button.closest('nav') });
+      } else if (size === '28' && svg.parentElement === button &&
+          /^(Notifications|通知)$/.test(button.getAttribute('aria-label') || '') &&
+          button.matches('button[type="button"].relative.flex.items-center.justify-center.rounded-2xl')) {
+        found.push({ button, host: button, root: button.closest('nav') });
+      }
+    }
+    return found;
+  }
+
+  function count(rows) {
+    const values = rows.map(({ host }) => {
+      const badges = [...host.children].filter(el => el.matches('span.absolute.rounded-full') && el.classList.contains('bg-sky-500'));
+      if (!badges.length) return 0;
+      if (badges.length !== 1 || !/^\d{1,2}$/.test(badges[0].textContent.trim())) return null;
+      return Number(badges[0].textContent.trim());
+    });
+    return values.length && values.every(value => value !== null && value === values[0]) ? values[0] : null;
+  }
+
+  function capability() {
+    if (window.isSecureContext !== true) return copy.insecure;
+    if (typeof Notification !== 'function' || typeof Notification.requestPermission !== 'function') return copy.unsupported;
+    if (typeof navigator.locks?.request !== 'function') return copy.locks;
+    if (mobile && !backend) return probing ? copy.preparing : copy.mobile;
+    return '';
+  }
+
+  function state() {
+    const reason = capability();
+    const denied = typeof Notification === 'function' && Notification.permission === 'denied';
+    return { enabled, busy, supported: !reason, canEnable: !reason && !!account && !denied,
+      status: issue || (busy ? copy.permission : reason || (!account ? copy.signIn : denied ? copy.denied :
+        !enabled ? copy.off : !active ? copy.paused : baseline === null ? copy.count : owner ? copy.on : copy.other)) };
+  }
+
+  function announce() {
+    const next = JSON.stringify(state());
+    if (next === signature) return;
+    signature = next;
+    window.dispatchEvent(new CustomEvent('ct-browser-notifications-change'));
+  }
+
+  function closeSW(tag, worker) {
+    if (tag && typeof worker?.getNotifications === 'function') {
+      try {
+        Promise.resolve(worker.getNotifications({ tag })).then(items => {
+          for (const item of items || []) if (item.tag === tag) item.close();
+        }).catch(() => {});
+      } catch { /* A detached worker must not interrupt OFF/pagehide cleanup. */ }
+    }
+  }
+
+  function close() {
+    clearTimeout(timer); timer = null;
+    try { notification?.close(); } catch {}
+    notification = null;
+    const record = swAlert; swAlert = null; closeSW(record?.tag, record?.worker);
+  }
+
+  function relinquish() {
+    generation++; busy = false; close(); baseline = null; owner = false;
+    releaseOwner?.(); releaseOwner = null;
+  }
+
+  function loadPreference(handle) {
+    if (!handle) return false;
+    try {
+      const value = JSON.parse(localStorage.getItem(prefix + handle) || 'null');
+      return value?.version === 1 && value.enabled === true;
+    } catch { return false; }
+  }
+
+  function persist(value) {
+    try { localStorage.setItem(prefix + account, JSON.stringify({ version: 1, enabled: value })); return true; }
+    catch { return false; }
+  }
+
+  function acquire() {
+    if (owner || lockPending || destroyed || !active || !enabled || !account || capability()) return;
+    if (Date.now() - lastLockAttempt < 2000) return;
+    lastLockAttempt = Date.now(); lockPending = true;
+    const expected = account, token = generation;
+    Promise.resolve().then(() => navigator.locks.request(prefix + expected, { mode: 'exclusive', ifAvailable: true }, lock => {
+      if (!lock || destroyed || !active || !enabled || account !== expected || token !== generation) return;
+      owner = true; baseline = count(controls()); readyAt = Date.now() + 2000; announce();
+      return new Promise(resolve => { releaseOwner = resolve; });
+    })).catch(() => { if (token === generation) issue = copy.failed; }).finally(() => {
+      lockPending = false; if (!destroyed) refresh();
+    });
+  }
+
+  function watch(rows) {
+    const roots = enabled && active ? [...new Set([...rows.map(row => row.root),
+      ...document.querySelectorAll('aside button[aria-label="Account menu"]')].filter(Boolean))] : [];
+    if (roots.length === observed.length && roots.every((root, i) => root === observed[i])) return;
+    observer.disconnect(); observed = roots;
+    for (const root of roots) observer.observe(root, { childList: true, subtree: true, characterData: true,
+      attributes: true, attributeFilter: ['aria-label', 'data-icon'] });
+  }
+
+  function deliver(value, expected, token) {
+    timer = null;
+    if (destroyed || !active || !enabled || !owner || token !== generation || account !== expected ||
+        capability() || identity() !== expected || Notification.permission !== 'granted' || count(controls()) !== value ||
+        (document.visibilityState !== 'hidden' && document.hasFocus())) return;
+    if (Date.now() - lastAlert < 30000) return;
+    lastAlert = Date.now();
+    try {
+      if (backend === 'sw') {
+        const tag = alertTag(expected, token), worker = registration; swAlert = { tag, worker };
+        Promise.resolve(worker.showNotification(copy.title, { body: copy.body, tag,
+          ...('navigate' in Notification.prototype
+            ? { navigate: new URL('/notifications', location.origin).href } : {})
+        })).then(() => {
+          if (destroyed || token !== generation || !active || !enabled) closeSW(tag, worker);
+        }, () => { if (token === generation) { issue = copy.failed; announce(); } });
+      } else {
+        close();
+        const current = new Notification(copy.title, { body: copy.body, tag: alertTag(expected, token) });
+        notification = current;
+        current.onclick = () => {
+          if (!destroyed && active && generation === token && account === expected && identity() === expected) {
+            window.focus(); controls()[0]?.button.click();
+          }
+          try { current.close(); } catch {}
+          if (notification === current) notification = null;
+        };
+      }
+    } catch { issue = copy.failed; announce(); }
+  }
+
+  function refresh() {
+    if (destroyed) return;
+    const next = identity();
+    if (next !== account) {
+      relinquish(); account = next; issue = ''; lastLockAttempt = 0; lastAlert = 0;
+      enabled = loadPreference(account) && typeof Notification === 'function' && Notification.permission === 'granted';
+    }
+    if (typeof Notification === 'function' && Notification.permission !== 'granted' && enabled) {
+      relinquish(); enabled = false;
+    }
+    const rows = controls(); watch(rows);
+    const value = count(rows);
+    if (!enabled || !active || capability()) { baseline = null; announce(); return; }
+    acquire();
+    if (baseline !== null && value !== null && value > baseline && owner && Date.now() >= readyAt) {
+      clearTimeout(timer);
+      const expected = account, token = generation;
+      timer = setTimeout(() => deliver(value, expected, token), 250);
+    } else if (value === null || (baseline !== null && value < baseline)) { clearTimeout(timer); timer = null; }
+    baseline = value; announce();
+  }
+
+  async function setEnabled(requested, { userGesture = false } = {}) {
+    refresh();
+    if (destroyed) return false;
+    if (!requested) {
+      busy = false; relinquish(); enabled = false; watch([]);
+      const saved = account ? persist(false) : true;
+      issue = saved ? '' : copy.storage; announce(); return saved;
+    }
+    const reason = capability();
+    if (reason || !account) { issue = reason || copy.signIn; announce(); return false; }
+    if (!userGesture || navigator.userActivation?.isActive === false) { issue = copy.gesture; announce(); return false; }
+    if (busy) return false;
+    issue = ''; busy = true; announce();
+    const expected = account, token = ++generation;
+    try {
+      const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+      if (destroyed || !active || generation !== token || identity() !== expected || account !== expected) return false;
+      if (permission !== 'granted') { issue = copy.denied; return false; }
+      if (!persist(true)) { issue = copy.storage; return false; }
+      enabled = true; baseline = count(controls()); lastLockAttempt = 0; refresh(); return true;
+    } catch { if (generation === token) issue = copy.failed; return false; }
+    finally { if (generation === token) busy = false; announce(); }
+  }
+
+  async function probe() {
+    if (!mobile || probing || destroyed) return;
+    probing = true; announce();
+    let next = null;
+    try {
+      if (ios && !navigator.standalone && !window.matchMedia?.('(display-mode: standalone)').matches) return;
+      const reg = await navigator.serviceWorker?.getRegistration?.();
+      if (destroyed) return;
+      const scope = reg?.scope && new URL(reg.scope);
+      const script = reg?.active?.scriptURL && new URL(reg.active.scriptURL);
+      if (reg?.active && typeof reg.showNotification === 'function' && scope?.origin === location.origin &&
+          script?.origin === location.origin && location.pathname.startsWith(scope.pathname)) {
+        next = reg;
+      }
+    } catch { /* An existing worker is optional; never create one here. */ }
+    finally {
+      probing = false;
+      if (!destroyed) {
+        if (registration !== next) {
+          const lost = !!registration && !next;
+          relinquish(); registration = next; backend = next ? 'sw' : null;
+          if (lost) enabled = false;
+        }
+        refresh(); announce();
+      }
+    }
+  }
+
+  function pageHide() { active = false; busy = false; relinquish(); watch([]); announce(); }
+  function pageShow() { if (destroyed) return; active = true; baseline = null; lastLockAttempt = 0; probe(); refresh(); }
+  function visibility() { baseline = null; clearTimeout(timer); timer = null; refresh(); }
+  function storage(event) {
+    if (!account || (event.key !== prefix + account && event.key !== null)) return;
+    const requested = loadPreference(account);
+    if (!requested || !enabled) {
+      relinquish(); enabled = requested && typeof Notification === 'function' && Notification.permission === 'granted';
+      lastLockAttempt = 0; issue = ''; refresh();
+    }
+  }
+  window.addEventListener('pagehide', pageHide);
+  window.addEventListener('pageshow', pageShow);
+  window.addEventListener('storage', storage);
+  document.addEventListener('visibilitychange', visibility);
+  navigator.serviceWorker?.addEventListener?.('controllerchange', probe);
+  refresh(); probe();
+  return { getState: state, setEnabled, refresh, destroy() {
+    if (destroyed) return;
+    destroyed = true; active = false; busy = false; enabled = false; relinquish(); observer.disconnect();
+    window.removeEventListener('pagehide', pageHide); window.removeEventListener('pageshow', pageShow);
+    window.removeEventListener('storage', storage); document.removeEventListener('visibilitychange', visibility);
+    navigator.serviceWorker?.removeEventListener?.('controllerchange', probe);
+  } };
+}
+
   /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -338,6 +659,9 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     deviceUnsupported: 'このブラウザでは端末内翻訳を利用できません。Safari／Stayとスマートフォンではサイトの翻訳をご利用ください。',
     sourceLanguage: '翻訳する投稿の言語', prepareModel: 'モデルを準備', preparingModel: '準備中…',
     translationStatus: '翻訳の状態',
+    notifications: 'ページを開いている間の通知', notificationsEnabled: '通知数が増えたらお知らせする',
+    notificationsHelp: 'ページを閉じる・スマホが画面を停止すると届きません。投稿内容や名前は通知に出しません。',
+    notificationsError: '通知の設定を変更できませんでした。',
     favorites: 'お気に入りの復元', restoreFavorites: '読み込み済みのお気に入りを復元', restoringFavorites: '確認中…',
     restoreHelp: '今の画面で読み込んだお気に入り済みのツイートを、このブラウザに保存します（1回40件まで）。過去の全履歴は取得できません。',
     restoreResult: (saved, unresolved) => `${saved}件を保存しました。${unresolved ? ` ${unresolved}件は特定できませんでした。詳細画面か原文を開いて再度お試しください。` : ''}`,
@@ -377,6 +701,9 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     deviceUnsupported: 'On-device translation is unavailable here. Use site translation in Safari/Stay and on mobile.',
     sourceLanguage: 'Language of posts to translate', prepareModel: 'Prepare model', preparingModel: 'Preparing…',
     translationStatus: 'Translation status',
+    notifications: 'Alerts while Tweet is open', notificationsEnabled: 'Alert when the unread count increases',
+    notificationsHelp: 'Alerts stop when you close the page or your phone suspends it. Names and post text are never included.',
+    notificationsError: 'Could not change the notification setting.',
     favorites: 'Restore Favorites', restoreFavorites: 'Restore loaded Favorites', restoringFavorites: 'Checking…',
     restoreHelp: 'Save already-favorited Tweets loaded on this screen in this browser (up to 40 per run). This cannot retrieve your entire past history.',
     restoreResult: (saved, unresolved) => `Saved ${saved}. ${unresolved ? `${unresolved} could not be identified. Open the detail page or original text and try again.` : ''}`,
@@ -531,6 +858,34 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     input.focus();
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
+
+  let refreshBrowserNotifications = () => {};
+  if (typeof browserNotifications?.getState === 'function' && typeof browserNotifications?.setEnabled === 'function') {
+    const section = element('section');
+    const input = element('input', undefined, { type: 'checkbox', id: 'ct-local-browser-notifications',
+      'aria-describedby': 'ct-local-browser-notifications-help ct-local-browser-notifications-status' });
+    const label = element('label'); label.append(input, document.createTextNode(copy.notificationsEnabled));
+    const status = element('p', '', { id: 'ct-local-browser-notifications-status', class: 'ct-local-note', role: 'status', 'aria-live': 'polite' });
+    refreshBrowserNotifications = () => {
+      const current = browserNotifications.getState();
+      input.checked = current.enabled === true;
+      input.disabled = current.busy === true || (!current.canEnable && !current.enabled);
+      if (status.textContent !== current.status) status.textContent = current.status || '';
+    };
+    input.addEventListener('change', async () => {
+      const requested = input.checked;
+      try {
+        const pending = browserNotifications.setEnabled(requested, { userGesture: true });
+        refreshBrowserNotifications(); await pending;
+      } catch { announce(copy.notificationsError, true); }
+      finally { refreshBrowserNotifications(); }
+    });
+    section.append(element('h3', copy.notifications), label,
+      element('p', copy.notificationsHelp, { id: 'ct-local-browser-notifications-help', class: 'ct-local-note' }), status);
+    body.append(section);
+    window.addEventListener('ct-browser-notifications-change', refreshBrowserNotifications);
+    refreshBrowserNotifications();
+  }
 
   let refreshAppearance = () => {};
   if (typeof getClassicAppearance === 'function' && typeof setClassicAppearance === 'function') {
@@ -800,6 +1155,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     collapsed.delete(article);
   }
   function refresh() {
+    refreshBrowserNotifications();
     updateBookmarkControl();
     for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);
     if (!state.enabled && collapsed.size === 0) return;
@@ -995,6 +1351,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   updateViewport();
   refresh();
   const controller = { root, panel, refresh, refreshTranslation, destroy() {
+    if (destroyed) return;
     destroyed = true;
     observer.disconnect();
     clearTimeout(timer);
@@ -1003,6 +1360,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     document.removeEventListener('input', onSearchUserInput, true);
     window.removeEventListener('storage', onStorage);
     window.removeEventListener('ct-favorite-history-change', refreshFavoriteHistory);
+    window.removeEventListener('ct-browser-notifications-change', refreshBrowserNotifications);
     window.removeEventListener('popstate', refresh);
     viewport?.removeEventListener('resize', queueViewport);
     viewport?.removeEventListener('scroll', queueViewport);
@@ -2504,6 +2862,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         ctRememberScanContexts(root);
         scan(root);
       }
+      ctBrowserNotifications?.refresh();
       ctTools?.refresh();
     }
     finally { ctScanning = false; ctObserve(); }
@@ -2517,12 +2876,14 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   let ctTools = null;
+  let ctBrowserNotifications = null;
 
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.20.0';
+    document.documentElement.dataset.ctActiveVersion = '6.21.0';
     ctStarted = true;
+    ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
@@ -2531,6 +2892,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
+      browserNotifications: ctBrowserNotifications,
       restoreVisibleFavorites: ctRestoreVisibleFavorites,
       getFavoriteHistoryStatus: ctFavoriteHistoryStatus,
       runFavoriteHistory: ctRunFavoriteHistory,
@@ -2628,6 +2990,63 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     } else { badge?.remove(); }
   }
 
+  // Tweet renders the stored bio as a text child in a normal-whitespace P.
+  // Preserve its existing nodes, links and handlers; only that verified profile
+  // field needs a whitespace rule. Reused/hidden headers release our class.
+  const ctProfileBioNodes = new Set();
+  function ctPatchProfileBio() {
+    const path = location.pathname;
+    let route = null;
+    const userRoute = /^\/user\/([^/]+)\/?$/.exec(path);
+    if (userRoute) {
+      try { route = decodeURIComponent(userRoute[1]).toLowerCase(); } catch {}
+      if (!route || !/^[a-z0-9_.-]{1,80}$/.test(route)) route = null;
+    }
+    const profileRoute = /^\/profile\/?$/.test(path) || !!route;
+    const candidates = [];
+    if (profileRoute) {
+      for (const bio of document.querySelectorAll('main p.mt-3.text-tl-app-text.leading-relaxed')) {
+        if (bio.closest('article,form,[role="dialog"],[data-ct-owned],[data-ct-local-ui],[hidden],.hidden,[aria-hidden="true"],[contenteditable]') ||
+            bio.querySelector('input,textarea,select,[contenteditable]')) continue;
+        const details = bio.parentElement;
+        const header = bio.previousElementSibling;
+        const metadata = bio.nextElementSibling;
+        const cover = details?.parentElement;
+        const tabs = cover?.nextElementSibling;
+        if (!details?.matches('div.px-4.pb-4') || !cover?.matches('div.overflow-hidden') ||
+            !header?.matches('div.mt-3.flex.flex-col.gap-1') ||
+            !header.querySelector(':scope > h2.font-extrabold.text-tl-app-text.leading-tight.min-w-0') ||
+            !metadata?.matches('div.mt-3.flex.flex-wrap.items-center.text-tl-app-text-muted') ||
+            !tabs?.matches('div[role="tablist"]')) continue;
+        const handles = [...header.querySelectorAll(':scope > p.text-tl-app-text-muted')];
+        const handle = handles.length === 1 && !handles[0].children.length &&
+          /^@([A-Za-z0-9_.-]{1,80})$/.exec(handles[0].textContent.trim())?.[1].toLowerCase();
+        const nativeTabs = [...tabs.children].filter(el => el.matches('button[role="tab"]') && !el.id.startsWith('ct-'));
+        const labels = nativeTabs.map(el => (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent).trim());
+        if (!handle || (route && route !== handle) || nativeTabs.length !== 3 ||
+            !/^(Tweets|Posts|ツイート|呟き)$/.test(labels[0]) || !/^(Replies|リプライ|返信)$/.test(labels[1]) ||
+            !/^(Reposts|Retweets|リツイート|リポスト)$/.test(labels[2])) continue;
+        candidates.push(bio);
+      }
+    }
+    const bio = candidates.length === 1 ? candidates[0] : null;
+    for (const previous of ctProfileBioNodes) {
+      if (previous !== bio) { previous.classList.remove('ct-profile-bio-lines'); ctProfileBioNodes.delete(previous); }
+    }
+    if (!bio) return;
+    let style = document.getElementById('ct-profile-bio-style');
+    if (style && !style.matches('style[data-ct-owned="profile-bio"]')) return;
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'ct-profile-bio-style';
+      style.dataset.ctOwned = 'profile-bio';
+      style.textContent = '.ct-profile-bio-lines{white-space:pre-wrap;overflow-wrap:anywhere}';
+      (document.head || document.documentElement).append(style);
+    }
+    if (!bio.classList.contains('ct-profile-bio-lines')) bio.classList.add('ct-profile-bio-lines');
+    ctProfileBioNodes.add(bio);
+  }
+
   let ctProfileFounderRequest = 0;
   function ctClearProfileFounders(keep = null) {
     document.querySelectorAll('.ct-profile-founder').forEach(badge => {
@@ -2636,6 +3055,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   async function patchProfileFounder() {
+    ctPatchProfileBio();
     const request = ++ctProfileFounderRequest;
     if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) {
       ctClearProfileFounders();
@@ -3249,6 +3669,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const viewer = ctProfileState.viewer;
     if (!viewer) return;
     ctProfileState.viewer = null;
+    if (typeof ctMediaReleasePhotoQuality === 'function') ctMediaReleasePhotoQuality(viewer.dialog);
     viewer.cleanup?.();
     try { viewer.dialog.close(); } catch {}
     viewer.dialog.remove();
@@ -3300,6 +3721,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     } };
     fit();
     show();
+    if (typeof ctMediaAttachPhotoQuality === 'function') ctMediaAttachPhotoQuality(dialog, img);
     try { dialog.showModal(); close.focus(); } catch { ctProfileCloseViewer(); }
   }
   function ctProfileRestoreNative() {
@@ -5478,6 +5900,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const ctMediaCarousels = new Map();
   const ctMediaCenteredViewers = new Map();
   const ctMediaVideos = new Map();
+  const ctMediaPhotoQuality = new Map();
   let ctMediaViewportBound = false;
   let ctMediaTransferSupported;
   let ctMediaPendingViewer = null;
@@ -5485,6 +5908,62 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const ctMediaPhotoAccept = 'image/jpeg,image/png,image/webp';
 
   function ctMediaJapanese() { return CT_LOCALE === 'ja'; }
+  function ctMediaQualityURL(value) {
+    if (typeof value !== 'string' || value.length > 4000) return '';
+    try {
+      const url = new URL(value, location.href);
+      return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+    } catch { return ''; }
+  }
+  function ctMediaResolution(width, height) {
+    return Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0
+      ? `${width} × ${height}` : '';
+  }
+  function ctMediaReleasePhotoQuality(dialog) {
+    const state = ctMediaPhotoQuality.get(dialog);
+    if (!state) return;
+    state.observer.disconnect();
+    state.image.removeEventListener('load', state.update);
+    state.image.removeEventListener('error', state.update);
+    state.tools.remove(); ctMediaPhotoQuality.delete(dialog);
+  }
+  function ctMediaAttachPhotoQuality(dialog, image) {
+    if (!dialog?.isConnected || image?.tagName !== 'IMG' || !dialog.contains(image)) return;
+    const old = ctMediaPhotoQuality.get(dialog);
+    if (old?.image === image) { old.update(); return; }
+    ctMediaReleasePhotoQuality(dialog); ctMediaStyles();
+    const tools = document.createElement('div');
+    tools.className = 'ct-media-photo-quality'; tools.dataset.ctLocalUi = 'media-quality';
+    const open = document.createElement('a');
+    open.target = '_blank'; open.rel = 'noopener noreferrer'; open.referrerPolicy = 'no-referrer';
+    open.textContent = ctMediaJapanese() ? '配信画像を開く ↗' : 'Open image ↗';
+    open.setAttribute('aria-label', ctMediaJapanese() ? '配信画像を新しいタブで開く' : 'Open delivered image in a new tab');
+    const resolution = document.createElement('span'); resolution.className = 'ct-media-photo-resolution';
+    resolution.title = ctMediaJapanese() ? '読み込んだ画像のサイズ' : 'Size of the loaded image';
+    tools.append(open, resolution);
+    tools.addEventListener('click', event => event.stopPropagation());
+    const state = { image, tools, open, resolution, source: '' };
+    state.update = () => {
+      const source = ctMediaQualityURL(image.getAttribute('src') || '');
+      if (source !== state.source) {
+        state.source = source; resolution.textContent = ''; resolution.hidden = true;
+      }
+      if (source) { if (open.href !== source) open.href = source; }
+      else open.removeAttribute('href');
+      open.hidden = !source;
+      // currentSrc can still describe the previous photo during a native src
+      // change. Never attach that earlier photo's dimensions to the new link.
+      const current = image.currentSrc;
+      const dimensions = source && image.complete && (!current || ctMediaQualityURL(current) === source)
+        ? ctMediaResolution(image.naturalWidth, image.naturalHeight) : '';
+      if (resolution.textContent !== dimensions) resolution.textContent = dimensions;
+      resolution.hidden = !dimensions; tools.hidden = !source;
+    };
+    state.observer = new MutationObserver(state.update);
+    state.observer.observe(image, { attributes: true, attributeFilter: ['src', 'srcset', 'sizes'] });
+    image.addEventListener('load', state.update); image.addEventListener('error', state.update);
+    dialog.append(tools); ctMediaPhotoQuality.set(dialog, state); state.update();
+  }
   function ctMediaCanTransfer() {
     if (ctMediaTransferSupported !== undefined) return ctMediaTransferSupported;
     try {
@@ -5811,8 +6290,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         ['click', viewer.onClick]]) if (handler) viewer.dialog.removeEventListener(name, handler, name === 'click');
     document.removeEventListener('visibilitychange', viewer.onVisibility);
     window.removeEventListener('pagehide', viewer.onPageHide);
+    window.removeEventListener('pageshow', viewer.onPageShow);
     viewer.dialog.removeEventListener('dragstart', viewer.onDragStart);
     viewer.reduce?.removeEventListener?.('change', viewer.onReduce);
+    ctMediaClearPhotoDecode(viewer);
     ctMediaViewer = null;
   }
   function ctMediaPhotoContext() {
@@ -5842,6 +6323,37 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (viewer.touch?.locked || viewer.pinch) viewer.suppressClickUntil = Date.now() + 400;
     ctMediaResetPhotoMotion(viewer);
   }
+  function ctMediaClearPhotoDecode(viewer) {
+    // Detached decoded images belong only to this visible viewer. A promise
+    // completing after close/source/account changes cannot revive that viewer.
+    viewer.decodedPhotos?.clear();
+  }
+  function ctMediaWarmPhotoDecode(viewer) {
+    if (!ctMediaPhotoViewerValid(viewer) || viewer.pageActive === false || viewer.reduce?.matches || ctPhotoViewportZoomed()) {
+      ctMediaClearPhotoDecode(viewer); return;
+    }
+    const slides = ctMediaSlides(viewer.state.grid);
+    const wanted = new Set([viewer.index - 1, viewer.index, viewer.index + 1].filter(index => slides[index]));
+    const photos = viewer.decodedPhotos ||= new Map();
+    for (const index of photos.keys()) if (!wanted.has(index)) photos.delete(index);
+    const preview = viewer.dialog.querySelector('img[alt="Media preview"]');
+    for (const index of wanted) {
+      const source = slides[index].firstElementChild.src;
+      if (photos.get(index)?.source === source) continue;
+      const image = document.createElement('img');
+      image.alt = ''; image.draggable = false; image.decoding = 'async';
+      image.referrerPolicy = preview?.referrerPolicy || ''; image.src = source;
+      const entry = { image, source, ready: typeof image.decode !== 'function' };
+      photos.set(index, entry);
+      if (entry.ready) continue; // Older engines retain the existing behavior.
+      try {
+        Promise.resolve(image.decode()).then(() => {
+          if (photos.get(index) !== entry || !ctMediaPhotoViewerValid(viewer)) return;
+          entry.ready = image.complete && image.naturalWidth > 0;
+        }, () => {});
+      } catch {}
+    }
+  }
   function ctMediaPhotoLayer(viewer, target) {
     if (viewer.motion) return viewer.motion;
     const image = viewer.dialog.querySelector('img[alt="Media preview"]');
@@ -5849,18 +6361,23 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     // image, src, click handlers, close button and backdrop throughout.
     if (!viewer.stage || image?.parentElement !== viewer.stage ||
         viewer.reduce?.matches) return null;
+    ctMediaWarmPhotoDecode(viewer);
+    const slides = ctMediaSlides(viewer.state.grid);
+    // Do not cover a decoded native photo with a freshly created, still blank
+    // image. If preparation is incomplete, the native click remains available.
+    if (!viewer.decodedPhotos?.get(viewer.index)?.ready ||
+        (slides[target] && !viewer.decodedPhotos.get(target)?.ready)) return null;
     const layer = document.createElement('div');
     layer.className = 'ct-media-photo-layer'; layer.dataset.ctLocalUi = 'photo-motion';
     layer.setAttribute('aria-hidden', 'true');
     const track = document.createElement('div'); track.className = 'ct-media-photo-track';
-    const slides = ctMediaSlides(viewer.state.grid);
     for (const index of [target < viewer.index ? target : viewer.index - 1, viewer.index,
         target > viewer.index ? target : viewer.index + 1]) {
       const pane = document.createElement('div'); pane.className = 'ct-media-photo-pane';
       const original = slides[index]?.firstElementChild;
       if (original) {
-        const photo = document.createElement('img'); photo.alt = ''; photo.draggable = false;
-        photo.referrerPolicy = image.referrerPolicy; photo.src = original.src; pane.append(photo);
+        const decoded = viewer.decodedPhotos.get(index);
+        if (decoded?.ready && decoded.source === original.src) pane.append(decoded.image);
       }
       track.append(pane);
     }
@@ -5975,6 +6492,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed');
       state.stage.classList.remove('ct-media-viewer-stage');
       state.header?.classList.remove('ct-media-viewer-header');
+      ctMediaReleasePhotoQuality(dialog);
       for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
       ctMediaCenteredViewers.delete(dialog);
     }
@@ -5991,6 +6509,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       dialog.classList.toggle('ct-media-viewport-viewer', dialog.classList.contains('fixed'));
       stage.classList.add('ct-media-viewer-stage');
       header?.classList.add('ct-media-viewer-header');
+      ctMediaAttachPhotoQuality(dialog, image);
       ctMediaCenteredViewers.set(dialog, { stage, header });
       ctMediaViewport(dialog);
     }
@@ -6119,9 +6638,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     button.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>';
     const status = document.createElement('span');
     status.className = 'ct-media-video-status'; status.setAttribute('role', 'status'); status.hidden = true;
-    controls.append(button, status);
+    const resolution = document.createElement('span');
+    resolution.className = 'ct-media-video-resolution'; resolution.hidden = true;
+    resolution.title = ctMediaJapanese() ? '読み込んだ動画のサイズ' : 'Size of the loaded video';
+    controls.append(resolution, button, status);
     controls.addEventListener('click', event => event.stopPropagation());
-    const state = { video, shell, controls, button, status, context: null, pauseGuard: null,
+    const state = { video, shell, controls, button, status, resolution, context: null, pauseGuard: null,
       guardTimer: null, webkitFullscreen: false, requesting: false, requestSequence: 0, pendingRequests: new Set(),
       invalidatedFullscreen: false };
     button.addEventListener('click', () => {
@@ -6175,7 +6697,19 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     state.onWebkitEnd = () => { state.webkitFullscreen = false; ctMediaVideoEnd(state); };
     state.onPause = () => { state.intentPlaying = false; };
     state.onPlay = () => { if (ctMediaVideoFullscreen(state) && ctMediaVideoContextMatches(state)) state.intentPlaying = true; };
-    state.onInvalid = () => { if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true); };
+    state.onQuality = () => {
+      const source = ctMediaQualityURL(video.src);
+      const dimensions = source && video.readyState >= 1 &&
+        (!video.currentSrc || ctMediaQualityURL(video.currentSrc) === source)
+        ? ctMediaResolution(video.videoWidth, video.videoHeight) : '';
+      if (resolution.textContent !== dimensions) resolution.textContent = dimensions;
+      resolution.hidden = !dimensions;
+    };
+    state.onQualityReset = () => { resolution.textContent = ''; resolution.hidden = true; };
+    state.onInvalid = () => {
+      if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
+      state.onQuality();
+    };
     state.onPageHide = () => ctMediaVideoEnd(state, true);
     state.onVisibility = () => {
       if (document.hidden) ctMediaVideoEnd(state);
@@ -6189,11 +6723,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     video.addEventListener('play', state.onPlay);
     video.addEventListener('emptied', state.onInvalid);
     video.addEventListener('loadstart', state.onInvalid);
+    video.addEventListener('loadedmetadata', state.onQuality);
+    video.addEventListener('resize', state.onQuality);
+    video.addEventListener('emptied', state.onQualityReset);
+    video.addEventListener('loadstart', state.onQualityReset);
     window.addEventListener('pagehide', state.onPageHide);
     state.observer = new MutationObserver(state.onInvalid);
     state.observer.observe(video, { attributes: true, attributeFilter: ['src'], childList: true, subtree: true });
     shell.classList.add('ct-media-video-shell'); video.classList.add('ct-media-enhanced-video'); video.after(controls);
     ctMediaVideos.set(video, state);
+    state.onQuality();
   }
   function ctMediaRemoveVideo(state) {
     ctMediaVideoEnd(state, true);
@@ -6206,6 +6745,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     state.video.removeEventListener('play', state.onPlay);
     state.video.removeEventListener('emptied', state.onInvalid);
     state.video.removeEventListener('loadstart', state.onInvalid);
+    state.video.removeEventListener('loadedmetadata', state.onQuality);
+    state.video.removeEventListener('resize', state.onQuality);
+    state.video.removeEventListener('emptied', state.onQualityReset);
+    state.video.removeEventListener('loadstart', state.onQualityReset);
     window.removeEventListener('pagehide', state.onPageHide);
     state.controls.remove(); state.shell.classList.remove('ct-media-video-shell');
     state.video.classList.remove('ct-media-enhanced-video');
@@ -6251,7 +6794,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         stage, pointers: new Set(), pinch: false, context: pending.context,
         sources: ctMediaSlides(pending.state.grid).map(slide => slide.firstElementChild.src).join('\n') };
       viewer.reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-      viewer.onReduce = () => { if (viewer.reduce.matches) { ctMediaResetPhotoMotion(viewer); ctMediaEnhanceViewer(); } };
+      viewer.onReduce = () => {
+        if (viewer.reduce.matches) { ctMediaResetPhotoMotion(viewer); ctMediaClearPhotoDecode(viewer); }
+        ctMediaEnhanceViewer();
+      };
       viewer.reduce?.addEventListener?.('change', viewer.onReduce);
       stage?.classList.add('ct-media-swipe-stage');
       const move = index => {
@@ -6283,8 +6829,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         if (!viewer.pointers.size) viewer.pinch = false;
         ctMediaCancelPhotoGesture(viewer);
       };
-      viewer.onPageHide = () => { ctMediaCancelPhotoGesture(viewer); viewer.pointers.clear(); viewer.pinch = false; };
-      viewer.onVisibility = () => { if (document.hidden) viewer.onPageHide(); };
+      viewer.onPageHide = () => {
+        viewer.pageActive = false;
+        ctMediaCancelPhotoGesture(viewer); ctMediaClearPhotoDecode(viewer);
+        viewer.pointers.clear(); viewer.pinch = false;
+      };
+      viewer.onPageShow = () => { viewer.pageActive = true; ctMediaWarmPhotoDecode(viewer); };
+      viewer.onVisibility = () => { if (document.hidden) viewer.onPageHide(); else viewer.onPageShow(); };
       viewer.onDragStart = event => { if (viewer.touch && event.target.matches?.('img[alt="Media preview"]')) event.preventDefault(); };
       dialog.addEventListener('dragstart', viewer.onDragStart);
       viewer.onClick = event => {
@@ -6334,6 +6885,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       dialog.addEventListener('click', viewer.onClick, true);
       document.addEventListener('visibilitychange', viewer.onVisibility);
       window.addEventListener('pagehide', viewer.onPageHide);
+      window.addEventListener('pageshow', viewer.onPageShow);
       document.addEventListener('keydown', viewer.onKey, true);
       dialog.append(controls);
       ctMediaViewer = viewer;
@@ -6344,6 +6896,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       viewer.observer.observe(dialog, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     }
     ctMediaViewer.index = pending.index;
+    ctMediaWarmPhotoDecode(ctMediaViewer);
     if (ctMediaViewer.requestedIndex === pending.index) {
       ctMediaViewer.requestedIndex = null;
       clearTimeout(ctMediaViewer.requestTimer);
@@ -6372,6 +6925,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-media-viewport-viewer { inset:auto!important; top:var(--ct-media-view-top,0)!important; left:var(--ct-media-view-left,0)!important; width:var(--ct-media-view-width,100vw)!important; height:var(--ct-media-view-height,100dvh)!important; }
       .ct-media-centered-viewer > .ct-media-viewer-header { position:absolute!important; top:0; left:0; right:0; z-index:2; padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left))!important; pointer-events:none; }
       .ct-media-centered-viewer > .ct-media-viewer-header button { pointer-events:auto; min-width:44px; min-height:44px; }
+      .ct-media-photo-quality { position:absolute; top:max(12px,env(safe-area-inset-top)); right:max(12px,env(safe-area-inset-right)); z-index:3; display:flex; align-items:center; flex-wrap:wrap; gap:8px; max-width:calc(100% - 88px); color:#fff; font:12px/1.4 system-ui,sans-serif; }
+      .ct-media-photo-quality a { display:inline-flex; align-items:center; min-height:44px; padding:0 8px; color:inherit; background:#0009; border-radius:4px; text-decoration:none; }
+      .ct-media-photo-quality a:focus-visible { outline:3px solid #fff; outline-offset:2px; }
+      .ct-media-photo-resolution { padding:5px 8px; background:#0009; border-radius:4px; white-space:nowrap; }
+      .ct-media-photo-quality[hidden],.ct-media-photo-quality [hidden] { display:none!important; }
       .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
       .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
       .ct-media-swipe-stage { touch-action:pan-y pinch-zoom; }
@@ -6384,7 +6942,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-media-viewer-controls { position:absolute; left:0; right:0; bottom:0; z-index:2; flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
       .ct-media-viewer-controls button:hover:not(:disabled) { background:#ffffff26; }
       .ct-media-video-shell { position:relative; }
-      .ct-media-video-tools { position:absolute; top:4px; right:4px; z-index:1; }
+      .ct-media-video-tools { position:absolute; top:4px; right:4px; z-index:1; display:flex; align-items:center; gap:4px; }
+      .ct-media-video-resolution { padding:5px 7px; border-radius:4px; background:#0009; color:#fff; white-space:nowrap; font:12px/1.4 system-ui,sans-serif; }
       .ct-media-video-inline-tools { position:relative; top:auto; right:auto; display:flex; justify-content:flex-end; margin-top:-4px; margin-bottom:4px; }
       .ct-media-video-fullscreen { display:flex; align-items:center; justify-content:center; width:44px; height:44px; padding:0; border:0; border-radius:50%; background:#0009; color:#fff; cursor:pointer; opacity:.8; transition:background 120ms ease-out,opacity 120ms ease-out; }
       .ct-media-video-fullscreen:hover,.ct-media-video-fullscreen:focus-visible { opacity:1; background:#000c; }
@@ -6405,6 +6964,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctMediaEnhance(root = document) {
     ctMediaStyles();
+    for (const [dialog, state] of ctMediaPhotoQuality) {
+      if (!dialog.isConnected || !state.image.isConnected || !dialog.contains(state.image)) ctMediaReleasePhotoQuality(dialog);
+    }
     for (const state of ctMediaVideos.values()) {
       if (!state.video.isConnected) ctMediaRemoveVideo(state);
       else if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
@@ -7821,5 +8383,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.19.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.21.0 loaded');
 })();
