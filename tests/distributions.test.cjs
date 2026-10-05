@@ -255,6 +255,16 @@ for (const { file, locale } of distributions) {
       assert.match(window.document.querySelector('.ct-news-status').textContent,/Yahoo!ニュース・NHK NEWS WEB/);
       assert.equal(window.getComputedStyle(native).display,'none');
       assert.equal(native.textContent,'Native world headline');
+      // Loaded headlines can precede the last queued runtime/gallery scan on a
+      // busy CI runner. Require a bounded quiet window before observing idle;
+      // recurring mutation loops must still fail to reach this window.
+      const settleDeadline = Date.now() + 3000;
+      let lastMutations = mutations, quietSince = Date.now();
+      while (Date.now() - quietSince < 250 && Date.now() < settleDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        if (mutations !== lastMutations) { lastMutations = mutations; quietSince = Date.now(); }
+      }
+      assert.ok(Date.now() - quietSince >= 250, 'news/gallery mutations must reach a quiet window');
       const previous = mutations;
       await new Promise(resolve => setTimeout(resolve,450));
       assert.equal(mutations,previous,'news completion and gallery cleanup must settle');
