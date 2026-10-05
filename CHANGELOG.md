@@ -1,8 +1,8 @@
 # Changelog
 
-## All distributions v6.20.0 — 2026-10-05 (unreleased)
+## All distributions v6.20.0 — 2026-10-05
 
-Implementation and validation are in progress; the public release remains 6.19.1.
+All six editions are published as 6.20.0. Validation passes 603 tests; usual public code URLs and guides have been verified.
 
 - Accept a bounded string `response` when a manager supplies null/unavailable `responseText`; keep real HTTP status and final-response URL validation. Do not settle an empty status-zero Promise receipt before the actual callback or deadline.
 - Combine Yahoo! News with the current NHK domestic RSS, Nikkan Sports image-bearing sports/entertainment Atom and ITmedia technology RSS. Read two verified feeds per topic in parallel and display successful results as they arrive; retain available Japan news through a partial failure.

@@ -1,6 +1,6 @@
-# 6.20.0 検証記録（公開前）
+# 6.20.0 検証記録
 
-確認日: 2026-10-05（日本時間）。対象は日本語・英語各3環境、計6版。公開中は6.19.1です。
+確認日: 2026-10-05（日本時間）。対象は日本語・英語各3環境、計6版。全6版を6.20.0へ公開しました。
 
 **変更:** 管理アプリの文字列 `response` と空のstatus 0受領書への対応。YahooにNHK国内RSS・日刊スポーツのスポーツ／芸能Atom・ITmediaのIT RSSを補い、各分類の2配信元を並列取得。成功分を到着次第表示し、部分失敗でも日本ニュースを維持、全失敗は元ニュース＋「再試行」とします。`@connect` は `news.web.nhk`・`www.nikkansports.com`・`rss.itmedia.co.jp` の3ホストを追加し、既存のgrant・配布ID・保存キー・本文・下書きを保持します。
 
@@ -19,11 +19,11 @@
 - メタデータと生成コードの独立監査成功。6.19.1比で変更は版番号と追加3RSSホストだけ、名前・namespace・match・grant・既存connect・保存キーを保持。全6版の再展開バイト／SHA一致。
 - 証跡はリポジトリ外 `outputs/release-6.20.0/` の `full-check.txt`、`news-tests.txt`、`news-progressive-cache-review.json`、`metadata-audit.json`、`browser-audit.json`、`news-mobile.jpg`、`news-desktop.jpg`、`rss-research/live-feed-parser.json` に保存しました。検証用の画面幅は通常へ戻しました。
 
-**確認待ち:** GitHub CI・全6版の公開コード／案内照合。
+**公開照合:** 全6版の通常コードURLは匿名GETでHTTP 200／6.20.0。Greasy Forkが付加するdownloadURL／updateURLと改行・末尾空白だけを除き、全バイト・SHA256一致。全6版の案内は版見出し、必要なもの、版名、導入・更新、コードURL／管理アプリ／版選択リンクと4媒体のニュース説明を確認しました。計12GET、取得エラー0、キャッシュバスト・再試行なし。`public-code-checks.json` に保存。
 
 **実機との区別:** 公開Stayソースで確認した応答形が、ユーザーのインストール済み版・実際の通信でも使われているかは未確認です。実Safari＋Stay／Android Firefox＋Tampermonkeyでの導入・更新・ニュース復旧、長時間操作は未検証。実サービスへの投稿・アップロード・お気に入り・投票・ミュート・フォロー変更は行いません。
 
-**配布:** 6.20.0はまだGitHub／Greasy Forkへ公開していません。全6版の導入先・管理アプリ・スクリプト名・コードURL、Stayの更新ボタン案内を維持して更新予定です。
+**配布:** GitHub [PR #20](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/20)とGreasy Fork全6版を6.20.0へ更新しました。実装commit `5fdc7b2`、CI待機条件修正後のhead `b857293d96a22d80b61518188eae6c7f826d9169` のpush／PR CI 2件成功。各掲載画面の版番号と案内見出し、既存の限定公開・HTML設定を保持していることを確認。`ci-push.json`、`ci-pr.json`、公開画面の `release.jpg` を証跡に保存。ブラウザの一時サイズは解除済み。
 
 ---
 
