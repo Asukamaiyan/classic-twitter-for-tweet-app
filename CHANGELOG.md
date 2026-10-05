@@ -2,6 +2,8 @@
 
 ## All distributions v6.21.0 — 2026-10-06
 
+All six editions are published as 6.21.0. Validation passes 650 tests; ordinary public code URLs and complete installation/update guides match the generated release.
+
 - Preserve stored profile bio newlines and blank lines through CSS on verified native profile headers, without replacing text, links or handlers.
 - Open the unchanged delivered image URL from enlarged native/profile viewers and display decoded image/video dimensions. No higher-quality rendition, server transcoding or HDR retention is invented.
 - Decode only the current and adjacent photos before swipe motion; keep the native photo visible when decoding is pending or fails. Release prepared images on close, background, zoom and context changes.

@@ -15,7 +15,7 @@
 
 **未検証:** 実Safari＋Stay／Android Firefox＋Tampermonkey、実際のOS通知、実ピンチ・長時間操作は未検証です。ページを閉じて届くPush配信はTweet側の仕組みが確認できず実装していません。実サービスへの投稿・アップロード・お気に入り・投票・ミュート・フォロー変更は行っていません。
 
-**配布:** GitHub CIとGreasy Fork公開コード・案内の最終照合はこの節へ追記します。
+**配布:** GitHub [PR #21](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/21)とGreasy Fork全6版を6.21.0へ更新。実装commit `483a9cf20d0d6d561268305745e9e21875cfb611` のpush／PR CI 2件が成功。更新UIでコード全体のSHAを照合してから送信し、既存の限定公開・HTML設定を保持。匿名の通常6コードURL＋6案内URLの計12GETを各1回実行し、全HTTP 200／6.21.0。正当なGF追加downloadURL／updateURLと改行・末尾空白だけを除き、全バイト・SHA256が生成コードと一致。案内は全文block・リンク・版名・導入／更新も全6一致。`public-code-checks.json`、`ci-push.json`、`ci-pr.json`、公開画面の `release.jpg` を保存。ブラウザの一時画面幅は解除し、実プロフィールへの一時CSSは再読み込みで除去済みです。
 
 ---
 
