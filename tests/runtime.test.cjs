@@ -10,6 +10,7 @@ const runtime = fs.readFileSync(path.join(__dirname, '../src/runtime.js'), 'utf8
 const timestamps = fs.readFileSync(path.join(__dirname, '../src/timestamps.js'), 'utf8');
 const motion = fs.readFileSync(path.join(__dirname, '../src/motion.js'), 'utf8');
 const navigation = fs.readFileSync(path.join(__dirname, '../src/navigation.js'), 'utf8');
+const browserNotifications = fs.readFileSync(path.join(__dirname, '../src/browser-notifications.js'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../classic-twitter-ja.user.js'), 'utf8');
 const helperNames = new Set(['ctTranslationButtonText', 'ctTranslationControls', 'ctDeclaredLanguage', 'ctLikelyLanguage']);
 const helpers = [];
@@ -113,6 +114,7 @@ function harness(t, html = '', options = {}) {
     ${translation}
     ${options.timestamps ? timestamps : ''}
     ${options.motion ? motion : ''}
+    ${browserNotifications}
     ${runtime}
     ${options.navigation ? navigation : ''}
     ${options.localization ? localizationSource : ''}
@@ -122,7 +124,8 @@ function harness(t, html = '', options = {}) {
       timestampPatch: typeof ctTimestampPatchExactPostTime === 'function' ? ctTimestampPatchExactPostTime : null,
       patchClassicMotion: typeof patchClassicMotion === 'function' ? patchClassicMotion : null,
       patchNavigation: typeof patchNavigation === 'function' ? patchNavigation : null,
-      patchUI: typeof patchUI === 'function' ? patchUI : null };
+      patchUI: typeof patchUI === 'function' ? patchUI : null,
+      destroyBrowserNotifications: () => ctBrowserNotifications?.destroy() };
   `);
   async function flush() { await Promise.resolve(); await Promise.resolve(); }
   async function advance(duration = 0) {
@@ -141,7 +144,11 @@ function harness(t, html = '', options = {}) {
     now = end;
     await flush();
   }
-  t.after(() => { window.dispatchEvent(new window.Event('pagehide')); dom.window.close(); });
+  t.after(() => {
+    window.dispatchEvent(new window.Event('pagehide'));
+    window.qa.destroyBrowserNotifications();
+    dom.window.close();
+  });
   return {
     dom, window, document, qa: window.qa, stats, timers, intervals, values, advance, flush,
     get settings() { return settings; },
@@ -316,6 +323,8 @@ test('observer settles after own scan writes and batches dynamic navigation and 
   });
   f.qa.start(); f.qa.start();
   assert.equal(f.stats.scans, 1); assert.equal(f.stats.installs, 1);
+  assert.equal(f.settings.browserNotifications.getState().enabled, false);
+  assert.equal(f.settings.browserNotifications.getState().supported, false, 'the real module handles an engine without Notification');
   assert.equal(f.intervals.size, 0, 'native notifications own their refresh interval');
   await f.advance(1000); assert.equal(f.stats.scans, 1, 'no idle observer cycle from script mutations');
   f.document.getElementById('nav').textContent = 'Notifications';

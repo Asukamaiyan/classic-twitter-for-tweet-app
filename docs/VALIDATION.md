@@ -1,3 +1,24 @@
+# 6.21.0 検証記録
+
+確認日: 2026-10-06（日本時間）。日本語・英語各3環境、計6版。
+
+- 現行Tweet v2.1.1の公開クライアント、メディア設定、native GET postsの画像11件を確認。配信画像／動画は `public_url`、プレビューは `thumbnail_url`。別の高画質renditionは確認できませんでした。画像を開く機能・解像度表示は、配信データの画質向上とは区別します。
+- 実プロフィールは元bioに6改行があり、computed whitespaceがnormalでした。同じ修正関数を一時適用し、6改行保持・対象一致・pre-wrapを確認。再読み込みで専用クラスとstyleの除去を確認し、本文・アカウント設定は編集していません。
+- `npm run check`: **650件成功、失敗0件**。6生成版のbuild・構文検査・既存機能の回帰を含みます。新bio8件、media quality12件、共通APIのStay互換7件、通知20件を追加。通知＋既存Tools57件もfocusedで成功しています。
+- 初回全体検証では並行作業中の通知2テストと既存検索テストに失敗。通知のアカウント変更後のlock取得／test cleanup順を修正し、検索テストは固定280ms待ちから、同じ期待値の完了を最大3秒まで待つ形へ変更。生産コードの検索処理は変えていません。凍結後に全650件を再実行して成功しました。
+- 独立レビューで、旧tabの遅延SW完了が新ownerの通知を置換して消す競合を再現。controller固有＋generationのtag、配信時worker参照で解消。worker支援喪失時のpending／owner破棄と、古いdesktop通知clickの棄却も追加4回帰で確認しました。修正前後の再現証跡を保存。通知・Tools等の独立60テスト成功。
+- Chromium fixtureで全6版のbio改行／リンクhandler／本文・下書き保持、390px写真decode準備とnative switch、320pxの配信画像リンクと1600×1138実decoded寸法を確認。noopener noreferrer、配信URL・元画像node保持、閉じる操作と横幅の非干渉が成功。1280pxも横はみ出し0です。
+- 合成PointerEventを画像に送るスワイプ検証で連続transform値から220ms整列、native画像保持と一時layer撤去を確認。動画はローカル640×360サンプルで同じnode・src・音量・再生速度を保持し、再生中に全画面化後も再生が継続しました。実機の指操作やサーバー動画の画質変更ではありません。
+- 全6版の通知fixtureはFakeNotificationだけを使い、初期permission要求0、手動ONの要求1、native未読2→3で汎用通知1、OFFで閉じることを確認。実Web Locksで2タブの通知は1つだけ、owner解放後の次タブへの担当切替も成功。OSや実Tweetの通知許可は要求しませんでした。
+- 独立metadata監査で、6.20.0比のメタデータ変更はversionだけ。配布ID、name、namespace、match、grant、connect、既存保存キーを保持。新通知モジュールを含め、source展開と6生成コードは全バイト一致。全6guideの正確版名・manager・1本のみ・Stay更新・画質／通知の限界を確認しました。
+- 証跡はリポジトリ外 `outputs/release-6.21.0/` の `full-check-final.txt`、`metadata-audit.json`、`browser-audit.json`、`independent-notification-review-final.json`、`media-research/`、`notification-research/` に保存。
+
+**未検証:** 実Safari＋Stay／Android Firefox＋Tampermonkey、実際のOS通知、実ピンチ・長時間操作は未検証です。ページを閉じて届くPush配信はTweet側の仕組みが確認できず実装していません。実サービスへの投稿・アップロード・お気に入り・投票・ミュート・フォロー変更は行っていません。
+
+**配布:** GitHub [PR #21](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/21)とGreasy Fork全6版を6.21.0へ更新。実装commit `483a9cf20d0d6d561268305745e9e21875cfb611` のpush／PR CI 2件が成功。更新UIでコード全体のSHAを照合してから送信し、既存の限定公開・HTML設定を保持。匿名の通常6コードURL＋6案内URLの計12GETを各1回実行し、全HTTP 200／6.21.0。正当なGF追加downloadURL／updateURLと改行・末尾空白だけを除き、全バイト・SHA256が生成コードと一致。案内は全文block・リンク・版名・導入／更新も全6一致。`public-code-checks.json`、`ci-push.json`、`ci-pr.json`、公開画面の `release.jpg` を保存。ブラウザの一時画面幅は解除し、実プロフィールへの一時CSSは再読み込みで除去済みです。
+
+---
+
 # 6.20.0 検証記録
 
 確認日: 2026-10-05（日本時間）。対象は日本語・英語各3環境、計6版。全6版を6.20.0へ公開しました。

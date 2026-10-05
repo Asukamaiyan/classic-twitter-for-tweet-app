@@ -1,5 +1,16 @@
 # Changelog
 
+## All distributions v6.21.0 — 2026-10-06
+
+All six editions are published as 6.21.0. Validation passes 650 tests; ordinary public code URLs and complete installation/update guides match the generated release.
+
+- Preserve stored profile bio newlines and blank lines through CSS on verified native profile headers, without replacing text, links or handlers.
+- Open the unchanged delivered image URL from enlarged native/profile viewers and display decoded image/video dimensions. No higher-quality rendition, server transcoding or HDR retention is invented.
+- Decode only the current and adjacent photos before swipe motion; keep the native photo visible when decoding is pending or fails. Release prepared images on close, background, zoom and context changes.
+- Add optional, default-off browser alerts from reliable increases in native unread counts while Tweet remains open. Request permission only from the Tools switch; use account preferences, an exclusive Web Lock, generic text and no added API polling or Push subscription.
+- Accept Stay text-only JSON responses and incomplete Promise acknowledgements in the shared read-only API transport, retaining deadlines and exact endpoint validation.
+- Keep native upload/playback/actions, existing data and all six edition identities and permissions. Physical Safari/Stay/Android and actual OS alert delivery are separate acceptance checks.
+
 ## All distributions v6.20.0 — 2026-10-05
 
 All six editions are published as 6.20.0. Validation passes 603 tests; usual public code URLs and guides have been verified.

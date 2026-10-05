@@ -45,11 +45,18 @@
         try { controller?.abort(); } catch {}
       }, ctNetworkState.requestTimeout);
       const parse = response => {
-        if (!response || !(response.status >= 200 && response.status < 300) ||
-            (response.finalUrl && !ctAllowedAPIURL(response.finalUrl))) return null;
         try {
-          if (typeof response.responseText !== 'string' || response.responseText.length > 2 * 1024 * 1024) return null;
-          return JSON.parse(response.responseText);
+          if (!response || !(response.status >= 200 && response.status < 300)) return null;
+          for (const key of ['finalUrl', 'responseURL']) {
+            if (response[key] && ctAllowedAPIURL(response[key]) !== target) return null;
+          }
+          // Stay may return text in `response`, or expose an unavailable
+          // responseText getter. Do not accept manager-specific objects/blobs.
+          let body;
+          try { body = response.responseText; } catch {}
+          if (body == null) body = response.response;
+          if (typeof body !== 'string' || body.length > 2 * 1024 * 1024) return null;
+          return JSON.parse(body);
         } catch {
           return null;
         }
@@ -66,6 +73,7 @@
           handle = gmRequest({
             method: 'GET', url: target, headers: requestHeaders,
             timeout: ctNetworkState.requestTimeout, redirect: 'error', anonymous: true,
+            responseType: 'text',
             onload: response => finish(parse(response)),
             onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null)
           });
@@ -73,7 +81,11 @@
             Promise.resolve(handle).then(response => {
               // An acknowledgement is not the response. Some bridges resolve
               // first, then deliver the HTTP result through onload.
-              if (response && typeof response === 'object' && 'status' in response) finish(parse(response));
+              try {
+                if (response && typeof response === 'object' &&
+                    Number.isFinite(response.status) && response.status > 0 &&
+                    (response.readyState == null || response.readyState === 4)) finish(parse(response));
+              } catch { finish(null); }
             }, () => finish(null));
           }
         } catch {
@@ -86,9 +98,9 @@
         method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
         ...(controller ? { signal: controller.signal } : {})
       })).then(async response => {
-        if (!response?.ok || (response.url && !ctAllowedAPIURL(response.url))) return null;
+        if (!response?.ok || (response.url && ctAllowedAPIURL(response.url) !== target)) return null;
         const body = await response.text();
-        if (body.length > 2 * 1024 * 1024) return null;
+        if (typeof body !== 'string' || body.length > 2 * 1024 * 1024) return null;
         try { return JSON.parse(body); } catch { return null; }
       }).then(finish, () => finish(null));
     });

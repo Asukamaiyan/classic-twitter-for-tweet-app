@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.20.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.21.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 日本語・英語各3環境、全6版を6.20.0へ更新しました。通常のコードURLと生成コードの全バイト・SHA256、掲載案内の版番号・導入／更新情報を確認済みです。
+**配布状況:** 日本語・英語各3環境、全6版を6.21.0へ更新しました。通常コードURLはGreasy Forkが付加する更新URL等を除いて生成コードと全バイト・SHA256一致、掲載案内も全文とリンクを確認済みです。
 
 ## 導入・更新
 
@@ -51,7 +51,9 @@
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
 
-6.20.0では、日本ニュースの通信処理を修正し、Yahoo!ニュースに加えて国内はNHK、スポーツ・芸能は日刊スポーツ、ITはITmediaを利用します。各分類を2つの配信元から取得し、届いた記事から表示します。一方が失敗しても取得できた記事を表示し、すべて失敗した場合は元ニュースと「再試行」を残します。画像は配信元が提供するものを使います。実際のSafari＋Stayでの復旧はまだ未確認です。
+6.21.0ではbioの改行を保持し、拡大写真に **「配信画像を開く」** と画像サイズ、動画に読み込んだ解像度を表示します。写真の切替は現在・前後だけを先にデコードし、準備中は表示済みの写真を保持します。確認できた配信ソースをそのまま使いますが、配信データ以上の高画質化や4K／HDR保持はできません。日本ニュースのYahoo・NHK・日刊スポーツ・ITmedia対応も維持します。
+
+**通知：** 「便利ツール」→ **「通知数が増えたらお知らせする」** をオンにしてブラウザの通知を許可。初期状態はオフです。Tweetを開いている間に、元の未読数が増えた場合だけ一般的なお知らせを出し、名前・本文は出しません。複数タブでは1つだけが担当します。ページを閉じたりスマホで停止すると届かず、iPhoneの通常Safariタブなど非対応環境では理由を表示します。閉じたページへ届くPush通知はTweet側の対応が必要です。
 
 ## 主な機能
 
@@ -105,7 +107,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.20.0 fixes Japan news transport and combines Yahoo! News with NHK for domestic news, Nikkan Sports for sports/entertainment and ITmedia for technology. Each topic reads two sources in parallel and displays received articles without waiting for the other source. A partial failure keeps available Japan news; a complete failure retains native news and Retry. Images come from the publisher feeds. Actual recovery in Safari/Stay is unverified. All six published editions are 6.20.0, with their usual code URLs matched to generated files and their installation/update guides verified.
+Version 6.21.0 preserves profile bio line breaks, opens delivered images directly and shows decoded image/video dimensions. Adjacent photos are prepared before swipe motion; pending or failed decoding keeps the native photo visible. It cannot increase delivered resolution or guarantee 4K/HDR retention. Optional browser alerts are off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported. Japan news continues to combine Yahoo, NHK, Nikkan Sports and ITmedia. Physical Safari/Stay/Android and actual OS alerts remain unverified.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 

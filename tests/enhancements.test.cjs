@@ -214,7 +214,12 @@ test('saved-search startup consumes a fresh tab-local intent even after the app 
     },
   });
   assert.equal(window.sessionStorage.getItem(INTENT_KEY), null);
-  await new Promise(resolve => window.setTimeout(resolve, 280));
+  // Wait for the native acknowledgement to be consumed, not a fixed timer
+  // that can fire before the next animation frame under parallel CI load.
+  const deadline = Date.now() + 3000;
+  while (window.location.search !== '?tab=latest' && Date.now() < deadline) {
+    await new Promise(resolve => window.setTimeout(resolve, 20));
+  }
   assert.equal(document.querySelector('main input').value, 'cats');
   assert.equal(document.getElementById('ct-local-tools-status').textContent, '');
 });

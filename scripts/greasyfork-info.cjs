@@ -128,6 +128,8 @@ function render(edition) {
     `<h3>${japanese ? '版を選ぶ' : 'Choose an edition'}</h3>`,
     editionTable(edition.locale),
     `<p>${features}</p>`,
+    `<p>${japanese ? 'bioの改行を保持。拡大写真の「配信画像を開く」で提供画像を直接開き、写真・動画の読み込んだ解像度を表示します。写真切替の準備は前後だけに限定。配信データ以上の高画質化や4K／HDR保持はできません。' : 'Preserves bio line breaks. Open image in enlarged photos opens the delivered file; loaded image/video dimensions are shown. Swipe preparation is limited to adjacent photos. This cannot increase delivered resolution or guarantee 4K/HDR retention.'}</p>`,
+    `<p>${japanese ? '通知は「便利ツール」→「通知数が増えたらお知らせする」をオンにして許可（初期オフ）。ページを開いている間の未読数増加を通知し、名前・本文は表示しません。閉じる・スマホで停止すると届かず、iPhoneの通常Safariなど非対応環境では理由を表示します。' : 'For alerts: Tools → Alert when the unread count increases, then allow notifications (off by default). Alerts use native unread increases while Tweet is open and include no names or post text. Closing or suspending the page stops alerts; unsupported environments, including regular iPhone Safari tabs, show a reason.'}</p>`,
     `<p>${japanese ? '過去のお気に入りは「便利ツール」→「過去の投稿から探す」。画面を開いたまま使い、「続きから探す」で再開できます（1回100ページまで）。返されるタイムラインの範囲で復元するため、全履歴は保証できません。プロフィールの「お気に入り」は件数・期間・確認範囲と保存した投稿を表示し、JSONバックアップができます。写真は中央で拡大し、動画の「全画面表示」は同じプレーヤーを使います。' : 'For older Favorites: Tools → Search older posts, then Continue searching to resume (up to 100 pages per run while visible). Recovery covers returned timelines and cannot guarantee your entire history. Your profile’s Favorites tab shows saved posts, counts, date range and recovery coverage, with JSON backups. Enlarged photos are centered; video fullscreen keeps the same player.'}</p>`,
     safariFeature,
     `<p>${link(readmeUrl, japanese ? '機能・保存データ・対応範囲の詳細' : 'Features, saved data and compatibility details')}</p>`

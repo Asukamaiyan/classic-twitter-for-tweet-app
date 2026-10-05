@@ -1,5 +1,5 @@
 /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -27,6 +27,9 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     deviceUnsupported: 'このブラウザでは端末内翻訳を利用できません。Safari／Stayとスマートフォンではサイトの翻訳をご利用ください。',
     sourceLanguage: '翻訳する投稿の言語', prepareModel: 'モデルを準備', preparingModel: '準備中…',
     translationStatus: '翻訳の状態',
+    notifications: 'ページを開いている間の通知', notificationsEnabled: '通知数が増えたらお知らせする',
+    notificationsHelp: 'ページを閉じる・スマホが画面を停止すると届きません。投稿内容や名前は通知に出しません。',
+    notificationsError: '通知の設定を変更できませんでした。',
     favorites: 'お気に入りの復元', restoreFavorites: '読み込み済みのお気に入りを復元', restoringFavorites: '確認中…',
     restoreHelp: '今の画面で読み込んだお気に入り済みのツイートを、このブラウザに保存します（1回40件まで）。過去の全履歴は取得できません。',
     restoreResult: (saved, unresolved) => `${saved}件を保存しました。${unresolved ? ` ${unresolved}件は特定できませんでした。詳細画面か原文を開いて再度お試しください。` : ''}`,
@@ -66,6 +69,9 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     deviceUnsupported: 'On-device translation is unavailable here. Use site translation in Safari/Stay and on mobile.',
     sourceLanguage: 'Language of posts to translate', prepareModel: 'Prepare model', preparingModel: 'Preparing…',
     translationStatus: 'Translation status',
+    notifications: 'Alerts while Tweet is open', notificationsEnabled: 'Alert when the unread count increases',
+    notificationsHelp: 'Alerts stop when you close the page or your phone suspends it. Names and post text are never included.',
+    notificationsError: 'Could not change the notification setting.',
     favorites: 'Restore Favorites', restoreFavorites: 'Restore loaded Favorites', restoringFavorites: 'Checking…',
     restoreHelp: 'Save already-favorited Tweets loaded on this screen in this browser (up to 40 per run). This cannot retrieve your entire past history.',
     restoreResult: (saved, unresolved) => `Saved ${saved}. ${unresolved ? `${unresolved} could not be identified. Open the detail page or original text and try again.` : ''}`,
@@ -220,6 +226,34 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     input.focus();
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
+
+  let refreshBrowserNotifications = () => {};
+  if (typeof browserNotifications?.getState === 'function' && typeof browserNotifications?.setEnabled === 'function') {
+    const section = element('section');
+    const input = element('input', undefined, { type: 'checkbox', id: 'ct-local-browser-notifications',
+      'aria-describedby': 'ct-local-browser-notifications-help ct-local-browser-notifications-status' });
+    const label = element('label'); label.append(input, document.createTextNode(copy.notificationsEnabled));
+    const status = element('p', '', { id: 'ct-local-browser-notifications-status', class: 'ct-local-note', role: 'status', 'aria-live': 'polite' });
+    refreshBrowserNotifications = () => {
+      const current = browserNotifications.getState();
+      input.checked = current.enabled === true;
+      input.disabled = current.busy === true || (!current.canEnable && !current.enabled);
+      if (status.textContent !== current.status) status.textContent = current.status || '';
+    };
+    input.addEventListener('change', async () => {
+      const requested = input.checked;
+      try {
+        const pending = browserNotifications.setEnabled(requested, { userGesture: true });
+        refreshBrowserNotifications(); await pending;
+      } catch { announce(copy.notificationsError, true); }
+      finally { refreshBrowserNotifications(); }
+    });
+    section.append(element('h3', copy.notifications), label,
+      element('p', copy.notificationsHelp, { id: 'ct-local-browser-notifications-help', class: 'ct-local-note' }), status);
+    body.append(section);
+    window.addEventListener('ct-browser-notifications-change', refreshBrowserNotifications);
+    refreshBrowserNotifications();
+  }
 
   let refreshAppearance = () => {};
   if (typeof getClassicAppearance === 'function' && typeof setClassicAppearance === 'function') {
@@ -489,6 +523,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     collapsed.delete(article);
   }
   function refresh() {
+    refreshBrowserNotifications();
     updateBookmarkControl();
     for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);
     if (!state.enabled && collapsed.size === 0) return;
@@ -684,6 +719,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   updateViewport();
   refresh();
   const controller = { root, panel, refresh, refreshTranslation, destroy() {
+    if (destroyed) return;
     destroyed = true;
     observer.disconnect();
     clearTimeout(timer);
@@ -692,6 +728,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     document.removeEventListener('input', onSearchUserInput, true);
     window.removeEventListener('storage', onStorage);
     window.removeEventListener('ct-favorite-history-change', refreshFavoriteHistory);
+    window.removeEventListener('ct-browser-notifications-change', refreshBrowserNotifications);
     window.removeEventListener('popstate', refresh);
     viewport?.removeEventListener('resize', queueViewport);
     viewport?.removeEventListener('scroll', queueViewport);
