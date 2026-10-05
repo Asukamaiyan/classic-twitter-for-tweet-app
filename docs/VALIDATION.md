@@ -1,3 +1,31 @@
+# 6.20.0 検証記録（公開前）
+
+確認日: 2026-10-05（日本時間）。対象は日本語・英語各3環境、計6版。公開中は6.19.1です。
+
+**変更:** 管理アプリの文字列 `response` と空のstatus 0受領書への対応。YahooにNHK国内RSS・日刊スポーツのスポーツ／芸能Atom・ITmediaのIT RSSを補い、各分類の2配信元を並列取得。成功分を到着次第表示し、部分失敗でも日本ニュースを維持、全失敗は元ニュース＋「再試行」とします。`@connect` は `news.web.nhk`・`www.nikkansports.com`・`rss.itmedia.co.jp` の3ホストを追加し、既存のgrant・配布ID・保存キー・本文・下書きを保持します。
+
+- 公開RSS／Atomの匿名GETで、採用する追加4フィードすべてHTTP 200・転送なし。NHK国内は184件／画像0、日刊スポーツのスポーツ・芸能は各10件／画像10、ITmediaは50件／画像0でした。既存Yahooの4分類も各50件／画像50・HTTP 200。採用先はすべてapp.tweet.appのOriginに対するACAOがなく、管理アプリのGM通信が必要です。配信元にない画像は補わず、記事ごとのOGP取得も行いません。
+- 旧NHKのcat0.xmlはHTTP 200でも最新が2026-08-08、7件だけでした。現行の公式RSS案内に載る新URLを採用します。証跡はリポジトリ外の作業ディレクトリ `outputs/release-6.20.0/rss-research/` の `feed-summary.json`、公式案内・XML・画像GET結果に保存されています。
+- Stay公開ソースのcommit `9b78d761d307234d4ed5ea72ac423804ea0c4301` で、旧bridgeが非空responseTypeの際に `responseText=null`・`response=xhr.response` を返す経路と、別bridgeの `responseURL` を確認しました。status 0のPromise受領書は別の合成再現条件で、実公開Stayで確認したPromise応答としては扱いません。[根拠と公式リンク](API_RESEARCH.md#6200-publisher-feed-and-manager-response-recheck-2026-10-05-jst)を参照してください。
+- `node --test tests/news-transport.test.cjs`: **11件成功、失敗0件**。公開6.19.1固定ソースとの合成比較で、null `responseText`／文字列 `response` は旧版拒否→新版受理、空のstatus 0 Promise受領書は旧版早期失敗→新版callback待機後成功。URL正規化、`responseURL` が別URLの場合の拒否、取得不能な `responseText` getter、期限と後始末も検証しました。任意wrapper・Blob・documentから本文を変換する処理は追加していません。証跡はリポジトリ外の `outputs/release-6.20.0/news-transport-reproduction.json` に保存されています。
+- `news` **47件成功、失敗0件**。通信11件と合わせてニュース関連 **58件成功**。NHK／ITmedia RSSと日刊スポーツAtomの解析・配信元／日時／画像有無の保持、2配信元の並列取得、遅いYahooを待たない先行表示、完成後の件数配分と時刻順、部分失敗の再試行、全失敗の元ニュース復帰を確認しました。旧Yahoo-only cacheの再取得、キャッシュの配信元検証、遅い応答の画面／分類変更後の棄却、地域切替・背景化・期限・元DOMと操作の保持も既存テストを含めて成功しました。
+- `npm run check`: **603件成功、失敗0件**。全6版の生成・構文検査と、ニュース修正を含む既存機能の回帰検証が成功しました。実ブラウザの表示・管理アプリ実機・公開コード照合の結果とは区別します。
+- 全6版の案内生成を確認し、管理アプリ・正確な版名・導入先・1本だけ有効・SafariコードURL／Stay更新ボタンを維持。案内スクリプトの構文検査と `git diff --check` は成功しました。生成コードや掲載画面の最終確認とは区別します。
+
+- 独立レビューで、別分類の完了時に未完了キャッシュも保存される不具合を再現して修正。完了分だけ保存し、旧`loading:true`キャッシュも再取得します。分類をまたぐ取得→再読み込みの回帰テストを追加しました。
+- 実8フィードを現行parserへ通す独立検証115項目が成功。各配信10記事、4分類の統合は各10記事・各媒体5記事・日時降順・URL重複なし。元XMLのタイトル・出典・日時・実画像URLと一致しました。
+- 実Tweet v2.1.1の390px幅で現行ニュースタブと対象DOMを確認しました。追加コードの描画は実RSSデータ＋管理アプリ応答模擬を使うローカルChromium再現画面で検証。全6版×4分類、世界へ復帰、320pxでYahoo失敗時のNHK表示と再試行、1280px日本語／英語表示、全配信失敗時の元ニュース、フォロー中へ切り替えた後の遅延応答棄却が成功しました。36ケースで本文／元リンクと横はみ出し防止を確認。遅延読込の写真は画面内で表示確認し、画面外の全画像読込を成功として数えません。
+- メタデータと生成コードの独立監査成功。6.19.1比で変更は版番号と追加3RSSホストだけ、名前・namespace・match・grant・既存connect・保存キーを保持。全6版の再展開バイト／SHA一致。
+- 証跡はリポジトリ外 `outputs/release-6.20.0/` の `full-check.txt`、`news-tests.txt`、`news-progressive-cache-review.json`、`metadata-audit.json`、`browser-audit.json`、`news-mobile.jpg`、`news-desktop.jpg`、`rss-research/live-feed-parser.json` に保存しました。検証用の画面幅は通常へ戻しました。
+
+**確認待ち:** GitHub CI・全6版の公開コード／案内照合。
+
+**実機との区別:** 公開Stayソースで確認した応答形が、ユーザーのインストール済み版・実際の通信でも使われているかは未確認です。実Safari＋Stay／Android Firefox＋Tampermonkeyでの導入・更新・ニュース復旧、長時間操作は未検証。実サービスへの投稿・アップロード・お気に入り・投票・ミュート・フォロー変更は行いません。
+
+**配布:** 6.20.0はまだGitHub／Greasy Forkへ公開していません。全6版の導入先・管理アプリ・スクリプト名・コードURL、Stayの更新ボタン案内を維持して更新予定です。
+
+---
+
 # 6.19.1 検証記録
 
 確認日: 2026-10-04（日本時間）。日本語・英語各3環境、計6版。

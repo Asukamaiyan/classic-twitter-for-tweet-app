@@ -111,8 +111,8 @@ function render(edition) {
     : '';
   const current = japanese ? 'このページのスクリプト' : 'The script on this page';
   const features = japanese
-    ? '昔のTwitter風の表示、星のお気に入り、通知フィルターなどを追加。写真のズーム中に画像が縮む問題と、2本指操作で写真が切り替わる問題を修正。通常の横スワイプは指に追従します。写真・動画／お気に入りは小さな行から表示し、取得範囲・バックアップは詳細にまとめています。本文・名前・下書き・サイトのテーマを保持します。'
-    : 'Adds classic Twitter styling, star Favorites and notification filters. Fixes photos shrinking during zoom and photo switching during a second-finger gesture. Normal photo swipes follow your finger. Media/Favorites start with a compact row; open its details for coverage and backups. Preserves post text, names, drafts and the site theme.';
+    ? '昔のTwitter風の表示、星のお気に入り、通知フィルターなどを追加。日本ニュースはYahoo・NHK・日刊スポーツ・ITmediaの各分類に合う配信元を使い、取得できた記事から表示します。全配信元が失敗した場合は元ニュースと「再試行」を表示。写真のズーム・横スワイプ、小さな写真・動画／お気に入り行も利用できます。本文・名前・下書き・サイトのテーマを保持します。'
+    : 'Adds classic Twitter styling, star Favorites and notification filters. Japan news combines topic-matched feeds from Yahoo, NHK, Nikkan Sports and ITmedia, displaying received articles first. A complete failure keeps native news and Retry. Includes photo zoom/swipes and compact Media/Favorites rows. Preserves post text, names, drafts and the site theme.';
   const safariFeature = edition.platform === 'safari'
     ? japanese ? '<p>Safari版は写真・動画の長押しで配信ファイル情報も表示します。</p>' : '<p>The Safari edition also shows delivered media file information on a long press.</p>'
     : '';
