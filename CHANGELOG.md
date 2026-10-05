@@ -1,5 +1,15 @@
 # Changelog
 
+## All distributions v6.20.0 — 2026-10-05
+
+All six editions are published as 6.20.0. Validation passes 603 tests; usual public code URLs and guides have been verified.
+
+- Accept a bounded string `response` when a manager supplies null/unavailable `responseText`; keep real HTTP status and final-response URL validation. Do not settle an empty status-zero Promise receipt before the actual callback or deadline.
+- Combine Yahoo! News with the current NHK domestic RSS, Nikkan Sports image-bearing sports/entertainment Atom and ITmedia technology RSS. Read two verified feeds per topic in parallel and display successful results as they arrive; retain available Japan news through a partial failure.
+- Persist only completed topic caches and reject old loading caches on reload, avoiding a permanently partial list after another topic finishes.
+- Keep native news and Retry when every source fails, World restoration, topic/route/lifecycle checks, request deadlines and bounded cached results. Preserve publisher attribution and use only feed-provided verified image URLs.
+- Add the three required public feed hosts to `@connect` while retaining edition names, IDs, existing grants, storage identities, native controls, user content and drafts. Physical Stay/Android operation has not yet been verified.
+
 ## All distributions v6.19.1 — 2026-10-04
 
 - Share photo viewport fitting between native and profile viewers. Keep the last unzoomed layout dimensions and position during visual zoom/panning, avoiding image shrinkage that cancels magnification; resume ordinary viewport/keyboard fitting when zoom returns to its normal scale.

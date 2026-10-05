@@ -34,6 +34,9 @@ test('six editions preserve existing identifiers and share their platform implem
     assert.equal(source.match(/^\/\/ @namespace\s+(.+)$/m)?.[1], 'https://tweet.app/');
     assert.equal(source.match(/^\/\/ @version\s+(.+)$/m)?.[1], releaseVersion);
     assert.match(source, new RegExp(`const CT_LOCALE = '${locale}'`));
+    for (const host of ['news.yahoo.co.jp', 'news.web.nhk', 'www.nikkansports.com', 'rss.itmedia.co.jp']) {
+      assert.equal(source.includes(`// @connect      ${host}`), true, 'each publisher uses an explicit public feed permission');
+    }
     assert.doesNotMatch(source, /\/\* @(?:include|safari-grants)/);
     assert.equal(source.includes('function ctShowMediaInfo('), platform === 'safari', 'both Safari locales include the same media tools');
     for (const domain of ['firebasestorage.googleapis.com', 'storage.googleapis.com']) {
@@ -189,9 +192,13 @@ for (const { file, locale } of distributions) {
     window.fetch = async () => ({ok:false,status:401});
     const requests = [];
     window.GM_xmlhttpRequest = options => {
-      if (options.url.includes('news.yahoo.co.jp/rss/')) {
+      if (options.url.includes('news.yahoo.co.jp/rss/') || options.url.includes('news.web.nhk/n-data/')) {
         requests.push(options);
-        window.setTimeout(() => options.onload({status:200,responseText:`<rss version="2.0"><channel><item><title>国内の新しいニュース</title><link>https://news.yahoo.co.jp/articles/test-article</link><image>https://newsatcl-pctr.c.yimg.jp/t/amd-img/thumbnail.jpg</image><pubDate>Sun, 27 Sep 2026 00:00:00 GMT</pubDate></item></channel></rss>`}),0);
+        const xml = options.url.includes('yahoo')
+          ? `<rss version="2.0"><channel><item><title>国内の新しいニュース</title><link>https://news.yahoo.co.jp/articles/test-article</link><image>https://newsatcl-pctr.c.yimg.jp/t/amd-img/thumbnail.jpg</image><pubDate>Sun, 27 Sep 2026 00:00:00 GMT</pubDate></item></channel></rss>`
+          : `<rss version="2.0"><channel><item><title>NHKの国内ニュース</title><link>https://news.web.nhk/newsweb/na/nd-20261005example</link><pubDate>Sun, 27 Sep 2026 00:00:00 GMT</pubDate></item></channel></rss>`;
+        // Exercise the mobile Stay text response shape in complete editions.
+        window.setTimeout(() => options.onload({status:200,responseText:null,response:xml,responseURL:options.url}),0);
       } else window.setTimeout(() => options.onload({status:401,responseText:'{}'}),0);
       return {abort(){}};
     };
@@ -240,12 +247,24 @@ for (const { file, locale } of distributions) {
         window.document.querySelector('[data-ct-news-region="jp"]').click();
         await new Promise(resolve => setTimeout(resolve,200));
       }
-      assert.equal(requests.length,1);
-      assert.equal(requests[0].anonymous,true);
+      assert.equal(requests.length,2);
+      assert.equal(requests.every(request => request.anonymous && request.responseType === 'text'),true);
       assert.equal(window.document.querySelector('.ct-news-article h3').textContent,'国内の新しいニュース');
       assert.match(window.document.querySelector('.ct-news-article img').src,/yimg\.jp/);
+      assert.equal(window.document.querySelectorAll('.ct-news-article').length,2);
+      assert.match(window.document.querySelector('.ct-news-status').textContent,/Yahoo!ニュース・NHK NEWS WEB/);
       assert.equal(window.getComputedStyle(native).display,'none');
       assert.equal(native.textContent,'Native world headline');
+      // Loaded headlines can precede the last queued runtime/gallery scan on a
+      // busy CI runner. Require a bounded quiet window before observing idle;
+      // recurring mutation loops must still fail to reach this window.
+      const settleDeadline = Date.now() + 3000;
+      let lastMutations = mutations, quietSince = Date.now();
+      while (Date.now() - quietSince < 250 && Date.now() < settleDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        if (mutations !== lastMutations) { lastMutations = mutations; quietSince = Date.now(); }
+      }
+      assert.ok(Date.now() - quietSince >= 250, 'news/gallery mutations must reach a quiet window');
       const previous = mutations;
       await new Promise(resolve => setTimeout(resolve,450));
       assert.equal(mutations,previous,'news completion and gallery cleanup must settle');

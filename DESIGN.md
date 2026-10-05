@@ -1,6 +1,6 @@
 # Implementation boundaries
 
-Source templates in `src/ja.js` and `src/en.js` embed shared network, runtime and local-tools modules at build time. Greasy Fork receives self-contained files without remote code loading. A build check ensures all three distributions remain reproducible.
+Source templates in `src/ja.js` and `src/en.js` embed shared network, runtime and local-tools modules at build time. Greasy Fork receives self-contained files without remote code loading. A build check ensures all six distributions remain reproducible.
 
 Localization uses structural UI allowlists and content exclusions. Notification action fragments are handled within each row so neighboring actors and previews cannot be merged. React retains ownership of its controls and text containers.
 
@@ -116,3 +116,13 @@ The shared `photo-viewport` module holds each dialog's last unzoomed bounds in a
 Native photo motion rechecks zoom during drag and release. A second pointer/touch cancels the current motion and keeps a pinch flag until every touch ends; pointer cancellation, lost capture, hidden pages and pagehide clear the appropriate state. Zoom or viewport changes also release active presentation/capture. A zoomed native stage allows `pan-x pan-y pinch-zoom`, while normal carousel mode retains `pan-y pinch-zoom`. The existing native image, handlers and bounded selection commit remain authoritative.
 
 The profile viewer records its trigger, gallery and normalized ordered source list. After a profile render commits, disconnected triggers/galleries or changed source lists close the viewer and detach its viewport/window callbacks. Reused rows, dates and progress do not close it. Close returns focus to a connected trigger or the selected profile tab when the trigger is gone; route/account/pagehide cleanup retains the same lifecycle. This change does not replace the single-image profile dialog or alter saved records.
+
+## 6.20.0 News transport and parallel publisher feeds
+
+This implementation is in progress. The news transport accepts a bounded textual `response` when `responseText` is unavailable, while retaining real HTTP success and final URL checks. Manager Promise receipts with status zero and no body leave the request pending for its actual callback/deadline. Legacy callback and modern Promise/binding paths remain; no session credentials are used for external publisher reads.
+
+Each existing topic retains Yahoo and gains one exact public publisher endpoint: current NHK domestic RSS, Nikkan sports/entertainment Atom or ITmedia technology RSS. Parse the verified RSS/Atom structures into the same bounded article model, with source-specific article/image allowlists and publisher attribution. Reject unverified URLs and XML entities. Feed requests run in parallel per topic; successful arrivals reconcile bounded results immediately, and failure of a different feed does not remove them. All-source failure leaves the native container visible and exposes Retry. World, detached targets, hidden pages and changed selections retain existing native restoration and stale-completion guards.
+
+The inspected Atom alternate links, image enclosures and optional article sections are validated against the declared publisher; ITmedia's singular and plural article paths are accepted. Images remain feed-provided, without article/OGP fetches. Up to 50 entries per feed are examined and ten combined articles are displayed. The existing 15-minute session-cache key remains, with publisher-feed count validation invalidating older Yahoo-only entries so the new feeds are read. Partial completion has loading/failure status and Retry without losing valid articles. Persist only finished topic entries; reject old loading entries on reload so another topic cannot strand an incomplete cached list.
+
+Only `news.web.nhk`, `www.nikkansports.com` and `rss.itmedia.co.jp` are added to the six distribution connection metadata. Existing grants, identities, storage keys, safe localization and native content/actions remain. Tests and browser/public validation will be recorded after source completion; public Stay source inspection does not establish a user's actual Safari/Stay response shape. The status-zero Promise receipt regression is synthetic and is not attributed to Stay's inspected non-Promise XHR bridge.

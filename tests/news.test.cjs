@@ -59,7 +59,9 @@ function setup(t, options = {}) {
   if (options.modernGM) window.GM = options.modernGM;
   if (options.lexicalGM) window.fixtureGM = options.lexicalGM;
   if (options.fetch) window.fetch = options.fetch;
-  window.eval(`const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};\n${options.lexicalGM ? 'const GM = window.fixtureGM;' : ''}\n${source}\nwindow.news = { patch: patchJapaneseNews, parse: ctParseJapaneseNews, url: ctNewsURL, load: ctLoadJapaneseNews, request: ctRequestNews, state: ctNewsState, targets: ctNewsTargets };`);
+  // Keep the original Yahoo transport/lifecycle cases scoped to one publisher;
+  // multisource cases below use the actual full registry with allFeeds:true.
+  window.eval(`const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};\n${options.lexicalGM ? 'const GM = window.fixtureGM;' : ''}\n${source}\n${options.allFeeds ? '' : "ctNewsFeedList = topic => (ctNewsFeeds[topic] || []).filter(feed => feed.publisher === 'yahoo');"}\nwindow.news = { patch: patchJapaneseNews, parse: ctParseJapaneseNews, url: ctNewsURL, load: ctLoadJapaneseNews, request: ctRequestNews, state: ctNewsState, targets: ctNewsTargets, feeds: ctNewsFeeds, merge: ctNewsMergeArticles };`);
   const news = window.news;
   news.state.timeout = 30;
   t.after(() => window.close());
@@ -67,12 +69,200 @@ function setup(t, options = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const gmSuccess = xml => options => { queueMicrotask(() => options.onload({ status: 200, responseText: xml, finalUrl: options.url })); };
+const nhkURL = 'https://news.web.nhk/newsweb/na/nd-20261005example';
+const nikkanURL = 'https://www.nikkansports.com/sports/news/202610050001765.html';
+const nikkanImage = 'https://www.nikkansports.com/sports/athletics/news/img/202610050001765-w500_0.jpg';
+const itmediaURL = 'https://www.itmedia.co.jp/news/article/2610/05/2000002016/';
+const atom = (url = nikkanURL, img = nikkanImage, title = 'スポーツのニュース') => `<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>${title}</title><link rel="alternate" type="text/html" href="${url}"/><published>2026-10-05T20:51:20+09:00</published><link rel="enclosure" type="image/jpeg" href="${img}"/><content type="html">&lt;img src="https://evil.test/track"&gt;</content></entry></feed>`;
 function select(document, label) {
   for (const button of document.querySelectorAll('.sticky button')) {
     button.classList.toggle('bg-sky-500', button.textContent === label);
     button.classList.toggle('text-white', button.textContent === label);
   }
 }
+
+test('current NHK and ITmedia RSS preserve publisher, dates and image absence', t => {
+  const { news } = setup(t, { allFeeds: true });
+  for (const [publisher, url, name] of [['nhk', nhkURL, 'NHK NEWS WEB'], ['itmedia', itmediaURL, 'ITmedia NEWS']]) {
+    const articles = news.parse(rss(item('Home Like News', url, '')).replace('</item>', '<description>&lt;img src="https://evil.test/tracker"&gt;</description></item>'), publisher);
+    assert.equal(articles.length, 1);
+    assert.equal(articles[0].source, name);
+    assert.equal(articles[0].image, '');
+    assert.equal(articles[0].url, url);
+    assert.equal(articles[0].publishedAt, '2026-09-27T03:00:00.000Z');
+  }
+});
+
+test('Nikkan Atom reads official alternate link, published date and image enclosure', t => {
+  const { news } = setup(t, { allFeeds: true });
+  const [article] = news.parse(atom(), 'nikkan');
+  assert.equal(article.source, '日刊スポーツ');
+  assert.equal(article.url, nikkanURL);
+  assert.equal(article.image, nikkanImage);
+  assert.equal(article.publishedAt, '2026-10-05T11:51:20.000Z');
+  const entertainment = news.parse(atom(nikkanURL.replace('/sports/', '/entertainment/'), nikkanImage.replace('/sports/athletics/', '/entertainment/')), 'nikkan');
+  assert.equal(entertainment.length, 1);
+  assert.match(entertainment[0].image, /entertainment\/news\/img/);
+});
+
+test('publisher feeds cannot impersonate other sources or inject executable markup', t => {
+  const { news } = setup(t, { allFeeds: true });
+  assert.deepEqual(news.parse(rss(item()), 'nhk').length, 0);
+  assert.equal(news.parse(atom().replace('http://www.w3.org/2005/Atom', 'https://evil.test/atom'), 'nikkan').length, 0);
+  assert.equal(news.parse(atom(), 'unknown').length, 0);
+  const [article] = news.parse(atom(nikkanURL, image, '&lt;img src=x onerror=alert(1)&gt;'), 'nikkan');
+  assert.equal(article.title, '<img src=x onerror=alert(1)>');
+  assert.equal(article.image, '', 'a Nikkan entry must not borrow another publisher image');
+  assert.equal(news.parse(atom('https://www.nikkansports.com.evil.test/sports/news/123.html'), 'nikkan').length, 0);
+});
+
+test('new feed and article URLs are restricted to their verified public locations', t => {
+  const { news } = setup(t, { allFeeds: true });
+  for (const feeds of Object.values(news.feeds)) for (const feed of feeds) assert.equal(news.url(feed.url, 'feed'), feed.url);
+  for (const url of [nhkURL, nikkanURL, itmediaURL, 'https://www.itmedia.co.jp/news/articles/2610/05/news123.html']) assert.equal(news.url(url), url);
+  for (const url of ['https://news.web.nhk/login', 'https://rss.itmedia.co.jp/rss/2.0/unknown.xml', 'https://www.nikkansports.com/sports/news/123.html']) assert.equal(news.url(url, 'feed'), null);
+  for (const url of ['https://news.web.nhk.evil.test/newsweb/na/nd-example', 'http://news.web.nhk/newsweb/na/nd-example', 'https://user:pass@www.itmedia.co.jp/news/article/x', 'https://www.nikkansports.com/login', 'https://www.itmedia.co.jp/login']) assert.equal(news.url(url), null);
+  assert.equal(news.url(nikkanImage, 'image'), nikkanImage);
+  assert.equal(news.url(nikkanImage.replace('/news/img/', '/private/'), 'image'), null);
+});
+
+test('a fast NHK result displays before a hanging Yahoo read times out', async t => {
+  const calls = [];
+  const { news, document, clock } = setup(t, { allFeeds: true, clock: true, gm: options => {
+    calls.push(options);
+    if (options.url.includes('news.web.nhk')) gmSuccess(rss(item('NHK ready', nhkURL, '')))(options);
+    return { abort() {} };
+  } });
+  news.patch(); await flush();
+  assert.equal(calls.length, 2);
+  assert.equal(news.state.pending.size, 1);
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'NHK ready');
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), true);
+  assert.match(document.querySelector('.ct-news-status').textContent, /他の配信元を読み込み中/);
+  await clock.tick(news.state.timeout);
+  assert.equal(news.state.pending.size, 0);
+  assert.equal(document.querySelector('.ct-news-article h3').textContent, 'NHK ready');
+  assert.equal(document.querySelector('[data-ct-news-action="retry"]').hidden, false);
+  assert.match(document.querySelector('.ct-news-status').textContent, /一部取得できません/);
+  assert.equal(clock.timers.size, 1);
+});
+
+test('completed feeds share ten headline slots fairly and sort the chosen articles by time', async t => {
+  let calls = 0;
+  const { news, document } = setup(t, { allFeeds: true, gm: options => {
+    calls++;
+    const yahoo = options.url.includes('yahoo');
+    const entries = Array.from({ length: 10 }, (_, i) => item((yahoo ? 'Yahoo ' : 'NHK ') + i,
+      yahoo ? articleURL + i : nhkURL + i, yahoo ? image : '')).join('');
+    gmSuccess(rss(entries))(options);
+  } });
+  news.patch(); await flush();
+  assert.equal(calls, 2);
+  const articles = news.state.cache.get('nation').articles;
+  assert.equal(articles.length, 10);
+  assert.equal(articles.filter(a => a.source === 'Yahoo!ニュース').length, 5);
+  assert.equal(articles.filter(a => a.source === 'NHK NEWS WEB').length, 5);
+  assert.equal(document.querySelectorAll('.ct-news-article').length, 10);
+  assert.equal(document.querySelector('[data-ct-news-action="retry"]').hidden, true);
+  const mixed = news.merge([[articles[0], { ...articles[1], publishedAt: '2026-10-05T12:00:00Z' }], [articles[0]]]);
+  assert.equal(mixed.length, 2);
+  assert.equal(mixed[0].publishedAt, '2026-10-05T12:00:00Z');
+});
+
+test('partial failure Retry refetches once and restores both publishers without changing native content', async t => {
+  let calls = 0, failYahoo = true;
+  const { news, document } = setup(t, { allFeeds: true, gm: options => {
+    calls++;
+    if (failYahoo && options.url.includes('yahoo')) queueMicrotask(() => options.onerror());
+    else gmSuccess(rss(item(options.url.includes('yahoo') ? 'Yahoo recovered' : 'NHK works', options.url.includes('yahoo') ? articleURL : nhkURL, '')))(options);
+  } });
+  const native = document.getElementById('native-news');
+  news.patch(); await flush();
+  assert.equal(calls, 2);
+  assert.equal(document.querySelectorAll('.ct-news-article').length, 1);
+  failYahoo = false;
+  const retry = document.querySelector('[data-ct-news-action="retry"]');
+  retry.click(); retry.click(); await flush();
+  assert.equal(calls, 4);
+  assert.equal(document.querySelectorAll('.ct-news-article').length, 2);
+  assert.equal(retry.hidden, true);
+  document.querySelector('[data-ct-news-region="world"]').click();
+  assert.equal(document.getElementById('native-news'), native);
+  assert.equal(native.classList.contains('ct-news-native-hidden'), false);
+});
+
+test('both failing publishers restore World and retry only after a shared backoff', async t => {
+  let calls = 0;
+  const { news, document, clock } = setup(t, { allFeeds: true, clock: true, gm: options => {
+    calls++; queueMicrotask(() => options.onerror());
+  } });
+  news.patch(); await flush();
+  assert.equal(calls, 2);
+  assert.equal(document.querySelectorAll('.ct-news-article').length, 0);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+  news.patch(); news.patch(); await flush(); assert.equal(calls, 2);
+  await clock.tick(news.state.retryDelay);
+  assert.equal(calls, 4);
+  assert.equal(clock.timers.size, 1);
+});
+
+test('old single-publisher caches are refreshed and new multifeed caches validate source ownership', async t => {
+  let calls = 0;
+  const legacy = { nation: { at: Date.now(), articles: [{ title: 'Legacy', url: articleURL, image }] } };
+  const { news, document } = setup(t, { allFeeds: true, cache: JSON.stringify(legacy), gm: options => {
+    calls++; gmSuccess(rss(item('Current', options.url.includes('yahoo') ? articleURL : nhkURL, '')))(options);
+  } });
+  news.patch(); await flush();
+  assert.equal(calls, 2);
+  assert.equal(document.querySelectorAll('.ct-news-article').length, 2);
+  const cache = { nation: { at: Date.now(), feedCount: 2, failed: ['yahoo', 'evil'], articles: [
+    { title: 'NHK cached', url: nhkURL, source: 'Spoofed', image }, { title: 'Evil', url: 'https://evil.test/a', image }
+  ] } };
+  const fresh = setup(t, { allFeeds: true, cache: JSON.stringify(cache), gm: () => assert.fail('validated fresh cache must not refetch') });
+  fresh.news.patch(); await flush();
+  assert.equal(fresh.document.querySelectorAll('.ct-news-article').length, 1);
+  assert.match(fresh.document.querySelector('.ct-news-source').textContent, /NHK NEWS WEB/);
+  assert.equal(fresh.document.querySelector('.ct-news-article img'), null);
+  assert.deepEqual(Array.from(fresh.news.state.cache.get('nation').failed), ['yahoo']);
+});
+
+test('finishing another topic cannot persist an incomplete feed as a finished cache after reload', async t => {
+  const calls = [];
+  const { news, document, window } = setup(t, { allFeeds: true, clock: true, gm: options => calls.push(options) });
+  news.patch();
+  select(document, 'Sports'); news.patch();
+  calls.find(o => o.url.includes('nikkansports')).onload({ status: 200, responseText: atom() }); await flush();
+  assert.equal(news.state.cache.get('sports').loading, true);
+  for (const request of calls.filter(o => o.url === feedURL || o.url.includes('news.web.nhk'))) {
+    request.onload({ status: 200, responseText: rss(item('Complete news', request.url === feedURL ? articleURL : nhkURL, '')) });
+  }
+  await flush();
+  const stored = JSON.parse(window.sessionStorage.getItem('ct-japanese-news-cache-v1'));
+  assert.equal(stored.nation.loading, false);
+  assert.equal(stored.sports, undefined, 'unfinished topics must not be persisted');
+  // Also reject unfinished entries written by an older implementation.
+  stored.sports = news.state.cache.get('sports');
+  let reloadedCalls = 0;
+  const reloaded = setup(t, { allFeeds: true, clock: true, html: layout('Sports'), cache: JSON.stringify(stored), gm: options => {
+    reloadedCalls++;
+    gmSuccess(options.url.includes('nikkansports') ? atom() : rss(item('Yahoo sports')))(options);
+  } });
+  reloaded.news.patch(); await flush();
+  assert.equal(reloadedCalls, 2);
+  assert.equal(reloaded.news.state.cache.get('sports').loading, false);
+  assert.equal(reloaded.document.querySelector('[data-ct-news-action="retry"]').hidden, true);
+});
+
+test('a late second publisher cannot repopulate a new route or selected topic', async t => {
+  const calls = [];
+  const { news, document, window } = setup(t, { allFeeds: true, gm: options => calls.push(options) });
+  news.patch();
+  calls[1].onload({ status: 200, responseText: rss(item('First NHK', nhkURL, '')) }); await flush();
+  window.history.replaceState({}, '', '/notifications'); news.patch();
+  calls[0].onload({ status: 200, responseText: rss(item('Late Yahoo')) }); await flush();
+  assert.equal(document.querySelector('.ct-japanese-news'), null);
+  assert.equal(document.querySelector('#native-news').classList.contains('ct-news-native-hidden'), false);
+});
 
 test('parses Yahoo RSS image headlines, deduplicates articles, preserves source and publication date', t => {
   const { news } = setup(t);
@@ -397,7 +587,7 @@ test('translated native category labels still resolve and do not change titles o
 });
 
 test('cached headlines are validated again and stale or malicious entries are discarded', async t => {
-  const entry = { at: Date.now(), articles: [{ title: 'Cached', url: articleURL, image, publishedAt: '2026-09-27T03:00:00Z' }, { title: 'Evil', url: 'javascript:alert(1)', image }] };
+  const entry = { at: Date.now(), feedCount: 1, articles: [{ title: 'Cached', url: articleURL, image, publishedAt: '2026-09-27T03:00:00Z' }, { title: 'Evil', url: 'javascript:alert(1)', image }] };
   const { news, document } = setup(t, { cache: JSON.stringify({ nation: entry }), gm: () => assert.fail('fresh cache should not fetch') });
   news.patch(); await flush();
   assert.equal(document.querySelectorAll('.ct-news-article').length, 1);

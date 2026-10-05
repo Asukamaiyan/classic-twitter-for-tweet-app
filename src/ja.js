@@ -1,13 +1,16 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.19.1
+// @version      6.20.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      api.tweet.app
 // @connect      news.yahoo.co.jp
+// @connect      news.web.nhk
+// @connect      www.nikkansports.com
+// @connect      rss.itmedia.co.jp
 /* @safari-grants */
 // @noframes
 // @run-at       document-start

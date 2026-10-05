@@ -1,13 +1,16 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.19.1
+// @version      6.20.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      api.tweet.app
 // @connect      news.yahoo.co.jp
+// @connect      news.web.nhk
+// @connect      www.nikkansports.com
+// @connect      rss.itmedia.co.jp
 // @connect      firebasestorage.googleapis.com
 // @connect      storage.googleapis.com
 // @noframes
@@ -2519,7 +2522,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.19.1';
+    document.documentElement.dataset.ctActiveVersion = '6.20.0';
     ctStarted = true;
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
@@ -6440,14 +6443,28 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ctMediaEnhanceViewer();
   }
 
-    // Public Japanese RSS headlines. Native tweet.app requests are not intercepted.
+    // Public Japanese publisher feeds. Native tweet.app requests are not intercepted.
   // The original news container remains intact and is restored on every failure.
   const ctNewsFeeds = Object.freeze({
-    nation: 'https://news.yahoo.co.jp/rss/categories/domestic.xml',
-    sports: 'https://news.yahoo.co.jp/rss/categories/sports.xml',
-    entertainment: 'https://news.yahoo.co.jp/rss/categories/entertainment.xml',
-    technology: 'https://news.yahoo.co.jp/rss/categories/it.xml'
+    nation: Object.freeze([
+      { publisher: 'yahoo', url: 'https://news.yahoo.co.jp/rss/categories/domestic.xml' },
+      { publisher: 'nhk', url: 'https://news.web.nhk/n-data/conf/na/rss/cat1.xml' }
+    ]),
+    sports: Object.freeze([
+      { publisher: 'yahoo', url: 'https://news.yahoo.co.jp/rss/categories/sports.xml' },
+      { publisher: 'nikkan', url: 'https://www.nikkansports.com/sports/atom.xml' }
+    ]),
+    entertainment: Object.freeze([
+      { publisher: 'yahoo', url: 'https://news.yahoo.co.jp/rss/categories/entertainment.xml' },
+      { publisher: 'nikkan', url: 'https://www.nikkansports.com/entertainment/atom.xml' }
+    ]),
+    technology: Object.freeze([
+      { publisher: 'yahoo', url: 'https://news.yahoo.co.jp/rss/categories/it.xml' },
+      { publisher: 'itmedia', url: 'https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml' }
+    ])
   });
+  const ctNewsPublishers = Object.freeze({ yahoo: 'Yahoo!ニュース', nhk: 'NHK NEWS WEB', nikkan: '日刊スポーツ', itmedia: 'ITmedia NEWS' });
+  function ctNewsFeedList(topic) { return ctNewsFeeds[topic] || []; }
   const ctNewsLabels = new Map([
     ['News', 'nation'], ['ニュース', 'nation'], ['Sports', 'sports'], ['スポーツ', 'sports'],
     ['Entertainment', 'entertainment'], ['エンタメ', 'entertainment'], ['エンターテインメント', 'entertainment'],
@@ -6468,43 +6485,64 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     try {
       const url = new URL(value);
       if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash) return null;
-      if (kind === 'feed') return Object.values(ctNewsFeeds).includes(url.href) ? url.href : null;
+      if (kind === 'feed') return Object.values(ctNewsFeeds).flat().some(feed => feed.url === url.href) ? url.href : null;
       if (kind === 'image') {
         // Yahoo's feed images are served by its public image CDN. Never accept
         // arbitrary feed-supplied URLs (localhost, data URLs, credentials, etc.).
-        return /^(?:[a-z0-9-]+\.)*yimg\.(?:jp|com)$/.test(url.hostname) ? url.href : null;
+        return /^(?:[a-z0-9-]+\.)*yimg\.(?:jp|com)$/.test(url.hostname) ||
+          url.hostname === 'www.nikkansports.com' && /^\/[a-z0-9_-]+\/(?:[a-z0-9_-]+\/)?news\/img\/[^/]+\.(?:jpe?g|png|webp)$/i.test(url.pathname) ? url.href : null;
       }
-      return url.hostname === 'news.yahoo.co.jp' && /^\/(?:articles|pickup|expert\/articles)\//.test(url.pathname) ? url.href : null;
+      return url.hostname === 'news.yahoo.co.jp' && /^\/(?:articles|pickup|expert\/articles)\//.test(url.pathname) ||
+        url.hostname === 'news.web.nhk' && /^\/newsweb\/na\/[a-z0-9-]+\/?$/i.test(url.pathname) ||
+        url.hostname === 'www.nikkansports.com' && /^\/[a-z0-9_-]+\/(?:[a-z0-9_-]+\/)?news\/\d+\.html$/.test(url.pathname) ||
+        url.hostname === 'www.itmedia.co.jp' && /^\/news\/(?:articles|article)\//.test(url.pathname) ? url.href : null;
     } catch { return null; }
   }
-  function ctNewsArticle(value) {
+  function ctNewsArticle(value, expectedPublisher) {
     if (!value || typeof value !== 'object') return null;
     const title = ctNewsText(value.title);
     const url = ctNewsURL(value.url);
     if (!title || !url) return null;
+    const hostname = new URL(url).hostname;
+    const publisher = { 'news.yahoo.co.jp': 'yahoo', 'news.web.nhk': 'nhk',
+      'www.nikkansports.com': 'nikkan', 'www.itmedia.co.jp': 'itmedia' }[hostname];
+    if (expectedPublisher && publisher !== expectedPublisher) return null;
+    const image = ctNewsURL(value.image, 'image') || '';
+    const samePublisherImage = publisher === 'yahoo' ? image && /\.yimg\.(?:jp|com)$/.test(new URL(image).hostname) :
+      publisher === 'nikkan' ? image && new URL(image).hostname === hostname : false;
     const date = Date.parse(value.publishedAt);
     return {
-      title, url, image: ctNewsURL(value.image, 'image') || '',
-      source: 'Yahoo!ニュース', publishedAt: Number.isFinite(date) ? new Date(date).toISOString() : ''
+      title, url, image: samePublisherImage ? image : '',
+      source: ctNewsPublishers[publisher], publishedAt: Number.isFinite(date) ? new Date(date).toISOString() : ''
     };
   }
-  function ctParseJapaneseNews(xml) {
+  function ctParseJapaneseNews(xml, publisher = 'yahoo') {
     if (typeof xml !== 'string' || !xml || xml.length > 1024 * 1024 || /<!DOCTYPE|<!ENTITY/i.test(xml)) return [];
     const doc = new DOMParser().parseFromString(xml, 'application/xml');
-    if (doc.querySelector('parsererror') || !doc.querySelector('rss > channel')) return [];
+    if (doc.querySelector('parsererror')) return [];
+    const root = doc.documentElement;
+    const atom = root?.localName === 'feed' && root.namespaceURI === 'http://www.w3.org/2005/Atom';
+    const channel = root?.localName === 'rss' && [...root.children].find(el => el.localName === 'channel');
+    if (!atom && !channel || !Object.hasOwn(ctNewsPublishers, publisher)) return [];
     const seen = new Set();
     const articles = [];
-    for (const item of [...doc.querySelectorAll('channel > item')].slice(0, 50)) {
+    const items = [...(atom ? root : channel).children].filter(el => el.localName === (atom ? 'entry' : 'item') &&
+      (!atom || el.namespaceURI === root.namespaceURI));
+    for (const item of items.slice(0, 50)) {
       const childText = name => [...item.children].find(el => el.localName === name)?.textContent || '';
       const imageElement = [...item.children].find(el => el.localName === 'image');
       const mediaElement = [...item.children].find(el =>
         (el.localName === 'thumbnail' || el.localName === 'content') &&
         el.namespaceURI === 'http://search.yahoo.com/mrss/');
       const enclosure = [...item.children].find(el => el.localName === 'enclosure' && /^image\//.test(el.getAttribute('type') || ''));
+      const atomLink = atom ? [...item.children].find(el => el.localName === 'link' &&
+        el.namespaceURI === root.namespaceURI && (!el.hasAttribute('rel') || el.getAttribute('rel') === 'alternate')) : null;
+      const atomImage = atom ? [...item.children].find(el => el.localName === 'link' &&
+        el.namespaceURI === root.namespaceURI && el.getAttribute('rel') === 'enclosure' && /^image\//.test(el.getAttribute('type') || '')) : null;
       const imageValue = imageElement?.querySelector('url')?.textContent || imageElement?.textContent ||
-        mediaElement?.getAttribute('url') || enclosure?.getAttribute('url') || '';
-      const article = ctNewsArticle({ title: childText('title'), url: childText('link').trim(),
-        image: imageValue.trim(), publishedAt: childText('pubDate') });
+        mediaElement?.getAttribute('url') || enclosure?.getAttribute('url') || atomImage?.getAttribute('href') || '';
+      const article = ctNewsArticle({ title: childText('title'), url: atom ? atomLink?.getAttribute('href')?.trim() : childText('link').trim(),
+        image: imageValue.trim(), publishedAt: childText(atom ? 'published' : 'pubDate') || (atom ? childText('updated') : '') }, publisher);
       if (!article || seen.has(article.url)) continue;
       seen.add(article.url);
       articles.push(article);
@@ -6530,10 +6568,22 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         try { handle?.abort?.(); } catch {}
         try { aborter?.abort(); } catch {}
       }, ctNewsState.timeout);
-      const parse = response => response?.status >= 200 && response.status < 300 &&
-        (!response.finalUrl || response.finalUrl === target) &&
-        typeof response.responseText === 'string' && response.responseText.length <= 1024 * 1024
-        ? response.responseText : null;
+      const parse = response => {
+        try {
+          if (!(response?.status >= 200 && response.status < 300)) return null;
+          // Stay exposes responseURL in its bridge; Tampermonkey uses finalUrl.
+          // Compare canonical feed URLs and reject either field if it disagrees.
+          for (const value of [response.finalUrl, response.responseURL]) {
+            if (value && ctNewsURL(value, 'feed') !== target) return null;
+          }
+          let text;
+          // An XHR responseText getter can throw for a non-text response. Stay's
+          // older text bridge also returns null here while response is a string.
+          try { text = response.responseText; } catch {}
+          if (typeof text !== 'string') text = response.response;
+          return typeof text === 'string' && text.length <= 1024 * 1024 ? text : null;
+        } catch { return null; }
+      };
       let request = null;
       if (typeof GM_xmlhttpRequest === 'function') request = GM_xmlhttpRequest;
       else {
@@ -6544,14 +6594,18 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
       if (request) {
         try {
-          handle = request({ method: 'GET', url: target, anonymous: true, redirect: 'error',
+          handle = request({ method: 'GET', url: target, anonymous: true, redirect: 'error', responseType: 'text',
             timeout: ctNewsState.timeout, headers: { Accept: 'application/rss+xml, application/xml, text/xml' },
             onload: response => finish(parse(response)), onerror: () => finish(null),
             ontimeout: () => finish(null), onabort: () => finish(null) });
           if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => {
             // A mobile bridge can resolve its request receipt before onload.
             // Wait for a real response or the bounded callback/timeout instead.
-            if (response?.status != null || typeof response?.responseText === 'string') finish(parse(response));
+            try {
+              const status = Number(response?.status);
+              if (Number.isFinite(status) && status > 0 &&
+                  (response.readyState == null || Number(response.readyState) === 4)) finish(parse(response));
+            } catch { finish(null); }
           }, () => finish(null));
         } catch { finish(null); }
         return;
@@ -6560,7 +6614,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       Promise.resolve().then(() => fetch(target, { method: 'GET', credentials: 'omit', redirect: 'error',
         referrerPolicy: 'no-referrer', ...(aborter ? { signal: aborter.signal } : {}) }))
         .then(async response => {
-          if (!response?.ok || (response.url && response.url !== target)) return null;
+          if (!response?.ok || (response.url && ctNewsURL(response.url, 'feed') !== target)) return null;
           const value = await response.text();
           return value.length <= 1024 * 1024 ? value : null;
         }).then(finish, () => finish(null));
@@ -6573,9 +6627,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const cache = JSON.parse(stored);
       for (const topic of Object.keys(ctNewsFeeds)) {
         const entry = cache?.[topic];
-        if (!entry || !Number.isFinite(entry.at) || entry.at > Date.now() || Date.now() - entry.at >= ctNewsState.ttl || !Array.isArray(entry.articles)) continue;
-        const articles = entry.articles.slice(0, 10).map(ctNewsArticle).filter(Boolean);
-        if (articles.length) ctNewsState.cache.set(topic, { at: entry.at, articles });
+        if (!entry || entry.loading || entry.feedCount !== ctNewsFeedList(topic).length || !Number.isFinite(entry.at) || entry.at > Date.now() ||
+            Date.now() - entry.at >= ctNewsState.ttl || !Array.isArray(entry.articles)) continue;
+        const articles = entry.articles.slice(0, 10).map(article => ctNewsArticle(article)).filter(Boolean);
+        const failed = Array.isArray(entry.failed) ? entry.failed.filter(id => ctNewsFeedList(topic).some(feed => feed.publisher === id)) : [];
+        if (articles.length) ctNewsState.cache.set(topic, { at: entry.at, articles, failed, feedCount: entry.feedCount, loading: false });
       }
     } catch {}
   }
@@ -6586,19 +6642,46 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (ctNewsState.pending.has(topic)) return ctNewsState.pending.get(topic);
     if ((ctNewsState.retryAt.get(topic) || 0) > Date.now()) return null;
     const pending = (async () => {
-      const xml = await ctRequestNews(ctNewsFeeds[topic]);
-      const articles = ctParseJapaneseNews(xml);
-      if (!articles.length) {
+      const feeds = ctNewsFeedList(topic);
+      const batches = feeds.map(() => []);
+      // Start each publisher together. A slow or failed Yahoo request must not
+      // hold the other publisher's usable headlines behind its timeout.
+      await Promise.all(feeds.map(async (feed, index) => {
+        try {
+          const xml = await ctRequestNews(feed.url);
+          batches[index] = ctParseJapaneseNews(xml, feed.publisher);
+        } catch { batches[index] = []; }
+        if (!batches[index].length) return;
+        const articles = ctNewsMergeArticles(batches);
+        ctNewsState.cache.set(topic, { at: Date.now(), articles, loading: true, failed: [], feedCount: feeds.length });
+        patchJapaneseNews();
+      }));
+      const entry = ctNewsState.cache.get(topic);
+      if (!batches.some(batch => batch.length)) {
         ctNewsState.retryAt.set(topic, Date.now() + ctNewsState.retryDelay);
         return null;
       }
       ctNewsState.retryAt.delete(topic);
-      ctNewsState.cache.set(topic, { at: Date.now(), articles });
-      try { sessionStorage.setItem(ctNewsCacheKey, JSON.stringify(Object.fromEntries(ctNewsState.cache))); } catch {}
-      return articles;
+      entry.loading = false;
+      entry.failed = feeds.filter((feed, index) => !batches[index].length).map(feed => feed.publisher);
+      try { sessionStorage.setItem(ctNewsCacheKey, JSON.stringify(Object.fromEntries([...ctNewsState.cache].filter(([, cached]) => !cached.loading)))); } catch {}
+      return entry.articles;
     })().finally(() => ctNewsState.pending.delete(topic));
     ctNewsState.pending.set(topic, pending);
     return pending;
+  }
+  function ctNewsMergeArticles(batches) {
+    const seen = new Set(), articles = [];
+    // Give each successful publisher room, even when another has more items.
+    for (let index = 0; index < 10 && articles.length < 10; index++) {
+      for (const batch of batches) {
+        const article = batch[index];
+        if (!article || seen.has(article.url)) continue;
+        seen.add(article.url); articles.push(article);
+        if (articles.length === 10) break;
+      }
+    }
+    return articles.sort((a, b) => (Date.parse(b.publishedAt) || 0) - (Date.parse(a.publishedAt) || 0));
   }
   function ctNewsVisible(element) {
     return element?.isConnected && !element.closest('[hidden],[aria-hidden="true"]');
@@ -6714,6 +6797,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (!current || ctNewsState.pending.has(current.topic)) return;
       // Explicit retry may bypass the failure delay, never a pending request.
       ctNewsState.retryAt.delete(current.topic);
+      ctNewsState.cache.delete(current.topic);
       patchJapaneseNews();
     });
     return mount;
@@ -6766,11 +6850,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     const cached = ctNewsState.cache.get(mount.topic);
     if (cached && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) {
-      if (!mount.retry.hidden) mount.retry.hidden = true;
+      const partial = !cached.loading && cached.failed?.length > 0;
+      if (mount.retry.hidden === partial) mount.retry.hidden = !partial;
       ctNewsRenderArticles(mount, cached.articles);
       if (mount.list.hidden) mount.list.hidden = false;
       if (!mount.container.classList.contains('ct-news-native-hidden')) mount.container.classList.add('ct-news-native-hidden');
-      ctNewsSetText(mount.status, ja ? 'Yahoo!ニュース · 見出しを押すと記事が開きます' : 'Yahoo! News Japan · Open a headline to read the article');
+      const sources = [...new Set(cached.articles.map(article => article.source))].join('・');
+      const suffix = cached.loading ? ja ? ' · 他の配信元を読み込み中…' : ' · Loading another publisher…' :
+        partial ? ja ? ' · 一部取得できませんでした。取得済みのニュースを表示しています。' : ' · Some publishers are unavailable. Showing retrieved news.' :
+        ja ? ' · 見出しを押すと記事が開きます' : ' · Open a headline to read the article';
+      ctNewsSetText(mount.status, sources + suffix);
       return;
     }
     // Already-started requests may finish in the background. Their completion

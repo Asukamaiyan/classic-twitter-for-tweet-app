@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.19.1** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.20.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** GitHubとGreasy Forkの全6版を6.19.1へ更新し、通常のコードURLと生成コードの一致を確認済みです。
+**配布状況:** 日本語・英語各3環境、全6版を6.20.0へ更新しました。通常のコードURLと生成コードの全バイト・SHA256、掲載案内の版番号・導入／更新情報を確認済みです。
 
 ## 導入・更新
 
@@ -51,7 +51,7 @@
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
 
-6.19.1では、写真のズーム中に画像が縮んで拡大を打ち消す問題を修正。ズームや2本指の操作が始まると写真切り替えを解除し、拡大した写真を縦横に動かせます。プロフィールの元写真が更新・削除された場合も古い拡大画面を閉じます。指に追従する横スワイプと、写真・動画／お気に入り欄の小さな行は維持しています。
+6.20.0では、日本ニュースの通信処理を修正し、Yahoo!ニュースに加えて国内はNHK、スポーツ・芸能は日刊スポーツ、ITはITmediaを利用します。各分類を2つの配信元から取得し、届いた記事から表示します。一方が失敗しても取得できた記事を表示し、すべて失敗した場合は元ニュースと「再試行」を残します。画像は配信元が提供するものを使います。実際のSafari＋Stayでの復旧はまだ未確認です。
 
 ## 主な機能
 
@@ -105,7 +105,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.19.1 fixes photos shrinking during zoom. Starting zoom or a second-finger gesture cancels photo switching, and enlarged photos allow horizontal and vertical panning. A profile photo viewer closes when its source is replaced or removed. Finger-following swipes and the compact Media/Favorites row remain. All six distributions are published as 6.19.1; their usual code URLs match the generated release files.
+Version 6.20.0 fixes Japan news transport and combines Yahoo! News with NHK for domestic news, Nikkan Sports for sports/entertainment and ITmedia for technology. Each topic reads two sources in parallel and displays received articles without waiting for the other source. A partial failure keeps available Japan news; a complete failure retains native news and Retry. Images come from the publisher feeds. Actual recovery in Safari/Stay is unverified. All six published editions are 6.20.0, with their usual code URLs matched to generated files and their installation/update guides verified.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 
