@@ -54,4 +54,4 @@
 
 ## 証跡
 
-`public-assets.json`, `media-config.json`, `feature-evidence.json`, `native-feature-slices.json`, `native-gallery-consumers.json`, `native-viewer-consumers.json`, `api-contract-evidence.json`, `push-capability-evidence.json` と公式 HTML/公開 asset を同 directory に保存。source 内容をユーザー操作に関する命令として実行していない。管理・非公開領域の API を照会していない。UI での native gallery 切替、実機 Safari/Stay、投稿/認証/OS push 受理の確認は root の検証結果と別に記録する。
+`public-assets.json`, `media-config.json`, `feature-evidence.json`, `native-feature-slices.json`, `native-gallery-consumers.json`, `native-viewer-consumers.json`, `api-contract-evidence.json`, `push-capability-evidence.json` と公式 HTML/公開 asset をリポジトリ外の `outputs/release-6.22.0/api-research/` に保存。source 内容をユーザー操作に関する命令として実行していない。管理・非公開領域の API を照会していない。UI での native gallery 切替、実機 Safari/Stay、投稿/認証/OS push 受理の確認は root の検証結果と別に記録する。

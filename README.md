@@ -2,7 +2,7 @@
 
 **6.22.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 6.22.0の検証・配布準備中です。公開版は6.21.0です。
+**配布状況:** 日本語・英語各3版をGreasy Forkへ6.22.0として公開済みです。
 
 ## 導入・更新
 
@@ -39,6 +39,8 @@
 
 **更新：** Stayで対象スクリプトの **「更新」ボタン** を押す → tweet.appを再読み込み。
 
+**日本ニュースが出ないとき：** Safariのページメニュー → Stay → 表示されたニュースサイトだけを許可 → ニュースの「再試行」。対象は `news.yahoo.co.jp` / `news.web.nhk` / `www.nikkansports.com` / `rss.itmedia.co.jp`。
+
 ### Android Firefox
 
 **必要なもの：** [Android版Firefox](https://www.mozilla.org/ja/firefox/browsers/mobile/android/)、[Tampermonkey](https://addons.mozilla.org/en-US/android/addon/tampermonkey/)、上の表のAndroid版。入るスクリプト名は日本語が **Classic Twitter for tweet.app - Japanese Android**、英語が **Classic Twitter for tweet.app - English Android** です。
@@ -73,7 +75,7 @@
 
 お気に入りはミュート一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。自動同期はなく、サイトデータを消すと失われます。
 
-画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。実機Android＋Tampermonkey、Safari＋Stayでの導入・操作は未検証です。
+画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。iPhone 17 Pro Max＋Stay 2.9.24で6.22.0への更新を確認。日本ニュースは配信元サイトへのSafari許可待ちです。写真の実ピンチ・長時間操作、Android＋Tampermonkeyは未検証です。
 
 [変更履歴](CHANGELOG.md) · [API調査](docs/API_RESEARCH.md) · [検証記録](docs/VALIDATION.md)
 
@@ -105,15 +107,17 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Update:** Press the script’s **Update** button in Stay, then reload tweet.app.
 
+**If Japan news does not appear:** Safari’s page menu → Stay → allow only the news sites shown → Retry in News. Sites: `news.yahoo.co.jp` / `news.web.nhk` / `www.nikkansports.com` / `rss.itmedia.co.jp`.
+
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.22.0 supports Tweet 2.2.3. Native multi-image selection (up to five images) and inline slides replace the duplicate extension handlers and controls. It preserves profile bio line breaks, opens delivered images directly and shows decoded image/video dimensions. Adjacent photos are prepared before swipe motion; pending or failed decoding keeps the native photo visible. It cannot increase delivered resolution or guarantee 4K/HDR retention. Optional browser alerts are off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported. Japan news continues to combine Yahoo, NHK, Nikkan Sports and ITmedia. Physical Safari/Stay/Android and actual OS alerts remain unverified.
+Version 6.22.0 supports Tweet 2.2.3. Native multi-image selection (up to five images) and inline slides replace the duplicate extension handlers and controls. It preserves profile bio line breaks, opens delivered images directly and shows decoded image/video dimensions. Adjacent photos are prepared before swipe motion; pending or failed decoding keeps the native photo visible. It cannot increase delivered resolution or guarantee 4K/HDR retention. Optional browser alerts are off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported. Japan news continues to combine Yahoo, NHK, Nikkan Sports and ITmedia. Updating to 6.22.0 was confirmed on an iPhone 17 Pro Max with Stay 2.9.24; Japan news is awaiting Safari permission for its publisher sites. Physical pinch, Android and actual OS alerts remain unverified.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 
 Post and verified reply ages update as time passes. Creation dates use your browser’s time zone, with dates and clock times in conversation details and local Media/Favorites. Edit dates and parent-post dates are kept separate; unknown or ambiguous reply times are not guessed.
 
-Use Tools → Search older posts to recover currently confirmed Favorites through older For you/Following pages (up to 100 pages per run; pause/continue while the tab is visible). This covers returned timelines and cannot guarantee your entire history. Your profile displays saved Favorites directly, without search/filter/sort controls. Counts and Refresh stay in the top row; open **Details** for the saved Tweet date range, recovery coverage/progress and same-account JSON backups/import. Open **Coverage** in Media for its read limits. Errors and storage warnings stay visible. There is no 500-record eviction; storage failures require a backup before closing. Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync automatically across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Physical Android/Tampermonkey and Safari/Stay acceptance remain unverified.
+Use Tools → Search older posts to recover currently confirmed Favorites through older For you/Following pages (up to 100 pages per run; pause/continue while the tab is visible). This covers returned timelines and cannot guarantee your entire history. Your profile displays saved Favorites directly, without search/filter/sort controls. Counts and Refresh stay in the top row; open **Details** for the saved Tweet date range, recovery coverage/progress and same-account JSON backups/import. Open **Coverage** in Media for its read limits. Errors and storage warnings stay visible. There is no 500-record eviction; storage failures require a backup before closing. Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync automatically across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Full physical Android/Tampermonkey and Safari/Stay acceptance remains pending.
 
 ## 開発
 

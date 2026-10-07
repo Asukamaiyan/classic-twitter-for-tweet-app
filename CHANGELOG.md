@@ -2,7 +2,7 @@
 
 ## All distributions v6.22.0 — 2026-10-07
 
-Validation and publication in progress.
+All six editions published on Greasy Fork with matching generated code and guides. iPhone news testing identified a Safari permission request for the publisher sites; permission and final device acceptance remain pending.
 
 - Remove the duplicate photo batch-upload helper and inline carousel controls now provided by Tweet 2.2.3. Native selection, uploads, counters, keyboard navigation and arrows remain authoritative. The current native limit is five images.
 - Reconnect photo centering, delivered-image information and smooth fullscreen swipes to the updated native viewer. Avoid committing another slide during pinch, zoom or vertical movement; reuse native previous/next controls without adding another counter or keyboard handler.
