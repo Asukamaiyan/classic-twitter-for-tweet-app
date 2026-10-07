@@ -6,9 +6,11 @@
 - Chromiumの日英×320/390/1280px（6ケース）で、画質情報とnavの間隔8px、画面内配置、全buttonの44px以上、下書き保持を確認。現行moduleと番号付きSVGに画質リンクを表示した制御fixtureであり、実配信画像の通信とは別です。
 - 全6版をGreasy Forkへ6.23.1として公開。通常6コード＋6案内の匿名GET（計12件、再試行なし）はHTTP200、生成コード／案内全文と一致しました。独立監査で6.23.0比の本体差分はプロフィール専用CSSと版番号、metadata差分はversionのみ。既存のgrant/connect、配布ID、保存呼出しを保持しています。
 - iPhone 17 Pro MaxのStayで6.23.1へ更新し、有効状態を確認。6.23.0のニュース選択と実配信写真の左右スワイプは下記で確認済みですが、6.23.1の画質表示と閉じるボタンの最終実機受け入れは未確認です。別アプリのUV Index画面はユーザーが閉じ、その後の新規スクリーンショットで消失を確認。写真・動画と標準返信の両tabが、同じ可視位置・enabled状態でもXCTestで`isHittable=false`となり、タップ前に停止しました。製品のclick handlerまで到達しておらず、原因は未確定です。ユーザーへ写真を開く手操作を依頼しています。
-- 実機harnessの6.23.1初回runは、起動していないShortcuts appのsnapshot検査でXCTestエラーが記録されて失敗しました。元xcresultを保持し、Tweetの不具合や全体PASSとは扱いません。別の再実行で最終確認と復元を行います。
+- 実機harnessの6.23.1初回runは、起動していないShortcuts appのsnapshot検査でXCTestエラーが記録されて失敗しました。元xcresultを保持し、Tweetの不具合や全体PASSとは扱いません。別の再実行はrunnerが正常終了（1件PASS・失敗0）しましたが、guardで拒否したタップは製品の受け入れ成功に含めません。Safari標準更新ボタンはhittableで再読み込みできた一方、Webの写真tabは再読み込み後もfalseでした。
+- Stayの6.23.1有効状態とニュース選択のYahoo/NHK両方を保持。手操作確認へ引き継ぐためSafariは公開プロフィールに残し、初期のおすすめrouteへ戻したとは扱いません。専用host/runnerの2アプリだけを削除し、各bundleの`apps: []`を確認。OS権限・他の拡張設定・投稿等のsocial writeは変更していません。検証用3タブ・一時注入・viewport overrideを解除し、ローカル検証サーバー4件を停止しました。
+- 実装head `63d69af` と記録head `cf0e38c` のGitHub push/PR CIはそれぞれ2件成功。公開6版のコードと案内は最終の生成物に一致します。最終headとマージ後の結果はリポジトリ外の`ci-final.json`、`ci-main.json`へ保存します。
 
-証跡はリポジトリ外`outputs/release-6.23.1/`の`full-check.txt`、`browser-profile-audit.json`、`public-code-checks.json`、`metadata-audit.json`、`iphone-stay-6.23.1.png`、`release.jpg`。ニュースと認証済みAPIの調査は下記6.23.0記録を引き継ぎます。
+証跡はリポジトリ外`outputs/release-6.23.1/`の`full-check.txt`、`browser-profile-audit.json`、`public-code-checks.json`、`metadata-audit.json`、`physical-device-summary.json`、`iphone-stay-6.23.1.png`、`release.jpg`。ニュースと認証済みAPIの調査は下記6.23.0記録を引き継ぎます。
 
 ---
 

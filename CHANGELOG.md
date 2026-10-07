@@ -2,7 +2,7 @@
 
 ## All distributions v6.23.1 — 2026-10-07
 
-Move the delivered-image link and dimensions above profile-photo navigation, preventing overlap with Next and Close on narrow screens. Keep native viewers, source URLs, photo gestures and zoom handling intact. Publication and final device evidence are recorded in VALIDATION.md.
+All six editions are published with matching code and complete guides. Move the delivered-image link and dimensions above profile-photo navigation, preventing overlap with Next and Close on narrow screens. Keep native viewers, source URLs, photo gestures and zoom handling intact. Stay was updated to 6.23.1; final footer/Close device acceptance remains pending because XCTest rejects the visible web tabs before tapping. Publication, device evidence and temporary-app cleanup are recorded in VALIDATION.md.
 
 ## All distributions v6.23.0 — 2026-10-07
 
