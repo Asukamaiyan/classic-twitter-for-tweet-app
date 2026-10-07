@@ -1,3 +1,21 @@
+# 6.22.0 検証記録
+
+2026-10-07。Tweetの公開HTML・JavaScript・CSS・SW・media configと認証済みの実画面を確認。現行は2.2.3。非公開サーバー機能や独立アプリの書き込み受理を確認したものではありません。
+
+- 全651テスト、六配布コードのビルド・構文・差分確認に成功。旧アップロードqueue・inline controlsのテストを標準委譲/DOM・handlers保全の回帰へ置換。単に旧実装を残すための重複テストは維持していません。
+- ニュースは実取得した8つのRSS/Atomを全HTTP200・正常XML確認。Yahooと日刊の画像は実配信URL、NHK/ITmediaの写真なし項目へ画像を作っていません。
+- Chromiumの390px/1280px×全6版、17項目のニュース確認（204項目）成功。日本/世界、正常/全失敗/一部失敗、Retryの重複抑止、背景/復帰、元node/handler/本文/下書き保持を確認。5つの模擬manager形式×5応答状態（25件）も成功。これは物理Safari/Stayの通信ではありません。
+- 写真・動画・お気に入りを含む82項目の検証が成功。最新native viewer/inline layout、5枚snapshot、native count/buttons/keys、44pxdots、zoom/pinch/途中キャンセル/旧source/返信への誤接続を確認。独立レビューの別fixtureでも主要修理を再確認しました。
+- 実Tweet画面に生成Safari版6.22.0を一時注入し、起動・投稿本文19nodeと下書き保持、投稿欄「いまどうしてる？」・写真/動画のaccessible名前・旧操作の日本語化を確認。実際の複数写真投稿を開き、44pxドット・日本語ARIA・1600×1200の品質リンク・中央配置を確認。ドラッグ中の3つのフレームで移動を確認し、標準枚数が1/2→2/2に1回切り替わり、標準キーで1/2へ戻りました。Chromiumのページ拡大1.4倍でもviewport寸法486×656を維持し、閉じた後の品質・motion要素を除去しました。一時注入と拡大は再読み込み／1倍へ戻して除去しました。実投稿/お気に入り/フォロー/通知権限を変更していません。
+
+**実機の現状:** iPhone 17 Pro Max / iOS27.2 Betaをpaired/availableと確認し、専用一時XCUITestを署名ビルドしました。実機runnerの起動時に`The device is passcode protected` / `notification_proxy`で失敗したため停止し、ロック解除を依頼しています。後の再確認でもpasscodeRequired:trueのため実機操作は再試行していません。`lockState`の`passcodeRequired:false`だけでは実機操作可能とは扱いません。Safari/Stayのバージョン・実際のYahoo!エラー・写真のpinch・更新受理は未確認です。
+
+**配布:** GitHub/Greasy Forkの公開は準備中です。
+
+証跡はリポジトリ外`outputs/release-6.22.0/`の`full-check-final.txt`、`browser-news-audit.json`、`news-research/`、`api-research/`。APIアプリの判断は[API_APP_FEASIBILITY.md](API_APP_FEASIBILITY.md)にまとめました。
+
+---
+
 # 6.21.0 検証記録
 
 確認日: 2026-10-06（日本時間）。日本語・英語各3環境、計6版。

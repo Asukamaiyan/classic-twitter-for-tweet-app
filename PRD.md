@@ -2,7 +2,7 @@
 
 ## 6.11.0: Tweet 2.1.0 compatibility and duplicate removal
 
-Use native reply notifications, unread counts, polls, account reports, Follow back and mute decisions. Remove the supplemental reply inbox and periodic reply reads while preserving older stored records. Retain only evidenced missing enhancements: Media/Favorites, photo batch selection and carousel, per-actor notification links, sharper badges, local search/bookmark/keyword tools and optional translation/news.
+Use native reply notifications, unread counts, polls, account reports, Follow back and mute decisions. Remove the supplemental reply inbox and periodic reply reads while preserving older stored records. Retain only evidenced missing enhancements: Media/Favorites, photo viewport, quality and accessibility improvements, per-actor notification links, sharper badges, local search/bookmark/keyword tools and optional translation/news.
 
 Add an inline type selector for already rendered native notifications, without new notification requests or new unread counts. Restore rows on native-tab selection, route/account changes and remount; retain unknown/system events. Protect all native `tl-user-text`, especially poll option text. Preserve poll input values, votes, selected options and native event handlers. Media toolbar matching must recognize photo/video icons even with the new poll control. Local Favorites must respect the verified muted-account list without deleting saved records, with bounded read pages and explicit retry/continuation.
 
@@ -162,3 +162,8 @@ Reduce repeated userscript DOM traversal on visible native changes, favorite com
 通知は便利ツールから明示的に有効にする、初期オフの追加機能とする。ブラウザの許可はスイッチ操作時だけ要求し、設定はアカウント別に保存する。標準ナビゲーションの確実な未読件数が増えた場合だけ、名前・投稿内容を含まない通知を表示する。複数タブの重複は `navigator.locks` により1タブだけが担当する。対応する既存サービスワーカーは利用できるが、新規登録・Push購読・APIポーリング・権限追加は行わない。ページを閉じた後やスマホが停止した間に届く真のPush通知とは区別し、非対応・拒否・停止状態を説明する。
 
 受け入れでは、古い画像の読み込みと通知のアカウント変更／タブ競合／許可拒否を検証し、スマホ幅とPCの表示・既存操作・本文／下書き保持を確認する。ブラウザでの制御した通知表示と実OS通知・実機の配信は別々に記録する。
+
+
+## 6.22.0: Tweet 2.2.3 native ownership
+
+Use native multiple-image upload, five-image limit, inline carousel and fullscreen controls/counter/key navigation. Remove the obsolete batch/inline implementations. Keep smooth fullscreen motion, zoom/centering/quality presentation and native 44px dot targets as verified improvements. Capture all current native carousel media when saving a known favorite; reject quotes and user images. News/API transport final callbacks settle once and clean up Stay-compatible listeners. Physical Safari/Stay acceptance remains required for the reported iPhone failure.

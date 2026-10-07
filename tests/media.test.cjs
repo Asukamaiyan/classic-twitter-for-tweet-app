@@ -5,6 +5,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(path.join(__dirname, '../src/media.js'), 'utf8');
 const photoViewport = fs.readFileSync(path.join(__dirname, '../src/photo-viewport.js'), 'utf8');
+const {galleryMarkup,viewerMarkup,installNativeViewer}=require('./helpers/native-media.cjs');
 
 function uploadMarkup(kind = 'home') {
   const submit = `<button id="${kind === 'modal' ? 'public-modal-tweet-submit-btn' : kind === 'reply' ? 'reply-submit' : 'public-tweet-submit-btn'}">Post</button>`;
@@ -13,34 +14,10 @@ function uploadMarkup(kind = 'home') {
     <div id="upload" class="w-full mt-3 space-y-3"><div id="toolbar" class="flex items-center justify-between pt-3">
       <div class="flex items-center gap-0.5"><button id="photo" type="button"><svg class="lucide lucide-image"></svg></button><button id="video" type="button"><svg class="lucide lucide-video"></svg></button></div>
       ${kind === 'home' ? submit : ''}
-      <input id="photos" type="file" accept="image/jpeg,image/png,image/webp" class="hidden">
+      <input id="photos" type="file" accept="image/*" multiple class="hidden">
       <input id="videos" type="file" accept="video/mp4,video/quicktime" class="hidden"></div></div>
     ${kind !== 'home' ? submit : ''}<button id="close">Close</button></section></main>`;
 }
-function galleryMarkup(count = 3, id = 'gallery') {
-  return `<div class="mt-3"><div id="${id}" class="grid gap-0.5 rounded-2xl overflow-hidden border border-tl-app-border grid-cols-${count === 1 ? 1 : 2}">
-    ${Array.from({ length: count }, (_, i) => `<div class="relative bg-tl-app-bg overflow-hidden ${i === 0 && count === 3 ? 'row-span-2' : 'aspect-video'}"><img src="https://media.tweet.app/${id}-${i}.jpg" alt="Attached media" class="w-full h-full object-cover cursor-pointer"></div>`).join('')}</div></div>`;
-}
-
-test('2.1 poll toggle does not disable multi-photo recognition or replace native poll actions', async t => {
-  const f=harness(t);
-  const actions=f.document.getElementById('photo').parentElement;
-  const poll=f.document.createElement('button');poll.type='button';poll.setAttribute('aria-label','Add poll');poll.setAttribute('aria-pressed','false');
-  poll.innerHTML='<svg class="lucide lucide-chart-column rotate-90"></svg>';
-  actions.prepend(poll);
-  let nativePoll=0;poll.addEventListener('click',()=>nativePoll++);
-  f.enhance();
-  assert.equal(f.document.getElementById('photos').multiple,true);
-  assert.equal(f.document.getElementById('photo').getAttribute('aria-label'),'写真を追加');
-  assert.equal(f.document.getElementById('video').getAttribute('aria-label'),'動画を追加');
-  assert.equal(poll.getAttribute('aria-label'),'Add poll');
-  poll.click();assert.equal(nativePoll,1);
-  f.select([f.file('one.jpg'),f.file('two.jpg')]);
-  await settle(()=>f.uploads.length===1);f.complete(0);
-  await settle(()=>f.uploads.length===2);f.complete(1);
-  await settle(()=>f.document.querySelector('.ct-media-upload-status')?.textContent.includes('2枚を追加'));
-  assert.equal(f.document.querySelector('textarea').value,'A draft');
-});
 function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', reduced = false, viewport = null } = {}) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>${html}</body></html>`, {
     url: 'https://app.tweet.app/feed', runScripts: 'outside-only', pretendToBeVisual: true
@@ -70,7 +47,7 @@ function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', red
     });
   }
   window.ctNetworkState = {authUID:''};
-  window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${photoViewport}\n${source}\nwindow.qa={ctMediaEnhance,ctMediaUploads,ctMediaCarousels,ctMediaVideos,ctMediaEnhanceVideo,network:ctNetworkState,get viewer(){return ctMediaViewer}};`);
+  window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${photoViewport}\n${source}\nwindow.qa={ctMediaEnhance,ctMediaGalleries,ctMediaVideos,ctMediaEnhanceVideo,network:ctNetworkState,get viewer(){return ctMediaViewer}};`);
   t.after(() => window.close());
   const f = { dom, window, document: window.document, qa: window.qa, uploads: [], submitted: 0, closed: 0 };
   f.enhance = () => f.qa.ctMediaEnhance();
@@ -105,10 +82,7 @@ function harness(t, html = uploadMarkup(), { transfer = true, locale = 'ja', red
   f.document.getElementById('composer')?.addEventListener('change', event => {
     if (event.target.id !== 'photos') return;
     f.document.querySelector('#upload > .text-red-500')?.remove();
-    const file = event.target.files[0];
-    if (!file) return;
-    const upload = { file, holder: f.preview(`${f.uploads.length}-${file.name}`) };
-    f.uploads.push(upload);
+    for(const file of event.target.files){f.uploads.push({file,holder:f.preview(`${f.uploads.length}-${file.name}`)});}
     event.target.value = '';
   });
   for (const button of f.document.querySelectorAll('#public-tweet-submit-btn,#public-modal-tweet-submit-btn,#reply-submit')) {
@@ -132,264 +106,57 @@ function geometry(f, grid, width = 400) {
   grid.scrollTo = options => { grid.lastScroll = options; grid.scrollLeft = options.left; grid.dispatchEvent(new f.window.Event('scroll')); };
 }
 
-test('only the verified native photo input gains multi-selection, with no format changes', t => {
-  const f = harness(t, uploadMarkup() + '<input id="profile" type="file" accept="image/jpeg,image/png,image/webp">');
-  f.enhance(); f.enhance();
-  assert.equal(f.document.getElementById('photos').multiple, true);
-  assert.equal(f.document.getElementById('videos').multiple, false);
-  assert.equal(f.document.getElementById('profile').multiple, false);
-  assert.equal(f.document.getElementById('photos').accept, 'image/jpeg,image/png,image/webp');
-  assert.equal(f.document.querySelectorAll('#ct-media-style').length, 1);
+test('native five-photo selection keeps the input, complete File list, original handler and draft', t=>{
+  const f=harness(t);const input=f.document.getElementById('photos'),before=input.outerHTML;
+  const files=[1,2,3,4,5].map(i=>f.file(`${i}.jpg`));f.enhance();f.enhance();f.select(files);
+  assert.equal(input.outerHTML,before);assert.equal(input.multiple,true);assert.equal(input.accept,'image/*');
+  assert.deepEqual(f.uploads.map(x=>x.file),files);assert.equal(f.document.querySelector('.ct-media-upload-status'),null);
+  assert.equal(f.document.querySelector('textarea').value,'A draft');assert.equal(f.submitted,0);
+  f.document.getElementById('public-tweet-submit-btn').click();assert.equal(f.submitted,1);
 });
-test('DataTransfer-unavailable browsers and future native multi-file handlers retain their native inputs', t => {
-  const unsupported = harness(t, uploadMarkup(), { transfer: false });
-  unsupported.enhance();
-  assert.equal(unsupported.document.getElementById('photos').multiple, false);
-  const native = harness(t);
-  native.document.getElementById('photos').multiple = true;
-  native.enhance();
-  assert.equal(native.qa.ctMediaUploads.has(native.document.getElementById('photos')), false);
+test('legacy file inputs fail open without adding multiple or intercepting their change handler',t=>{
+  const f=harness(t);const input=f.document.getElementById('photos');input.accept='image/jpeg,image/png,image/webp';input.multiple=false;
+  const before=input.outerHTML;f.enhance();assert.equal(input.outerHTML,before);
+  f.select([f.file('one.jpg')]);assert.equal(f.uploads.length,1);assert.equal(f.status(),undefined);
 });
-test('a single selected photo keeps the original one-file change behavior', t => {
-  const f = harness(t); f.enhance();
-  const photo = f.file('one.jpg'); f.select([photo]);
-  assert.equal(f.uploads.length, 1);
-  assert.equal(f.uploads[0].file, photo);
-  assert.equal(f.document.querySelector('.ct-media-upload-status'), null);
+test('native inline carousel, dots, counts and controls stay unchanged without a second row',t=>{
+  const f=harness(t,`<main>${galleryMarkup(5)}</main>`);const grid=f.document.getElementById('gallery'),shell=grid.parentElement;
+  const before=shell.outerHTML,nodes=[...shell.querySelectorAll('*')];let clicks=0;
+  shell.querySelector('[data-inline-next]').addEventListener('click',()=>clicks++);f.enhance();f.enhance();shell.querySelector('[data-inline-next]').click();
+  assert.equal(clicks,1);shell.classList.remove('ct-media-native-gallery');assert.equal(shell.outerHTML,before);assert.deepEqual([...shell.querySelectorAll('*')],nodes);
+  assert.equal(f.document.querySelector('.ct-media-carousel-controls'),null);assert.equal(f.qa.ctMediaGalleries.size,1);
 });
-test('multiple photos are serialized through the native handler only after a ready preview', async t => {
-  const f = harness(t); f.enhance();
-  const photos = [f.file('one.jpg'), f.file('two.png', 'image/png'), f.file('three.webp', 'image/webp')];
-  f.select(photos);
-  assert.equal(f.uploads.length, 1);
-  await new Promise(resolve => setTimeout(resolve, 15));
-  assert.equal(f.uploads.length, 1, 'a uploading preview is not a completed upload');
-  f.complete(0); await settle(() => f.uploads.length === 2);
-  f.complete(1); await settle(() => f.uploads.length === 3);
-  f.complete(2); await settle(() => !f.qa.ctMediaUploads.get(f.document.getElementById('photos')).busy);
-  assert.deepEqual(f.uploads.map(upload => upload.file), photos, 'exact File objects and original bytes are preserved');
-  assert.match(f.status(), /3枚を追加/);
-  assert.equal(f.document.querySelector('textarea').value, 'A draft');
-  assert.equal(f.submitted, 0);
+test('galleries are tracked once, with detached and unknown structures released',t=>{
+  const f=harness(t,`<main>${galleryMarkup(3)}</main>`),grid=f.document.getElementById('gallery');f.enhance();assert.equal(f.qa.ctMediaGalleries.size,1);
+  grid.classList.remove('snap-x');f.enhance();assert.equal(f.qa.ctMediaGalleries.size,0);grid.classList.add('snap-x');f.enhance();assert.equal(f.qa.ctMediaGalleries.size,1);
+  grid.remove();f.enhance();assert.equal(f.qa.ctMediaGalleries.size,0);
 });
-test('existing attachments consume slots and excess selected files are explicitly reported', async t => {
-  const f = harness(t); f.preview('existing', true); f.enhance();
-  f.select([1, 2, 3, 4, 5].map(n => f.file(`${n}.jpg`)));
-  for (let i = 0; i < 3; i++) { await settle(() => f.uploads.length === i + 1); f.complete(i); }
-  await settle(() => /残り2枚/.test(f.status()));
-  assert.equal(f.uploads.length, 3);
-  assert.equal(f.document.querySelectorAll('img[alt="Upload preview"]').length, 4);
-});
-test('a native error stops remaining files instead of retrying or bypassing validation', async t => {
-  const f = harness(t); f.enhance(); f.select([f.file('one.jpg'), f.file('two.jpg')]);
-  f.error('Daily upload limit reached');
-  await settle(() => /エラー/.test(f.status()));
-  assert.equal(f.uploads.length, 1);
-  assert.equal(f.document.querySelector('#upload > .text-red-500').textContent, 'Daily upload limit reached');
-});
-test('native validation before staging, including the same previous error, stops safely', async t => {
-  const f = harness(t); f.error('Images must be 10 MB or smaller.'); f.enhance();
-  f.document.getElementById('photos').addEventListener('change', () => f.error('Images must be 10 MB or smaller.'));
-  // Simulate validation with no preview: the fixture handler otherwise stages each File.
-  f.document.getElementById('composer').addEventListener('change', () => {
-    for (const img of f.document.querySelectorAll('img[alt="Upload preview"]')) img.parentElement.remove();
-    f.error('Images must be 10 MB or smaller.');
-  });
-  f.select([f.file('big.jpg'), f.file('other.jpg')]);
-  await settle(() => /エラー/.test(f.status()));
-  assert.equal(f.uploads.length, 1);
-});
-test('video attachment or disabled native photo button does not start an upload queue', t => {
-  for (const kind of ['video', 'disabled']) {
-    const f = harness(t); f.enhance();
-    if (kind === 'video') f.document.getElementById('upload').prepend(f.document.createElement('video'));
-    else f.document.getElementById('photo').disabled = true;
-    f.select([f.file('one.jpg'), f.file('two.jpg')]);
-    assert.equal(f.uploads.length, 0, kind);
-    assert.match(f.status(), /追加できません/);
+test('unknown grids, missing photos, duplicate sources and local galleries remain native',t=>{
+  for(const change of ['old','missing','duplicate','local']){
+    const f=harness(t,`<main>${galleryMarkup(3)}</main>`),grid=f.document.getElementById('gallery');
+    if(change==='old')grid.className='grid gap-0.5 rounded-2xl overflow-hidden border';
+    if(change==='missing')grid.firstElementChild.innerHTML='Unavailable image';
+    if(change==='duplicate')grid.lastElementChild.firstElementChild.src=grid.firstElementChild.firstElementChild.src;
+    if(change==='local')grid.parentElement.dataset.ctLocalUi='profile';
+    const before=grid.outerHTML;f.enhance();assert.equal(grid.outerHTML,before);assert.equal(f.qa.ctMediaGalleries.size,0,change);
   }
 });
-test('cancel stops remaining files without cancelling native work already dispatched', async t => {
-  const f = harness(t); f.enhance(); f.select([f.file('one.jpg'), f.file('two.jpg')]);
-  f.document.querySelector('.ct-media-upload-status button').click();
-  await settle(() => /中止/.test(f.status()));
-  f.complete(0);
-  assert.equal(f.uploads.length, 1);
-  assert.match(f.status(), /処理中の1枚/);
+function nativeViewer(f,images,options={}){return installNativeViewer(f.window,images,options);}
+test('native viewer buttons, count and keyboard are reused without duplicate navigation',t=>{
+  const f=harness(t,`<main>${galleryMarkup(3)}</main>`),images=[...f.document.querySelectorAll('#gallery img')],native=nativeViewer(f,images);
+  f.enhance();images[0].click();const buttons=[...native.dialog.querySelectorAll('button')];f.enhance();
+  native.dialog.querySelector('[data-native-next]').click();assert.equal(native.calls.next,1);assert.equal(native.dialog.querySelector('img').src,images[1].src);
+  assert.equal(native.dialog.querySelector('[data-native-count]').textContent,'2/3');assert.deepEqual([...native.dialog.querySelectorAll('button')],buttons);
+  assert.equal(native.dialog.querySelector('.ct-media-viewer-controls'),null);
+  f.document.dispatchEvent(new f.window.KeyboardEvent('keydown',{key:'End',bubbles:true}));assert.equal(native.calls.key,1);assert.equal(native.dialog.querySelector('img').src,images[2].src);
+  native.dialog.querySelector('[aria-label="Close media viewer"]').click();f.enhance();assert.equal(f.qa.viewer,null);
 });
-test('navigation or removal of the native composer stops the queue', async t => {
-  const f = harness(t); f.enhance(); f.select([f.file('one.jpg'), f.file('two.jpg')]);
-  f.window.history.pushState({}, '', '/settings');
-  f.complete(0);
-  await settle(() => /中止/.test(f.status()));
-  assert.equal(f.uploads.length, 1);
-  const g = harness(t); g.enhance(); g.select([g.file('one.jpg'), g.file('two.jpg')]);
-  const state = g.qa.ctMediaUploads.get(g.document.getElementById('photos'));
-  g.document.getElementById('composer').remove();
-  await settle(() => !state.busy);
-  assert.equal(g.uploads.length, 1);
-});
-for (const kind of ['home', 'modal', 'reply']) {
-  test(`${kind}: busy queue blocks native submit and Cmd/Ctrl+Enter, preserving text and scope`, async t => {
-    const f = harness(t, uploadMarkup(kind)); f.enhance(); f.select([f.file('one.jpg'), f.file('two.jpg')]);
-    const submit = f.document.querySelector('#public-tweet-submit-btn,#public-modal-tweet-submit-btn,#reply-submit');
-    submit.click();
-    for (const modifier of ['ctrlKey', 'metaKey']) f.document.querySelector('textarea').dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Enter', [modifier]: true, bubbles: true }));
-    assert.equal(f.submitted, 0);
-    f.document.getElementById('close').click();
-    assert.equal(f.closed, kind === 'reply' ? 0 : 1);
-    f.document.querySelector('.ct-media-upload-status button').click();
-    await settle(() => /中止/.test(f.status()));
-    submit.click(); assert.equal(f.submitted, 1);
-    assert.equal(f.document.querySelector('textarea').value, 'A draft');
-  });
-}
-test('new selections during an active queue cannot start concurrent uploads', async t => {
-  const f = harness(t); f.enhance(); f.select([f.file('one.jpg'), f.file('two.jpg')]);
-  f.select([f.file('replacement.jpg')]);
-  assert.equal(f.uploads.length, 1);
-  f.complete(0); await settle(() => f.uploads.length === 2);
-  assert.equal(f.uploads[1].file.name, 'two.jpg');
-  f.complete(1); await settle(() => /2枚を追加/.test(f.status()));
-});
-
-test('native multi-photo grid gains a carousel without replacing photos or their click handlers', t => {
-  const f = harness(t, `<main><article>${galleryMarkup()}</article></main>`);
-  const grid = f.document.getElementById('gallery'); geometry(f, grid);
-  const images = [...grid.querySelectorAll('img')]; let clicked = null;
-  images.forEach((image, index) => image.addEventListener('click', event => { event.stopPropagation(); clicked = index; }));
-  f.enhance(); f.enhance();
-  assert.equal(f.document.querySelectorAll('.ct-media-carousel-controls').length, 1);
-  assert.deepEqual([...grid.querySelectorAll('img')], images);
-  images[2].click(); assert.equal(clicked, 2);
-  assert.equal(grid.getAttribute('role'), 'region');
-  assert.equal(grid.tabIndex, 0);
-  assert.match(f.document.getElementById('ct-media-style').textContent, /scroll-snap-type:x mandatory/);
-});
-test('arrows, scroll and keyboard reach every photo with bounded controls and reduced motion', t => {
-  const f = harness(t, `<main>${galleryMarkup(4)}</main>`, { locale: 'en', reduced: true });
-  const grid = f.document.getElementById('gallery'); geometry(f, grid); f.enhance();
-  const controls = grid.nextElementSibling;
-  const [prev, next] = controls.querySelectorAll('button');
-  assert.equal(prev.disabled, true);
-  next.click(); assert.equal(grid.scrollLeft, 400); assert.equal(controls.querySelector('span').textContent, '2 / 4');
-  assert.equal(grid.lastScroll.behavior, 'auto');
-  grid.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-  assert.equal(grid.scrollLeft, 1200); assert.equal(next.disabled, true);
-  grid.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-  assert.equal(grid.scrollLeft, 0);
-  grid.scrollLeft = 800; grid.dispatchEvent(new f.window.Event('scroll'));
-  assert.equal(controls.querySelector('span').textContent, '3 / 4');
-  assert.equal(prev.getAttribute('aria-label'), 'Previous photo');
-});
-test('carousel controls do not trigger post navigation and normal keys remain untouched', t => {
-  const f = harness(t, `<main><article>${galleryMarkup()}</article></main>`);
-  const grid = f.document.getElementById('gallery'); geometry(f, grid); let navigated = 0, keys = 0;
-  f.document.querySelector('article').addEventListener('click', () => navigated++);
-  f.document.addEventListener('keydown', () => keys++);
-  f.enhance(); grid.nextElementSibling.querySelectorAll('button')[1].click();
-  assert.equal(navigated, 0);
-  grid.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-  assert.equal(keys, 0);
-  grid.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'a', bubbles: true }));
-  assert.equal(keys, 1);
-});
-test('single images, videos, quote media, upload previews and unrelated image grids stay unchanged', t => {
-  const f = harness(t, `<main>${galleryMarkup(1, 'single')}<blockquote>${galleryMarkup(2, 'quote')}</blockquote>
-    <div class="grid gap-0.5 rounded-2xl overflow-hidden border" id="video-grid"><video src="/movie.mp4"></video></div>
-    <div class="grid gap-0.5 rounded-2xl overflow-hidden border" id="other"><img src="/one.jpg"><img src="/two.jpg"></div>
-    ${uploadMarkup()}</main>`);
-  const before = f.document.getElementById('single').outerHTML;
-  f.enhance();
-  assert.equal(f.document.querySelectorAll('.ct-media-carousel').length, 0);
-  assert.equal(f.document.getElementById('single').outerHTML, before);
-});
-test('a reused grid changing to one image restores attributes and removes stale controls', t => {
-  const f = harness(t, `<main>${galleryMarkup(2)}</main>`);
-  const grid = f.document.getElementById('gallery'); grid.setAttribute('aria-label', 'Original'); geometry(f, grid);
-  f.enhance(); grid.lastElementChild.remove(); f.enhance();
-  assert.equal(grid.classList.contains('ct-media-carousel'), false);
-  assert.equal(grid.getAttribute('aria-label'), 'Original');
-  assert.equal(grid.hasAttribute('tabindex'), false);
-  assert.equal(f.document.querySelector('.ct-media-carousel-controls'), null);
-});
-function nativeViewer(f, images) {
-  let dialog;
-  const clicked = [];
-  images.forEach((image, index) => image.addEventListener('click', event => {
-    event.stopPropagation(); clicked.push(index);
-    if (!dialog?.isConnected) {
-      dialog = f.document.createElement('div'); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', 'Media viewer');
-      const close = f.document.createElement('button'); close.setAttribute('aria-label', 'Close media viewer'); close.textContent = 'Close'; close.addEventListener('click', () => dialog.remove());
-      const preview = f.document.createElement('img'); preview.alt = 'Media preview'; preview.addEventListener('click', event => event.stopPropagation());
-      dialog.append(close, preview); dialog.addEventListener('click', () => dialog.remove()); f.document.body.append(dialog);
-    }
-    dialog.querySelector('img').src = image.src;
-  }));
-  return { clicked, get dialog() { return dialog; } };
-}
-test('native enlarged viewer moves using original image handlers, retaining close and backdrop', t => {
-  const f = harness(t, `<main>${galleryMarkup(3)}</main>`);
-  const grid = f.document.getElementById('gallery'); geometry(f, grid);
-  const images = [...grid.querySelectorAll('img')]; const native = nativeViewer(f, images); f.enhance();
-  images[0].click(); f.enhance();
-  const controls = native.dialog.querySelector('.ct-media-viewer-controls');
-  assert.ok(controls);
-  controls.querySelectorAll('button')[1].click();
-  assert.equal(native.dialog.querySelector('img').src, images[1].src);
-  assert.equal(controls.querySelector('span').textContent, '2 / 3');
-  assert.deepEqual(native.clicked, [0, 1]);
-  f.document.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-  assert.equal(native.dialog.querySelector('img').src, images[2].src);
-  native.dialog.querySelector('[aria-label="Close media viewer"]').click(); f.enhance();
-  assert.equal(f.document.querySelector('.ct-media-viewer-controls'), null);
-  images[0].click(); f.enhance(); native.dialog.click(); f.enhance();
-  assert.equal(f.document.querySelector('[role="dialog"]'), null);
-});
-test('viewer swipes move photos without hijacking vertical movement or unrelated viewer images', t => {
-  const f = harness(t, `<main>${galleryMarkup(3)}</main>`);
-  const grid = f.document.getElementById('gallery'); geometry(f, grid); const images = [...grid.querySelectorAll('img')];
-  const native = nativeViewer(f, images); f.enhance(); images[0].click(); f.enhance();
-  const swipe = (dx, dy) => {
-    const image = native.dialog.querySelector('img');
-    const begin = new f.window.Event('touchstart', { bubbles: true }); Object.defineProperty(begin, 'touches', { value: [{ clientX: 200, clientY: 100 }] }); image.dispatchEvent(begin);
-    const end = new f.window.Event('touchend', { bubbles: true }); Object.defineProperty(end, 'changedTouches', { value: [{ clientX: 200 + dx, clientY: 100 + dy }] }); image.dispatchEvent(end);
-  };
-  swipe(-100, 5); assert.equal(native.dialog.querySelector('img').src, images[1].src);
-  swipe(-20, 100); assert.equal(native.clicked.length, 2);
-  native.dialog.remove(); f.enhance();
-  const unrelated = f.document.createElement('div'); unrelated.setAttribute('role', 'dialog'); unrelated.setAttribute('aria-modal', 'true'); unrelated.setAttribute('aria-label', 'Media viewer'); unrelated.innerHTML = '<img alt="Media preview" src="/unrelated.jpg">'; f.document.body.append(unrelated); f.enhance();
-  assert.equal(unrelated.querySelector('.ct-media-viewer-controls'), null);
-});
-
-test('React class and child replacement on an existing gallery restores the carousel without duplicate controls', t => {
-  const f = harness(t, `<main>${galleryMarkup(3)}</main>`);
-  const grid = f.document.getElementById('gallery'); geometry(f, grid); f.enhance();
-  grid.className = 'grid gap-0.5 rounded-2xl overflow-hidden border border-tl-app-border grid-cols-2';
-  grid.removeAttribute('tabindex'); grid.removeAttribute('aria-label');
-  grid.append(grid.firstElementChild.cloneNode(true));
-  f.enhance(); f.enhance();
-  assert.ok(grid.classList.contains('ct-media-carousel'));
-  assert.equal(grid.tabIndex, 0);
-  assert.equal(grid.getAttribute('aria-label'), '投稿の写真');
-  assert.equal(f.document.querySelectorAll('.ct-media-carousel-controls').length, 1);
-  assert.equal(grid.nextElementSibling.querySelector('span').textContent, '1 / 4');
-});
-test('viewer navigation follows an asynchronous native React src update without relying on the shared observer', async t => {
-  const f = harness(t, `<main>${galleryMarkup(3)}</main>`);
-  const grid = f.document.getElementById('gallery'); geometry(f, grid); const images = [...grid.querySelectorAll('img')];
-  const dialog = f.document.createElement('div'); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', 'Media viewer');
-  const image = f.document.createElement('img'); image.alt = 'Media preview'; dialog.append(image);
-  images.forEach(native => native.addEventListener('click', event => {
-    event.stopPropagation();
-    queueMicrotask(() => { image.src = native.src; if (!dialog.isConnected) f.document.body.append(dialog); });
-  }));
-  f.enhance(); images[0].click(); await new Promise(resolve => setTimeout(resolve, 0)); f.enhance();
-  const next = dialog.querySelector('.ct-media-viewer-controls button:last-child');
-  next.click(); await settle(() => dialog.querySelector('[role="status"]').textContent === '2 / 3');
-  assert.equal(image.src, images[1].src);
-  next.click(); await settle(() => dialog.querySelector('[role="status"]').textContent === '3 / 3');
-  assert.equal(image.src, images[2].src); assert.equal(next.disabled, true);
+test('asynchronous native selection keeps its original image/counter and updates the delivered-image link',async t=>{
+  const f=harness(t,`<main>${galleryMarkup(3)}</main>`),images=[...f.document.querySelectorAll('#gallery img')],native=nativeViewer(f,images,{asyncCommit:true});
+  f.enhance();images[0].click();await settle(()=>native.dialog?.isConnected);f.enhance();const image=native.dialog.querySelector('img'),counter=native.dialog.querySelector('[data-native-count]');
+  native.dialog.querySelector('[data-native-next]').click();await settle(()=>image.src===images[1].src);await Promise.resolve();
+  assert.equal(f.qa.viewer.index,1);assert.equal(counter.textContent,'2/3');assert.equal(native.calls.next,1);
+  assert.equal(native.dialog.querySelector('.ct-media-photo-quality a').href,images[1].src);assert.equal(native.dialog.querySelector('img'),image);assert.equal(native.dialog.querySelector('[data-native-count]'),counter);
 });
 
 function motionViewer(t, options = {}) {
@@ -408,7 +175,7 @@ function motionViewer(t, options = {}) {
   f.images = [...f.grid.querySelectorAll('img')];
   f.native = nativeViewer(f, f.images); f.enhance(); f.images[0].click();
   f.preview = f.native.dialog.querySelector('img');
-  f.stage = f.document.createElement('div'); f.preview.before(f.stage); f.stage.append(f.preview);
+  f.stage = f.preview.parentElement;
   Object.defineProperty(f.stage, 'clientWidth', {value:390});
   if (options.pointer) f.window.PointerEvent = f.window.MouseEvent;
   f.enhance();
@@ -481,12 +248,6 @@ test('backgrounding and image errors release the photo layer, animation frames a
   Object.defineProperty(f.document,'hidden',{configurable:true,value:false});f.gesture('touchstart',200);f.gesture('touchmove',100);f.gesture('touchend',90);f.tick(240);
   f.preview.dispatchEvent(new f.window.Event('error'));assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.timers.size,0);
 });
-test('gallery height-only resize leaves an in-progress swipe alone and width resize aligns without smooth scrolling', t => {
-  const f=harness(t,`<main>${galleryMarkup(3)}</main>`);const grid=f.document.getElementById('gallery');geometry(f,grid,390);
-  let resize;f.window.ResizeObserver=class {constructor(cb){resize=cb}observe(){}disconnect(){}};f.enhance();
-  grid.scrollLeft=100;resize();resize();assert.equal(grid.lastScroll,undefined);assert.equal(grid.scrollLeft,100);
-  Object.defineProperty(grid,'clientWidth',{configurable:true,value:320});resize();assert.deepEqual({...grid.lastScroll},{left:0,behavior:'auto'});
-});
 test('release before the queued animation frame begins settling from the latest finger position', t => {
   const f=motionViewer(t);f.gesture('touchstart',240);f.gesture('touchmove',160);
   const track=f.document.querySelector('.ct-media-photo-track');let start;
@@ -494,21 +255,21 @@ test('release before the queued animation frame begins settling from the latest 
   f.gesture('touchend',100);assert.match(start,/-140px/);assert.equal(f.frames.size,0);
 });
 test('asynchronous native commit locks repeated navigation and an old-source load cannot release its photo layer', t => {
-  const f=motionViewer(t);f.images[1].addEventListener('click',e=>{e.stopImmediatePropagation();f.native.clicked.push(1)},{capture:true});
-  const next=f.native.dialog.querySelector('.ct-media-viewer-controls button:last-child');next.click();next.click();
-  assert.deepEqual(f.native.clicked,[0,1]);assert.equal(next.disabled,true);f.tick(240);
+  const f=motionViewer(t);f.native.dialog.querySelector('[data-native-next]').addEventListener('click',e=>{e.stopImmediatePropagation();f.native.clicked.push(1)},{capture:true});
+  const next=f.native.dialog.querySelector('[data-native-next]');next.click();next.click();
+  assert.deepEqual(f.native.clicked,[0,1]);assert.equal(f.qa.viewer.requestedIndex,1);f.tick(240);
   f.preview.dispatchEvent(new f.window.Event('load'));assert.ok(f.document.querySelector('.ct-media-photo-layer'));
-  f.preview.src=f.images[1].src;f.preview.dispatchEvent(new f.window.Event('load'));f.enhance();
-  assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(next.disabled,false);
-  assert.equal(f.native.dialog.querySelector('[role="status"]').textContent,'2 / 3');
+  f.native.commit(1);f.preview.dispatchEvent(new f.window.Event('load'));f.enhance();
+  assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.qa.viewer.requestedIndex,null);
+  assert.equal(f.native.dialog.querySelector('[data-native-count]').textContent,'2/3');
 });
 test('a native handler with no commit times out, restores navigation and follows a later commit, including reduced motion', t => {
   for(const reduced of [false,true]) {
-    const f=motionViewer(t,{reduced});f.images[1].addEventListener('click',e=>e.stopImmediatePropagation(),{capture:true});
-    const next=f.native.dialog.querySelector('.ct-media-viewer-controls button:last-child');next.click();assert.equal(next.disabled,true);
-    f.tick(1600);assert.equal(next.disabled,false);assert.equal(f.qa.viewer.requestedIndex,null);
-    assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.native.dialog.querySelector('[role="status"]').textContent,'1 / 3');
-    f.preview.src=f.images[1].src;f.enhance();assert.equal(f.native.dialog.querySelector('[role="status"]').textContent,'2 / 3');
+    const f=motionViewer(t,{reduced});f.native.dialog.querySelector('[data-native-next]').addEventListener('click',e=>e.stopImmediatePropagation(),{capture:true});
+    const next=f.native.dialog.querySelector('[data-native-next]');next.click();assert.equal(f.qa.viewer.requestedIndex,1);
+    f.tick(1600);assert.equal(f.qa.viewer.requestedIndex,null);assert.equal(f.qa.viewer.requestedIndex,null);
+    assert.equal(f.document.querySelector('.ct-media-photo-layer'),null);assert.equal(f.native.dialog.querySelector('[data-native-count]').textContent,'1/3');
+    f.native.commit(1);f.enhance();assert.equal(f.native.dialog.querySelector('[data-native-count]').textContent,'2/3');
   }
 });
 test('mouse pointer capture stays on the preview and its native drag ghost is prevented', t => {
@@ -775,10 +536,7 @@ test('local profile video gets an inline fullscreen control but upload previews 
   assert.equal(f.document.getElementById('other-video').classList.contains('ct-media-enhanced-video'), false);
 });
 test('single native photos center in the visual viewport independently of carousel setup, while contained viewers keep their modal bounds', t => {
-  const f = harness(t, `<main></main><div class="fixed inset-0" role="dialog" aria-modal="true" aria-label="Media viewer" id="fixed">
-    <div><button aria-label="Close media viewer">Close</button></div><div><img alt="Media preview" src="/one.jpg"></div></div>
-    <div class="absolute inset-0" role="dialog" aria-modal="true" aria-label="Media viewer" id="contained">
-    <div><button aria-label="Close media viewer">Close</button></div><div><img alt="Media preview" src="/two.jpg"></div></div>`);
+  const f=harness(t, viewerMarkup({id:'fixed',source:'https://media.tweet.app/one.jpg'})+viewerMarkup({id:'contained',source:'https://media.tweet.app/two.jpg',contained:true}));
   const viewport = new f.window.EventTarget(); Object.assign(viewport, { width: 390, height: 520, offsetTop: 34, offsetLeft: 2 });
   Object.defineProperty(f.window, 'visualViewport', { configurable: true, value: viewport });
   f.enhance();
@@ -786,7 +544,7 @@ test('single native photos center in the visual viewport independently of carous
   assert.ok(fixed.classList.contains('ct-media-viewport-viewer'));
   assert.equal(fixed.style.getPropertyValue('--ct-media-view-height'), '520px');
   assert.equal(fixed.style.getPropertyValue('--ct-media-view-top'), '34px');
-  assert.equal(fixed.querySelector('img').parentElement.className, 'ct-media-viewer-stage');
+  assert.ok(fixed.querySelector('img').parentElement.classList.contains('ct-media-viewer-stage'));
   assert.equal(fixed.querySelectorAll('.ct-media-viewer-controls').length, 0);
   assert.ok(contained.classList.contains('ct-media-centered-viewer'));
   assert.equal(contained.classList.contains('ct-media-viewport-viewer'), false);
@@ -807,19 +565,19 @@ function photoViewportFixture(f, values = {}) {
   return viewport;
 }
 test('native photo zoom retains layout size and position through 2x, 4x and browser pan, then refits after zoom-out', t => {
-  const f=harness(t, '<div class="fixed" role="dialog" aria-modal="true" aria-label="Media viewer"><div><button aria-label="Close media viewer">Close</button></div><div><img alt="Media preview" src="/photo.jpg"></div></div>');
+  const f=harness(t, viewerMarkup({source:'https://media.tweet.app/photo.jpg'}));
   const v=photoViewportFixture(f), d=f.document.querySelector('[role=dialog]'), img=d.querySelector('img');
   const original=d.style.cssText;
   for(const values of [{scale:2,width:195,height:422,offsetLeft:60,offsetTop:100},{scale:4,width:97.5,height:211,offsetLeft:90,offsetTop:180}]) {
     Object.assign(v,values);v.dispatchEvent(new f.window.Event('resize'));v.dispatchEvent(new f.window.Event('scroll'));f.enhance();
-    assert.equal(d.style.cssText,original);assert.equal(d.querySelector('img'),img);assert.equal(img.getAttribute('src'),'/photo.jpg');
+    assert.equal(d.style.cssText,original);assert.equal(d.querySelector('img'),img);assert.equal(img.getAttribute('src'),'https://media.tweet.app/photo.jpg');
     assert.equal(d.classList.contains('ct-media-photo-zoomed'),true);
   }
   Object.assign(v,{scale:1,width:390,height:740,offsetLeft:0,offsetTop:0});v.dispatchEvent(new f.window.Event('resize'));
   assert.equal(d.style.getPropertyValue('--ct-media-view-height'),'740px');assert.equal(d.classList.contains('ct-media-photo-zoomed'),false);
 });
 test('a photo opened while already zoomed starts at unscaled bounds rather than the shrinking viewport', t => {
-  const f=harness(t,'<div class="fixed" role="dialog" aria-modal="true" aria-label="Media viewer"><div><img alt="Media preview" src="/photo.jpg"></div></div>');
+  const f=harness(t,viewerMarkup({source:'https://media.tweet.app/photo.jpg'}));
   photoViewportFixture(f,{scale:2,width:195,height:422,offsetLeft:100,offsetTop:200});const d=f.document.querySelector('[role=dialog]');
   assert.equal(d.style.getPropertyValue('--ct-media-view-width'),'390px');assert.equal(d.style.getPropertyValue('--ct-media-view-height'),'844px');
   assert.equal(d.style.getPropertyValue('--ct-media-view-top'),'0px');assert.equal(d.style.getPropertyValue('--ct-media-view-left'),'0px');
@@ -865,4 +623,62 @@ test('unzoomed viewport resize cancels stale drag geometry while fresh swipes co
   f.gesture('pointerdown',280);f.gesture('pointermove',200);f.flushFrames();v.height=600;v.dispatchEvent(new f.window.Event('resize'));
   f.gesture('pointerup',90);assert.deepEqual(f.native.clicked,[0]);assert.equal(f.qa.viewer.motion,null);
   f.gesture('pointerdown',280);f.gesture('pointerup',90);f.tick(240);assert.deepEqual(f.native.clicked,[0,1]);
+});
+
+test('a browser emitting pointer plus touch events commits one native swipe, retaining its own counter',t=>{
+  const f=motionViewer(t,{pointer:true,viewport:{}});
+  f.gesture('pointerdown',240);f.gesture('touchstart',240);
+  f.gesture('pointermove',120);f.gesture('touchmove',120);f.flushFrames();
+  f.gesture('pointerup',90);f.gesture('touchend',90,100,{touches:{value:[]}});
+  assert.equal(f.native.calls.next,1);assert.equal(f.native.calls.touch,0);
+  assert.deepEqual(f.native.clicked,[0,1]);assert.equal(f.native.dialog.querySelector('[data-native-count]').textContent,'2/3');
+});
+test('native X-only touch navigation is suppressed for diagonal vertical intent and pinch without preventing browser defaults',t=>{
+  const f=motionViewer(t,{viewport:{}});
+  f.gesture('touchstart',240,100);const vertical=f.gesture('touchmove',140,260);f.gesture('touchend',140,260,{touches:{value:[]}});
+  assert.equal(vertical.defaultPrevented,false);assert.equal(f.native.calls.touch,0);assert.deepEqual(f.native.clicked,[0]);
+  f.gesture('touchstart',240);const pinch=f.gesture('touchstart',180,100,{touches:{value:[{clientX:240,clientY:100},{clientX:180,clientY:100}]}});
+  f.gesture('touchend',80,100,{touches:{value:[]}});
+  assert.equal(pinch.defaultPrevented,false);assert.equal(f.native.calls.touch,0);assert.deepEqual(f.native.clicked,[0]);
+});
+test('native keyboard changes during settling discard the old destination, including returning to the original image in one turn',async t=>{
+  for(const key of ['ArrowRight','ArrowLeft','Home']){
+    const f=motionViewer(t);f.native.dialog.querySelector('[data-native-next]').click();assert.ok(f.qa.viewer.motion);
+    f.document.dispatchEvent(new f.window.KeyboardEvent('keydown',{key,bubbles:true}));await Promise.resolve();await Promise.resolve();
+    assert.equal(f.native.calls.next,1);assert.equal(f.native.calls.key,1);
+    assert.equal(f.document.querySelector('.ct-media-photo-layer'),null,key);
+    assert.equal(f.preview.classList.contains('ct-media-photo-covered'),false,key);assert.equal(f.timers.size,0,key);
+    assert.equal(f.qa.viewer.index,key==='ArrowRight'?2:0);
+  }
+});
+test('an open native viewer keeps source reconciliation after the initial five-second opener window',t=>{
+  const f=motionViewer(t);const real=f.window.Date.now;f.window.Date.now=()=>real()+10000;
+  f.native.commit(2);f.enhance();assert.equal(f.qa.viewer.index,2);
+  assert.equal(f.native.dialog.querySelector('.ct-media-photo-quality a').href,f.images[2].src);
+});
+test('closing a gallery viewer cannot bind a later single-photo reply viewer with the same delivered URL',t=>{
+  const f=motionViewer(t);const source=f.images[0].src;f.native.dialog.remove();f.enhance();assert.equal(f.qa.viewer,null);
+  const box=f.document.createElement('div');box.innerHTML=viewerMarkup({source,count:1});const single=box.firstElementChild;f.document.body.append(single);f.enhance();
+  assert.equal(f.qa.viewer,null);assert.equal(single.querySelector('.ct-media-photo-layer'),null);
+  assert.ok(single.classList.contains('ct-media-centered-viewer'));assert.equal(single.querySelector('.ct-media-photo-quality a').href,source);
+});
+test('native total and index must match the opener before photo motion can attach',t=>{
+  for(const count of ['1/1','2/3','not a count']){
+    const f=harness(t,`<main>${galleryMarkup(3)}</main>`),images=[...f.document.querySelectorAll('#gallery img')],native=nativeViewer(f,images);
+    f.enhance();images[0].click();native.dialog.querySelector('[data-native-count]').textContent=count;f.enhance();
+    assert.equal(f.qa.viewer,null,count);assert.equal(native.dialog.querySelector('.ct-media-photo-layer'),null,count);
+  }
+});
+test('native Japanese viewer labels keep the same buttons, image, quality and motion attachment',t=>{
+  const f=motionViewer(t),dialog=f.native.dialog,buttons=[...dialog.querySelectorAll('button')];
+  dialog.setAttribute('aria-label','写真・動画ビューア');buttons[0].setAttribute('aria-label','写真・動画を閉じる');buttons[1].setAttribute('aria-label','前の画像');buttons[2].setAttribute('aria-label','次の画像');f.enhance();
+  assert.ok(f.qa.viewer);assert.deepEqual([...dialog.querySelectorAll('button')],buttons);assert.ok(dialog.querySelector('.ct-media-photo-quality'));
+});
+
+test('native icon-only upload controls keep accessible names while selection and submit handlers stay native',t=>{
+  const f=harness(t),photo=f.document.getElementById('photo'),video=f.document.getElementById('video');
+  f.enhance();assert.equal(photo.getAttribute('aria-label'),'写真を追加');assert.equal(video.getAttribute('aria-label'),'動画を追加');
+  photo.setAttribute('aria-label','Native future photo control');f.enhance();assert.equal(photo.getAttribute('aria-label'),'Native future photo control');
+  const g=harness(t,uploadMarkup(),{locale:'en'});g.enhance();assert.equal(g.document.getElementById('photo').getAttribute('aria-label'),'Add photos');
+  assert.equal(g.document.getElementById('videos').multiple,false);assert.equal(g.document.getElementById('photos').multiple,true);
 });

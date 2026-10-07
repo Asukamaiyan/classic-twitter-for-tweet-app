@@ -38,7 +38,7 @@ const localizationNames = [
   'ctLocalizationClassicText', 'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
   'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber',
   'nativeTimestampJapaneseText', 'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
-  'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText'
+  'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText', 'nativeMediaUploadJapaneseText'
 ];
 const jpMapStart = script.indexOf('  const JP = new Map([');
 const jpMapEnd = script.indexOf('\n  ]);', jpMapStart) + '\n  ]);'.length;

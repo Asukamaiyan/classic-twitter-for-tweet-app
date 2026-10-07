@@ -50,8 +50,20 @@
   }
 
   function ctFavoriteDOMMedia(article) {
-    return [...article.querySelectorAll('img[alt="Attached media"],video[src]')].filter(el =>
-      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-ct-owned],[data-ct-local-ui]'))
+    const nodes = [...article.querySelectorAll('img[alt="Attached media"],video[src]')];
+    // Native v2.2.3 numbers each carousel image's alt. Reuse the verified
+    // gallery structure rather than matching arbitrary avatars or body images.
+    if (typeof ctMediaSlides === 'function') for (const grid of article.querySelectorAll('div.flex.snap-x.snap-mandatory.overflow-x-auto')) {
+      for (const slide of ctMediaSlides(grid)) nodes.push(slide.firstElementChild);
+    }
+    // The current native legacy-image branch uses a different alt; accept only
+    // its exact direct image container, never a similarly named user image.
+    for (const image of article.querySelectorAll('img[alt="Post media"].w-full.object-cover.cursor-pointer')) {
+      if (image.parentElement?.matches('div.mt-3.rounded-2xl.overflow-hidden.border') &&
+          image.parentElement.children.length === 1) nodes.push(image);
+    }
+    return [...new Set(nodes)].filter(el =>
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-user-content],.tl-user-text,[data-ct-owned],[data-ct-local-ui]'))
       .slice(0, 16).map(el => ({type: el.tagName === 'VIDEO' ? 'video' : 'image',
         url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : ''})).filter(asset => asset.url);
   }

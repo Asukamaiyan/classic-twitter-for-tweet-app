@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/favorite-capture.js'), 'utf8');
 const timestampSource = fs.readFileSync(require('node:path').join(__dirname, '../src/timestamps.js'), 'utf8');
+const mediaSource = fs.readFileSync(require('node:path').join(__dirname, '../src/media.js'), 'utf8');
+const {galleryMarkup}=require('./helpers/native-media.cjs');
 const date = '2026-09-30T07:00:00.000Z';
 function harness(t) {
   const dom = new JSDOM(`<article><button class="truncate font-bold">Alice</button>
@@ -30,7 +32,8 @@ function harness(t) {
   w.ctProfileMediaAssets = post => post.media_assets || [];
   w.ctProfileURL = value => /^https:\/\//.test(value || '') ? value : '';
   w.eval(`const API_ORIGIN='https://api.tweet.app'; const ctNetworkState={authUID:'account-a'}; const CT_LOCALE='ja'; ${timestampSource}
-    let favoritesActive=false; ${source}; window.identity=ctNetworkState;
+    let favoritesActive=false; ${mediaSource}
+    ${source}; window.identity=ctNetworkState;
     window.qa={ctFavoriteCandidate,ctResolveFavorite,ctCaptureFavoriteClick,ctRestoreVisibleFavorites,ctFavoriteRelativeTimeMatches};`);
   f.article = f.doc.querySelector('article');
   f.button = f.doc.querySelector('[data-testid]');
@@ -172,4 +175,22 @@ test('malformed exact candidate timestamps cannot match another invalid API crea
   const f=harness(t); f.response={posts:[{...f.post(),createdAt:'not-a-date'}]};
   assert.equal(await f.w.qa.ctResolveFavorite({...f.candidate(),createdAt:'not-a-date'},'account-a'),null);
   assert.equal(f.requests.length,0);
+});
+
+test('known detail Favorites retain all five numbered native photos while excluding quote, avatar and user images',t=>{
+  const f=harness(t);f.w.snapshotFavorite=()=>({id:'detail',text:'My post'});
+  f.article.insertAdjacentHTML('beforeend',galleryMarkup(5));
+  f.article.querySelector('[aria-label]').insertAdjacentHTML('beforeend',galleryMarkup(2,'quote'));
+  f.article.insertAdjacentHTML('beforeend','<img class="rounded-full" alt="Attached media 1 of 2" src="https://media.tweet.app/avatar.jpg"><div class="tl-user-text">'+galleryMarkup(2,'body')+'</div><article>'+galleryMarkup(2,'nested')+'</article>');
+  const originals=[...f.doc.querySelectorAll('#gallery img')],before=f.article.innerHTML;
+  const item=f.candidate();assert.equal(item.media.length,5);
+  assert.deepEqual([...item.media].map(asset=>asset.url), originals.map(image=>image.src));
+  assert.ok([...item.media].every(asset=>asset.type==='image'));
+  assert.equal(f.article.innerHTML,before);assert.equal(f.requests.length,0);
+});
+test('known detail Favorites include only the native legacy Post media image structure',t=>{
+  const f=harness(t);f.w.snapshotFavorite=()=>({id:'detail',text:'My post'});
+  f.article.insertAdjacentHTML('beforeend','<div class="mt-3 rounded-2xl overflow-hidden border"><img class="w-full object-cover cursor-pointer" alt="Post media" src="https://media.tweet.app/legacy.jpg"></div><img alt="Post media" src="https://media.tweet.app/body.jpg">');
+  f.article.querySelector('[aria-label]').insertAdjacentHTML('beforeend','<div class="mt-3 rounded-2xl overflow-hidden border"><img class="w-full object-cover cursor-pointer" alt="Post media" src="https://media.tweet.app/quoted.jpg"></div>');
+  assert.deepEqual([...f.candidate().media].map(asset=>asset.url),['https://media.tweet.app/legacy.jpg']);
 });

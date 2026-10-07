@@ -39,7 +39,7 @@ function fixture(language, html, route = '/feed') {
     'ctLocalizationRegularText', 'ctLocalizationClassicText',
     'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
     'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber', 'nativeTimestampJapaneseText',
-    'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
+    'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata', 'nativeMediaUploadJapaneseText',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
     'notificationTextNodes', 'patchNotificationGrammar', 'patchNotificationConnectors',
     'patchNotificationParticles', 'patchNotificationFollowGrammar', 'patchReplyingTo',
@@ -987,4 +987,52 @@ test('en: truncated native settings navigation restores wording while truncated 
   assert.equal(f.text('truncated-name'), 'Feed');
   assert.equal(f.text('truncated-route'), 'Settings');
   f.dom.window.close();
+});
+
+test('ja: Tweet 2.2.3 photo controls localize without replacing native handlers or captions', () => {
+  const f = fixture('ja', `<article><p class="whitespace-pre-wrap" id="caption">Open image 1 of 2</p>
+    <div class="relative overflow-hidden rounded-2xl border bg-black"><div class="snap-x snap-mandatory overflow-x-auto">
+    <button id="open-one" class="w-full min-w-full shrink-0 snap-start" aria-label="Open image 1 of 2"><img class="h-full w-full object-cover" alt="My original caption"></button>
+    <button id="open-two" class="w-full min-w-full shrink-0 snap-start" aria-label="Open image 2 of 2"><img class="h-full w-full object-cover"></button></div>
+    <button id="gallery-next" aria-label="Next image"><svg class="lucide-chevron-right"></svg></button>
+    <div id="dots" aria-label="Choose image"><button id="dot-one" aria-current="true" aria-label="Show image 1 of 2"></button><button aria-current="false" aria-label="Show image 2 of 2"></button></div></div></article>
+    <div class="fixed inset-0 flex flex-col ct-media-photo-dialog" role="dialog" aria-modal="true" aria-label="Media viewer" id="viewer"><div>
+    <button id="viewer-close" aria-label="Close media viewer"><svg class="lucide-x"></svg></button></div><div class="flex-1 min-h-0">
+    <button aria-label="Previous image" id="viewer-prev"><svg class="lucide-chevron-left"></svg></button><img class="object-contain" draggable="false"><button aria-label="Next image" id="viewer-next"><svg class="lucide-chevron-right"></svg></button></div></div>
+    <button aria-label="Open image 1 of 2" id="unrelated"><img></button>`);
+  const photo = f.document.getElementById('open-one'); const image = photo.firstElementChild;
+  let opens = 0; photo.addEventListener('click', () => opens++);
+  f.run(); f.run();
+  assert.equal(photo.getAttribute('aria-label'), '2枚中1枚目の画像を開く');
+  assert.equal(f.document.getElementById('open-two').getAttribute('aria-label'), '2枚中2枚目の画像を開く');
+  assert.equal(f.document.getElementById('dot-one').getAttribute('aria-label'), '2枚中1枚目の画像を表示');
+  assert.equal(f.document.getElementById('dots').getAttribute('aria-label'), '画像を選択');
+  assert.equal(f.document.getElementById('gallery-next').getAttribute('aria-label'), '次の画像');
+  assert.equal(f.document.getElementById('viewer').getAttribute('aria-label'), '写真・動画ビューア');
+  assert.equal(f.document.getElementById('viewer-close').getAttribute('aria-label'), '写真・動画を閉じる');
+  assert.equal(f.document.getElementById('viewer-prev').getAttribute('aria-label'), '前の画像');
+  assert.equal(f.document.getElementById('viewer-next').getAttribute('aria-label'), '次の画像');
+  assert.equal(f.text('caption'), 'Open image 1 of 2');
+  assert.equal(f.document.getElementById('unrelated').getAttribute('aria-label'), 'Open image 1 of 2');
+  assert.equal(photo.firstElementChild, image); assert.equal(image.alt, 'My original caption');
+  photo.click(); assert.equal(opens, 1);
+  photo.setAttribute('aria-label', 'Open image 2 of 2'); f.run(photo);
+  assert.equal(photo.getAttribute('aria-label'), 'Open image 2 of 2');
+  f.dom.window.close();
+});
+
+test('ja: native upload errors explain limits and retain the exact filename suffix', () => {
+  const error = text => `<div class="p-3 border text-red-500 flex items-center gap-2 bg-red-500/10 border-red-500/15"><svg class="lucide-circle-alert"></svg><span id="upload-error">${text}</span></div>`;
+  const f = fixture('ja', `<div><textarea id="public-tweet-input">draft</textarea><div class="w-full mt-3 space-y-3"><input type="file" accept="image/*" multiple><input type="file" accept="video/mp4,video/quicktime">${error('Maximum of 5 images allowed per post.')}</div></div><article><p class="whitespace-pre-wrap" id="body">Maximum of 5 images allowed per post.</p></article>`);
+  f.run(); assert.equal(f.text('upload-error'),'写真は1ツイートに5枚まで追加できます。');
+  assert.equal(f.text('body'),'Maximum of 5 images allowed per post.');
+  const node = f.document.getElementById('upload-error').firstChild;
+  node.nodeValue = '2 images were not added. My  Summer.png: Upload failed';
+  f.run(node.parentElement); assert.equal(node.nodeValue,'2枚の写真を追加できませんでした。 My  Summer.png: Upload failed');
+  node.nodeValue = 'Images must be 10 MB or smaller.'; f.run(node.parentElement);
+  assert.equal(node.nodeValue,'写真は1枚10MB以下にしてください。');
+  f.document.querySelector('input[accept="image/*"]').removeAttribute('multiple');
+  node.nodeValue = 'Maximum of 5 images allowed per post.'; f.run(node.parentElement);
+  assert.equal(node.nodeValue,'Maximum of 5 images allowed per post.');
+  assert.equal(f.document.querySelector('textarea').value,'draft'); f.dom.window.close();
 });

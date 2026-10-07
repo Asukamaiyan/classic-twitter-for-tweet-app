@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.21.0
+// @version      6.22.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -100,6 +100,10 @@
             timeout: ctNetworkState.requestTimeout, redirect: 'error', anonymous: true,
             responseType: 'text',
             onload: response => finish(parse(response)),
+            // Stay's Safari bridge releases its per-request message listener
+            // only when onloadend is registered. A final loadend can also
+            // supply the response; finish keeps the first result authoritative.
+            onloadend: response => finish(parse(response)),
             onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null)
           });
           if (handle && typeof handle.then === 'function') {
@@ -2881,7 +2885,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.21.0';
+    document.documentElement.dataset.ctActiveVersion = '6.22.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -4611,8 +4615,20 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   function ctFavoriteDOMMedia(article) {
-    return [...article.querySelectorAll('img[alt="Attached media"],video[src]')].filter(el =>
-      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-ct-owned],[data-ct-local-ui]'))
+    const nodes = [...article.querySelectorAll('img[alt="Attached media"],video[src]')];
+    // Native v2.2.3 numbers each carousel image's alt. Reuse the verified
+    // gallery structure rather than matching arbitrary avatars or body images.
+    if (typeof ctMediaSlides === 'function') for (const grid of article.querySelectorAll('div.flex.snap-x.snap-mandatory.overflow-x-auto')) {
+      for (const slide of ctMediaSlides(grid)) nodes.push(slide.firstElementChild);
+    }
+    // The current native legacy-image branch uses a different alt; accept only
+    // its exact direct image container, never a similarly named user image.
+    for (const image of article.querySelectorAll('img[alt="Post media"].w-full.object-cover.cursor-pointer')) {
+      if (image.parentElement?.matches('div.mt-3.rounded-2xl.overflow-hidden.border') &&
+          image.parentElement.children.length === 1) nodes.push(image);
+    }
+    return [...new Set(nodes)].filter(el =>
+      el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-user-content],.tl-user-text,[data-ct-owned],[data-ct-local-ui]'))
       .slice(0, 16).map(el => ({type: el.tagName === 'VIDEO' ? 'video' : 'image',
         url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : ''})).filter(asset => asset.url);
   }
@@ -5892,20 +5908,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return Promise.all(requests);
   }
 
-    // Reuse the native upload UI: it validates and uploads one File at a time.
-  // No media quotas, server formats, transcoding settings or post submissions
-  // are changed here. In particular, accepting a file does not promise 4K HDR.
-  const ctMediaUploads = new WeakMap();
-  const ctMediaUploadEvents = new WeakSet();
-  const ctMediaCarousels = new Map();
+    // Tweet owns photo selection, uploads, inline carousels and viewer controls.
+  // Supplement only the verified viewer's motion, viewport fit and delivered
+  // media information; never submit posts or rewrite provided media sources.
+  const ctMediaGalleries = new Map();
   const ctMediaCenteredViewers = new Map();
   const ctMediaVideos = new Map();
   const ctMediaPhotoQuality = new Map();
   let ctMediaViewportBound = false;
-  let ctMediaTransferSupported;
   let ctMediaPendingViewer = null;
   let ctMediaViewer = null;
-  const ctMediaPhotoAccept = 'image/jpeg,image/png,image/webp';
 
   function ctMediaJapanese() { return CT_LOCALE === 'ja'; }
   function ctMediaQualityURL(value) {
@@ -5964,313 +5976,79 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     image.addEventListener('load', state.update); image.addEventListener('error', state.update);
     dialog.append(tools); ctMediaPhotoQuality.set(dialog, state); state.update();
   }
-  function ctMediaCanTransfer() {
-    if (ctMediaTransferSupported !== undefined) return ctMediaTransferSupported;
-    try {
-      const transfer = new DataTransfer();
-      transfer.items.add(new File([], 'ct-capability-check.jpg', { type: 'image/jpeg' }));
-      const probe = document.createElement('input');
-      probe.type = 'file';
-      probe.files = transfer.files;
-      ctMediaTransferSupported = probe.files.length === 1;
-    } catch { ctMediaTransferSupported = false; }
-    return ctMediaTransferSupported;
-  }
-  function ctMediaUploadRoot(input) {
-    if (!input.matches(`input[type="file"][accept="${ctMediaPhotoAccept}"]`) ||
-        input.closest('[data-ct-local-ui]')) return null;
+  function ctMediaLabelUploadControls(input) {
+    if (!input.matches('input[type="file"][accept="image/*"][multiple]') || input.closest('[data-ct-local-ui],[data-ct-owned]')) return;
     const toolbar = input.parentElement;
-    const root = toolbar?.parentElement;
-    if (!toolbar?.matches('div.flex.items-center') || !root?.matches('div.w-full.mt-3.space-y-3') ||
-        ![...toolbar.children].some(el => el.matches('input[type="file"][accept="video/mp4,video/quicktime"]'))) return null;
+    if (!toolbar?.matches('div.flex.items-center') || !toolbar.parentElement?.matches('div.w-full.mt-3.space-y-3') ||
+        ![...toolbar.children].some(el => el.matches('input[type="file"][accept="video/mp4,video/quicktime"]'))) return;
     const actions = [...toolbar.children].find(el => el.matches('div.flex.items-center'));
-    const buttons = actions ? [...actions.children].filter(el => el.tagName === 'BUTTON') : [];
-    // Tweet 2.1 adds a poll toggle beside the two media controls. Identify the
-    // verified native icons rather than counting buttons or treating poll as video.
-    const photos = buttons.filter(el => el.querySelector(':scope > svg.lucide-image'));
-    const videos = buttons.filter(el => el.querySelector(':scope > svg.lucide-video'));
-    return photos.length === 1 && videos.length === 1
-      ? { root, toolbar, photoButton: photos[0], videoButton: videos[0] } : null;
-  }
-  function ctMediaPreviews(root) { return [...root.querySelectorAll('img[alt="Upload preview"]')]; }
-  function ctMediaPreviewReady(image) {
-    return [...(image.parentElement?.children || [])].some(el => el.matches('div.absolute.bottom-2.left-2') &&
-      el.classList.contains('bg-emerald-500/90'));
-  }
-  function ctMediaUploadError(root) {
-    const error = [...root.children].find(el => el.matches('div.text-red-500'));
-    return error?.textContent?.trim() || '';
-  }
-  function ctMediaUploadStatus(state, text, busy = false) {
-    if (!state.status?.isConnected) {
-      const status = document.createElement('div');
-      status.className = 'ct-media-upload-status';
-      status.dataset.ctLocalUi = 'media-upload';
-      const label = document.createElement('span');
-      label.setAttribute('role', 'status');
-      label.setAttribute('aria-live', 'polite');
-      const cancel = document.createElement('button');
-      cancel.type = 'button';
-      cancel.textContent = ctMediaJapanese() ? '残りを中止' : 'Stop remaining';
-      cancel.addEventListener('click', event => {
-        event.stopPropagation();
-        state.cancelled = true;
-        state.wake?.();
-      });
-      status.append(label, cancel);
-      state.root.append(status);
-      state.status = status;
-      state.label = label;
-      state.cancel = cancel;
-    }
-    if (state.label.textContent !== text) state.label.textContent = text;
-    state.cancel.hidden = !busy;
-  }
-  function ctMediaWaitForPhoto(state, previousSources) {
-    return new Promise(resolve => {
-      let complete = false;
-      const finish = result => {
-        if (complete) return;
-        complete = true;
-        observer.disconnect();
-        clearInterval(poll);
-        clearTimeout(timeout);
-        clearTimeout(initial);
-        state.wake = null;
-        resolve(result);
-      };
-      const check = () => {
-        if (state.cancelled || !state.input.isConnected || !state.root.isConnected ||
-            location.pathname !== state.path) { finish('cancelled'); return; }
-        if (ctMediaUploadError(state.root)) { finish('error'); return; }
-        const photos = ctMediaPreviews(state.root);
-        if (photos.length < previousSources.length) { finish('cancelled'); return; }
-        const remaining = previousSources.slice();
-        const added = photos.filter(photo => {
-          const index = remaining.indexOf(photo.getAttribute('src'));
-          if (index < 0) return true;
-          remaining.splice(index, 1);
-          return false;
-        });
-        if (remaining.length) { finish('cancelled'); return; }
-        if (added.length === 1 && ctMediaPreviewReady(added[0])) finish('ready');
-      };
-      // Start after the native change handler and React's state update. A stale
-      // validation error may still be in the DOM during dispatchEvent itself.
-      const observer = new MutationObserver(check);
-      observer.observe(state.root, { childList: true, subtree: true, attributes: true, characterData: true });
-      const poll = setInterval(check, 100);
-      const timeout = setTimeout(() => finish('timeout'), 120000);
-      const initial = setTimeout(check, 0);
-      state.wake = check;
-    });
-  }
-  async function ctMediaQueuePhotos(input, media, files) {
-    const state = ctMediaUploads.get(input);
-    if (state.busy) return;
-    const existing = ctMediaPreviews(media.root).length;
-    const available = Math.max(0, 4 - existing); // The observed native toolbar also caps at four.
-    const selected = files.slice(0, available);
-    const skipped = files.length - selected.length;
-    const ja = ctMediaJapanese();
-    if (media.photoButton.disabled || media.root.querySelector('video') || !selected.length) {
-      ctMediaUploadStatus(state, ja ? '現在は写真を追加できません。既存の添付とアップロード状態を確認してください。' :
-        'Photos cannot be added now. Check existing attachments and upload status.');
-      input.value = '';
-      return;
-    }
-    state.busy = true;
-    state.cancelled = false;
-    state.path = location.pathname;
-    let completed = 0;
-    let result = 'ready';
-    try {
-      for (const file of selected) {
-        if (state.cancelled || !input.isConnected || location.pathname !== state.path) { result = 'cancelled'; break; }
-        const before = ctMediaPreviews(media.root).map(photo => photo.getAttribute('src'));
-        ctMediaUploadStatus(state, ja ? `写真を追加中 ${completed + 1} / ${selected.length}` :
-          `Adding photos ${completed + 1} / ${selected.length}`, true);
-        const transfer = new DataTransfer();
-        transfer.items.add(file);
-        input.files = transfer.files;
-        const event = new Event('change', { bubbles: true });
-        ctMediaUploadEvents.add(event);
-        input.dispatchEvent(event);
-        result = await ctMediaWaitForPhoto(state, before);
-        if (result !== 'ready') break;
-        completed++;
+    if (!actions) return;
+    for (const [icon, label] of [['image', ctMediaJapanese() ? '写真を追加' : 'Add photos'],
+        ['video', ctMediaJapanese() ? '動画を追加' : 'Add video']]) {
+      const buttons = [...actions.children].filter(el => el.matches('button[type="button"]') &&
+        el.querySelector(':scope > svg.lucide-' + icon));
+      if (buttons.length !== 1) continue;
+      const button = buttons[0], current = button.getAttribute('aria-label');
+      // The current compose buttons remain icon-only. Preserve a future native
+      // accessible label; naming these controls never changes upload behavior.
+      if (!current || /^(?:写真を追加|動画を追加|Add photos|Add video)$/.test(current)) {
+        if (current !== label) button.setAttribute('aria-label', label);
+        if ((!button.title || /^(?:写真を追加|動画を追加|Add photos|Add video)$/.test(button.title)) && button.title !== label) button.title = label;
       }
-    } catch { result = 'error'; }
-    finally {
-      state.busy = false;
-      input.value = '';
-      const count = ja ? `${completed}枚を追加しました。` : `${completed} photo(s) added. `;
-      const reason = result === 'ready' ? (skipped ? (ja ? `1投稿4枚までのため、残り${skipped}枚は追加していません。` :
-        `${skipped} remaining photo(s) were not added because a post accepts four.`) : '') :
-        result === 'cancelled' ? (ja ? '残りの追加を中止しました。処理中の1枚は完了する場合があります。' :
-          'Remaining photos stopped. The photo already uploading may still finish.') :
-        result === 'timeout' ? (ja ? '完了を確認できないため、残りは停止しました。添付の状態を確認してください。' :
-          'Completion could not be confirmed. Remaining photos stopped; check the attachments.') :
-          (ja ? 'エラーのため残りは停止しました。標準のエラー表示を確認してください。' :
-            'Remaining photos stopped after an error. Check the native error message.');
-      if (state.root.isConnected) ctMediaUploadStatus(state, count + reason);
     }
   }
-  function ctMediaEnhanceInput(input) {
-    if (ctMediaUploads.has(input) || !ctMediaCanTransfer()) return;
-    const media = ctMediaUploadRoot(input);
-    if (!media || input.multiple) return; // A future native multi-file handler owns its own input.
-    const state = { input, root: media.root, busy: false, cancelled: false };
-    ctMediaUploads.set(input, state);
-    input.multiple = true;
-    input.addEventListener('change', event => {
-      if (ctMediaUploadEvents.has(event)) return;
-      const files = [...(input.files || [])];
-      if (!state.busy && files.length <= 1) return;
-      event.stopImmediatePropagation();
-      if (!state.busy) void ctMediaQueuePhotos(input, media, files);
-    }, true);
-    // Home's submit is in oS.actionRight; modal submit is its sibling and
-    // reply composers use a role=form ancestor with a Ctrl/Cmd+Enter handler.
-    const replyForm = media.root.closest('[role="form"]');
-    const parent = media.root.parentElement;
-    const scope = replyForm || (parent?.querySelector('textarea#public-tweet-input,textarea#public-modal-tweet-input') ? parent : media.root);
-    scope.addEventListener('click', event => {
-      if (!state.busy || event.target.closest('[data-ct-local-ui="media-upload"]')) return;
-      const button = event.target.closest('button,input');
-      if (button && (media.root.contains(button) || replyForm?.contains(button) ||
-          button.matches('#public-tweet-submit-btn,#public-modal-tweet-submit-btn'))) {
-        event.preventDefault(); event.stopImmediatePropagation();
-      }
-    }, true);
-    scope.addEventListener('keydown', event => {
-      if (state.busy && (event.ctrlKey || event.metaKey) && event.key === 'Enter' && event.target.matches('textarea')) {
-        event.preventDefault(); event.stopImmediatePropagation();
-      }
-    }, true);
-    scope.addEventListener('submit', event => {
-      if (state.busy) { event.preventDefault(); event.stopImmediatePropagation(); }
-    }, true);
-  }
-
   function ctMediaSlides(grid) {
-    if (!grid.matches('div.grid.gap-0\\.5.rounded-2xl.overflow-hidden.border') ||
-        !grid.closest('main,article') || grid.closest('[data-ct-local-ui],blockquote,[aria-label^="Quoted post"]')) return [];
+    if (!grid?.matches('div.flex.w-full.snap-x.snap-mandatory.overflow-x-auto.overscroll-x-contain') ||
+        !grid.closest('main,article') || grid.closest('[data-ct-local-ui],[data-ct-owned]') ||
+        !grid.parentElement?.matches('div.relative.overflow-hidden.rounded-2xl.border.bg-black')) return [];
     const slides = [...grid.children];
-    if (slides.length < 2 || slides.some(slide => !slide.matches('div.relative.overflow-hidden') ||
-        slide.children.length !== 1 || !slide.firstElementChild.matches('img[alt="Attached media"].cursor-pointer'))) return [];
-    return slides;
+    if (slides.length < 2 || slides.length > 16 || slides.some(slide =>
+        !slide.matches('button[type="button"].relative.w-full.min-w-full.shrink-0.snap-start.bg-black') ||
+        slide.children.length !== 1 || !slide.firstElementChild.matches('img.h-full.w-full.object-cover') ||
+        !ctMediaQualityURL(slide.firstElementChild.src))) return [];
+    const sources = slides.map(slide => slide.firstElementChild.src);
+    return new Set(sources).size === sources.length ? slides : [];
   }
-  function ctMediaCarouselIndex(state) {
-    const width = state.grid.clientWidth;
-    return width ? Math.max(0, Math.min(state.slides.length - 1, Math.round(state.grid.scrollLeft / width))) : state.index;
-  }
-  function ctMediaUpdateCarousel(state) {
-    state.index = ctMediaCarouselIndex(state);
-    const count = `${state.index + 1} / ${state.slides.length}`;
-    if (state.count.textContent !== count) state.count.textContent = count;
-    if (state.prev.disabled !== (state.index === 0)) state.prev.disabled = state.index === 0;
-    if (state.next.disabled !== (state.index === state.slides.length - 1)) state.next.disabled = state.index === state.slides.length - 1;
-  }
-  function ctMediaMoveCarousel(state, index) {
-    state.index = Math.max(0, Math.min(state.slides.length - 1, index));
-    const left = state.index * state.grid.clientWidth;
-    const behavior = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-    if (typeof state.grid.scrollTo === 'function') state.grid.scrollTo({ left, behavior });
-    else state.grid.scrollLeft = left;
-    // Native scrolling emits scroll events while moving; keep an immediate
-    // update as well for keyboard access and browsers without smooth scrolling.
-    const count = `${state.index + 1} / ${state.slides.length}`;
-    if (state.count.textContent !== count) state.count.textContent = count;
-    state.prev.disabled = state.index === 0;
-    state.next.disabled = state.index === state.slides.length - 1;
-  }
-  function ctMediaRemoveCarousel(state) {
-    state.grid.classList.remove('ct-media-carousel');
-    for (const [name, value] of state.attributes) {
-      if (value === null) state.grid.removeAttribute(name);
-      else state.grid.setAttribute(name, value);
-    }
-    state.grid.removeEventListener('scroll', state.onScroll);
-    state.grid.removeEventListener('keydown', state.onKey);
-    state.grid.removeEventListener('click', state.onClick, true);
-    state.resize?.disconnect();
-    state.controls.remove();
-    ctMediaCarousels.delete(state.grid);
-  }
-  function ctMediaApplyCarousel(state) {
-    const grid = state.grid;
-    if (!grid.classList.contains('ct-media-carousel')) grid.classList.add('ct-media-carousel');
-    const attributes = {
-      tabindex: '0', role: 'region',
-      'aria-label': ctMediaJapanese() ? '投稿の写真' : 'Post photos',
-      'aria-roledescription': ctMediaJapanese() ? 'カルーセル' : 'carousel'
-    };
-    for (const [name, value] of Object.entries(attributes)) {
-      if (grid.getAttribute(name) !== value) grid.setAttribute(name, value);
-    }
-  }
-  function ctMediaEnhanceCarousel(grid) {
+  function ctMediaObserveGallery(grid) {
     const slides = ctMediaSlides(grid);
     if (!slides.length) return;
-    const existing = ctMediaCarousels.get(grid);
-    if (existing) {
-      existing.slides = slides;
-      ctMediaApplyCarousel(existing);
-      if (!existing.controls.isConnected) grid.after(existing.controls);
-      ctMediaUpdateCarousel(existing);
-      return;
-    }
-    const controls = document.createElement('div');
-    controls.className = 'ct-media-carousel-controls';
-    controls.dataset.ctLocalUi = 'media-carousel';
-    const prev = document.createElement('button');
-    const next = document.createElement('button');
-    const count = document.createElement('span');
-    prev.type = next.type = 'button';
-    prev.textContent = '‹'; next.textContent = '›';
-    prev.setAttribute('aria-label', ctMediaJapanese() ? '前の写真' : 'Previous photo');
-    next.setAttribute('aria-label', ctMediaJapanese() ? '次の写真' : 'Next photo');
-    count.setAttribute('role', 'status');
-    count.setAttribute('aria-live', 'polite');
-    controls.append(prev, count, next);
-    controls.addEventListener('click', event => event.stopPropagation());
-    const state = { grid, slides, controls, prev, next, count, index: 0,
-      attributes: ['tabindex', 'role', 'aria-label', 'aria-roledescription'].map(name => [name, grid.getAttribute(name)]) };
-    prev.addEventListener('click', () => ctMediaMoveCarousel(state, state.index - 1));
-    next.addEventListener('click', () => ctMediaMoveCarousel(state, state.index + 1));
-    state.onScroll = () => ctMediaUpdateCarousel(state);
-    state.onKey = event => {
-      if (event.target !== grid || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-      event.preventDefault(); event.stopPropagation();
-      const index = event.key === 'Home' ? 0 : event.key === 'End' ? state.slides.length - 1 :
-        state.index + (event.key === 'ArrowRight' ? 1 : -1);
-      ctMediaMoveCarousel(state, index);
-    };
-    grid.addEventListener('scroll', state.onScroll, { passive: true });
-    grid.addEventListener('keydown', state.onKey);
+    const existing = ctMediaGalleries.get(grid);
+    if (existing) { existing.slides = slides; existing.shell.classList.add('ct-media-native-gallery'); return; }
+    // Record the native opener only. Its scroll snap, dots, keyboard/click
+    // handlers and counts remain untouched; no second inline carousel is made.
+    const state = { grid, slides, shell: grid.parentElement };
+    state.shell.classList.add('ct-media-native-gallery');
     state.onClick = event => {
-      const index = state.slides.findIndex(slide => slide.firstElementChild === event.target);
+      const button = event.target.closest?.('button');
+      const index = ctMediaSlides(grid).indexOf(button);
       if (index >= 0) ctMediaPendingViewer = { state, index, at: Date.now(), context: ctMediaPhotoContext() };
     };
     grid.addEventListener('click', state.onClick, true);
-    ctMediaApplyCarousel(state);
-    grid.after(controls);
-    if (typeof ResizeObserver === 'function') {
-      state.width = grid.clientWidth;
-      state.resize = new ResizeObserver(() => {
-        const width = grid.clientWidth;
-        if (!width || width === state.width) return;
-        state.width = width;
-        // Height-only image loads must not restart scrolling or undo a swipe.
-        const left = state.index * width;
-        if (typeof grid.scrollTo === 'function') grid.scrollTo({ left, behavior: 'auto' });
-        else grid.scrollLeft = left;
-      });
-      state.resize.observe(grid);
-    }
-    ctMediaCarousels.set(grid, state);
-    ctMediaUpdateCarousel(state);
+    ctMediaGalleries.set(grid, state);
+  }
+  function ctMediaRemoveGallery(state) {
+    state.shell.classList.remove('ct-media-native-gallery');
+    state.grid.removeEventListener('click', state.onClick, true);
+    ctMediaGalleries.delete(state.grid);
+    if (ctMediaPendingViewer?.state === state) ctMediaPendingViewer = null;
+  }
+  function ctMediaNativePhotoViewer(dialog) {
+    if (!dialog?.matches('div[role="dialog"][aria-modal="true"]:is([aria-label="Media viewer"],[aria-label="写真・動画ビューア"])') ||
+        !dialog.classList.contains('flex') || !dialog.classList.contains('flex-col') ||
+        dialog.closest('[data-ct-local-ui],[data-ct-owned]')) return null;
+    const stage = [...dialog.children].find(el =>
+      el.matches('div.relative.flex.flex-1.min-h-0.items-center.justify-center'));
+    const image = stage && [...stage.children].find(el => el.matches('img.max-h-full.max-w-full.select-none.object-contain'));
+    const prev = stage && [...stage.children].find(el => el.matches('button[type="button"].absolute.left-3') &&
+      el.querySelector(':scope > svg.lucide-chevron-left'));
+    const next = stage && [...stage.children].find(el => el.matches('button[type="button"].absolute.right-3') &&
+      el.querySelector(':scope > svg.lucide-chevron-right'));
+    const header = [...dialog.children].find(el => el.matches('div.flex.items-center.justify-between.shrink-0') &&
+      el.querySelector(':scope > button[type="button"] > svg.lucide-x') && el.querySelector(':scope > span[aria-live="polite"]'));
+    const position = /^(\d+)\s*\/\s*(\d+)$/.exec(header?.querySelector(':scope > span[aria-live="polite"]')?.textContent.trim() || '');
+    const index = position ? Number(position[1]) - 1 : -1, total = position ? Number(position[2]) : 0;
+    return stage && image && prev && next && header && index >= 0 && index < total && total <= 16
+      ? { stage, image, prev, next, header, index, total } : null;
   }
   function ctMediaClearViewer() {
     if (!ctMediaViewer) return;
@@ -6279,12 +6057,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     clearTimeout(viewer.requestTimer);
     ctMediaResetPhotoMotion(viewer);
     viewer.stage?.classList.remove('ct-media-swipe-stage');
-    viewer.controls.remove();
-    document.removeEventListener('keydown', viewer.onKey, true);
-    viewer.dialog.removeEventListener('touchstart', viewer.onTouchStart);
-    viewer.dialog.removeEventListener('touchmove', viewer.onTouchMove);
-    viewer.dialog.removeEventListener('touchend', viewer.onTouchEnd);
-    viewer.dialog.removeEventListener('touchcancel', viewer.onCancel);
+    viewer.dialog.removeEventListener('click', viewer.onControlClick, true);
+    viewer.dialog.removeEventListener('touchstart', viewer.onTouchStart, true);
+    viewer.dialog.removeEventListener('touchmove', viewer.onTouchMove, true);
+    viewer.dialog.removeEventListener('touchend', viewer.onTouchEnd, true);
+    viewer.dialog.removeEventListener('touchcancel', viewer.onCancel, true);
     for (const [name, handler] of [['pointerdown', viewer.onPointerStart], ['pointermove', viewer.onPointerMove],
         ['pointerup', viewer.onPointerEnd], ['pointercancel', viewer.onCancel], ['lostpointercapture', viewer.onCancel],
         ['click', viewer.onClick]]) if (handler) viewer.dialog.removeEventListener(name, handler, name === 'click');
@@ -6294,6 +6071,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     viewer.dialog.removeEventListener('dragstart', viewer.onDragStart);
     viewer.reduce?.removeEventListener?.('change', viewer.onReduce);
     ctMediaClearPhotoDecode(viewer);
+    if (ctMediaPendingViewer?.state === viewer.state) ctMediaPendingViewer = null;
     ctMediaViewer = null;
   }
   function ctMediaPhotoContext() {
@@ -6336,7 +6114,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const wanted = new Set([viewer.index - 1, viewer.index, viewer.index + 1].filter(index => slides[index]));
     const photos = viewer.decodedPhotos ||= new Map();
     for (const index of photos.keys()) if (!wanted.has(index)) photos.delete(index);
-    const preview = viewer.dialog.querySelector('img[alt="Media preview"]');
+    const preview = ctMediaNativePhotoViewer(viewer.dialog)?.image;
     for (const index of wanted) {
       const source = slides[index].firstElementChild.src;
       if (photos.get(index)?.source === source) continue;
@@ -6356,7 +6134,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctMediaPhotoLayer(viewer, target) {
     if (viewer.motion) return viewer.motion;
-    const image = viewer.dialog.querySelector('img[alt="Media preview"]');
+    const image = ctMediaNativePhotoViewer(viewer.dialog)?.image;
     // Only add presentation inside the verified native stage; React keeps its
     // image, src, click handlers, close button and backdrop throughout.
     if (!viewer.stage || image?.parentElement !== viewer.stage ||
@@ -6397,23 +6175,28 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (viewer.motion === motion) motion.track.style.transform = `translate3d(calc(-100% + ${motion.offset}px),0,0)`;
     });
   }
-  function ctMediaFinishPhoto(viewer, index, commit) {
+  function ctMediaFinishPhoto(viewer, index, commit, invokeNative = true) {
     if (!ctMediaPhotoViewerValid(viewer)) { ctMediaClearViewer(); return; }
     const motion = viewer.motion;
     const oldIndex = viewer.index;
     const image = ctMediaSlides(viewer.state.grid)[index]?.firstElementChild;
     if (commit && image) {
       viewer.requestedIndex = index;
-      viewer.prev.disabled = viewer.next.disabled = true;
+      if (motion) { motion.startSource = motion.image.src; motion.targetSource = image.src; }
       viewer.requestTimer = setTimeout(() => {
         if (ctMediaViewer !== viewer) return;
         viewer.requestedIndex = null;
         ctMediaResetPhotoMotion(viewer);
         ctMediaEnhanceViewer();
       }, 1600);
-      image.click(); ctMediaEnhanceViewer();
+      if (invokeNative) {
+        viewer.commitAction = true;
+        try { (index > oldIndex ? viewer.next : viewer.prev).click(); }
+        finally { viewer.commitAction = false; }
+        ctMediaEnhanceViewer();
+      }
     }
-    if (!motion) return;
+    if (!motion || viewer.motion !== motion) return;
     cancelAnimationFrame(motion.frame); motion.frame = 0;
     if (motion.offset != null) motion.track.style.transform = `translate3d(calc(-100% + ${motion.offset}px),0,0)`;
     // Establish the starting transform once, then let the compositor settle it.
@@ -6441,7 +6224,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctMediaStartPhotoGesture(viewer, event, point) {
     if (!ctMediaPhotoViewerValid(viewer) || viewer.motion || viewer.requestedIndex != null || ctPhotoViewportZoomed() || viewer.pinch ||
-        !event.target.matches?.('img[alt="Media preview"]')) return;
+        event.target !== ctMediaNativePhotoViewer(viewer.dialog)?.image) return;
     viewer.touch = { x: point.clientX, y: point.clientY, at: performance.now(), dx: 0, locked: false,
       pointer: event.pointerId, width: viewer.stage?.clientWidth || window.innerWidth };
   }
@@ -6488,7 +6271,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctMediaCenterViewers() {
     for (const [dialog, state] of ctMediaCenteredViewers) {
-      if (dialog.isConnected && dialog.querySelector('img[alt="Media preview"]')) continue;
+      if (dialog.isConnected && ctMediaNativePhotoViewer(dialog)) continue;
       dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed');
       state.stage.classList.remove('ct-media-viewer-stage');
       state.header?.classList.remove('ct-media-viewer-header');
@@ -6496,13 +6279,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
       ctMediaCenteredViewers.delete(dialog);
     }
-    for (const dialog of document.querySelectorAll('div[role="dialog"][aria-modal="true"][aria-label="Media viewer"]')) {
-      const image = dialog.querySelector('img[alt="Media preview"]');
-      const stage = image?.parentElement;
-      if (!stage || stage.parentElement !== dialog) continue;
+    for (const dialog of document.querySelectorAll('div[role="dialog"][aria-modal="true"]:is([aria-label="Media viewer"],[aria-label="写真・動画ビューア"])')) {
+      const native = ctMediaNativePhotoViewer(dialog);
+      if (!native) continue;
+      const { image, stage, header } = native;
       const previous = ctMediaCenteredViewers.get(dialog);
       if (previous && previous.stage !== stage) previous.stage.classList.remove('ct-media-viewer-stage');
-      const header = [...dialog.children].find(el => el !== stage && el.querySelector('[aria-label="Close media viewer"]'));
       dialog.classList.add('ct-media-centered-viewer');
       // Contained native viewers remain inside their existing modal. Only the
       // verified fixed viewer follows the visible viewport on mobile browsers.
@@ -6755,70 +6537,43 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ctMediaVideos.delete(state.video);
   }
   function ctMediaEnhanceViewer() {
-    const active = ctMediaViewer;
-    if (active && !ctMediaPhotoViewerValid(active)) ctMediaClearViewer();
-    const pending = ctMediaPendingViewer;
-    if (!pending || pending.context !== ctMediaPhotoContext() || document.hidden ||
-        !pending.state.grid.isConnected || Date.now() - pending.at > 5000) return;
-    // Native commits can arrive after our bounded request has expired. With no
-    // outstanding request, the native image is the authority for the counter.
-    if (ctMediaViewer?.state === pending.state && ctMediaViewer.requestedIndex == null) {
-      const source = ctMediaViewer.dialog.querySelector('img[alt="Media preview"]')?.src;
-      const actual = ctMediaSlides(pending.state.grid).findIndex(slide => slide.firstElementChild.src === source);
-      if (actual >= 0) pending.index = actual;
+    let viewer = ctMediaViewer;
+    if (viewer && (!ctMediaPhotoViewerValid(viewer) || !ctMediaNativePhotoViewer(viewer.dialog))) {
+      ctMediaClearViewer(); viewer = null;
     }
-    const source = pending.state.slides[pending.index]?.firstElementChild?.src;
-    if (!source) return;
-    const dialog = [...document.querySelectorAll('div[role="dialog"][aria-modal="true"][aria-label="Media viewer"]')]
-      .find(el => el.querySelector('img[alt="Media preview"]')?.src === source);
-    if (!dialog) return;
-    if (ctMediaViewer?.dialog !== dialog || ctMediaViewer?.state !== pending.state) {
-      ctMediaClearViewer();
-      const controls = document.createElement('div');
-      controls.className = 'ct-media-carousel-controls ct-media-viewer-controls';
-      controls.dataset.ctLocalUi = 'media-viewer';
-      const prev = document.createElement('button');
-      const next = document.createElement('button');
-      const count = document.createElement('span');
-      prev.type = next.type = 'button';
-      prev.textContent = '‹'; next.textContent = '›';
-      prev.setAttribute('aria-label', ctMediaJapanese() ? '前の写真' : 'Previous photo');
-      next.setAttribute('aria-label', ctMediaJapanese() ? '次の写真' : 'Next photo');
-      count.setAttribute('role', 'status');
-      count.setAttribute('aria-live', 'polite');
-      controls.append(prev, count, next);
-      controls.addEventListener('click', event => event.stopPropagation());
-      const preview = dialog.querySelector('img[alt="Media preview"]');
-      const stage = preview?.parentElement !== dialog && preview?.parentElement?.parentElement === dialog ? preview.parentElement : null;
-      const viewer = { dialog, state: pending.state, controls, prev, next, count, index: pending.index,
-        stage, pointers: new Set(), pinch: false, context: pending.context,
-        sources: ctMediaSlides(pending.state.grid).map(slide => slide.firstElementChild.src).join('\n') };
+    if (!viewer) {
+      const pending = ctMediaPendingViewer;
+      if (!pending || pending.context !== ctMediaPhotoContext() || document.hidden ||
+          !pending.state.grid.isConnected || Date.now() - pending.at > 5000) return;
+      const slides = ctMediaSlides(pending.state.grid);
+      const source = slides[pending.index]?.firstElementChild.src;
+      if (!source) return;
+      const dialog = [...document.querySelectorAll('div[role="dialog"][aria-modal="true"]:is([aria-label="Media viewer"],[aria-label="写真・動画ビューア"])')]
+        .find(el => ctMediaNativePhotoViewer(el)?.image.src === source);
+      const native = ctMediaNativePhotoViewer(dialog);
+      if (!native || native.total !== slides.length || native.index !== pending.index) return;
+      viewer = { dialog, state: pending.state, index: pending.index, ...native,
+        pointers: new Set(), pinch: false, context: pending.context,
+        sources: slides.map(slide => slide.firstElementChild.src).join('\n') };
       viewer.reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)');
       viewer.onReduce = () => {
         if (viewer.reduce.matches) { ctMediaResetPhotoMotion(viewer); ctMediaClearPhotoDecode(viewer); }
         ctMediaEnhanceViewer();
       };
       viewer.reduce?.addEventListener?.('change', viewer.onReduce);
-      stage?.classList.add('ct-media-swipe-stage');
-      const move = index => {
-        const slides = ctMediaSlides(viewer.state.grid);
-        if (!ctMediaPhotoViewerValid(viewer)) { ctMediaClearViewer(); return; }
-        if (viewer.motion || viewer.requestedIndex != null) return;
-        index = Math.max(0, Math.min(slides.length - 1, index));
-        if (index === viewer.index) return;
-        ctMediaResetPhotoMotion(viewer);
+      viewer.stage.classList.add('ct-media-swipe-stage');
+      viewer.onControlClick = event => {
+        const button = event.target.closest?.('button');
+        if (![viewer.prev, viewer.next].includes(button) || viewer.commitAction) return;
+        if (viewer.motion || viewer.requestedIndex != null) {
+          event.preventDefault(); event.stopImmediatePropagation(); return;
+        }
+        const index = viewer.index + (button === viewer.next ? 1 : -1);
+        if (index < 0 || index >= ctMediaSlides(viewer.state.grid).length) return;
         ctMediaPhotoLayer(viewer, index);
-        ctMediaFinishPhoto(viewer, index, true);
-      };
-      prev.addEventListener('click', () => move(viewer.index - 1));
-      next.addEventListener('click', () => move(viewer.index + 1));
-      viewer.onKey = event => {
-        if (!dialog.isConnected || event.altKey || event.ctrlKey || event.metaKey ||
-            event.target.closest?.('input,textarea,[contenteditable="true"]') ||
-            !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault(); event.stopPropagation();
-        move(event.key === 'Home' ? 0 : event.key === 'End' ? viewer.state.slides.length - 1 :
-          viewer.index + (event.key === 'ArrowRight' ? 1 : -1));
+        // The original click continues to React once. Only presentation and
+        // late-commit tracking are added; native controls/counters stay native.
+        ctMediaFinishPhoto(viewer, index, true, false);
       };
       viewer.onCancel = event => {
         if (event.type === 'lostpointercapture') {
@@ -6827,24 +6582,25 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         }
         viewer.pointers.delete(event.pointerId);
         if (!viewer.pointers.size) viewer.pinch = false;
+        if (viewer.nativeTouch) viewer.nativeTouch.cancelled = true;
         ctMediaCancelPhotoGesture(viewer);
       };
       viewer.onPageHide = () => {
         viewer.pageActive = false;
         ctMediaCancelPhotoGesture(viewer); ctMediaClearPhotoDecode(viewer);
-        viewer.pointers.clear(); viewer.pinch = false;
+        viewer.pointers.clear(); viewer.pinch = false; viewer.nativeTouch = null;
       };
       viewer.onPageShow = () => { viewer.pageActive = true; ctMediaWarmPhotoDecode(viewer); };
       viewer.onVisibility = () => { if (document.hidden) viewer.onPageHide(); else viewer.onPageShow(); };
-      viewer.onDragStart = event => { if (viewer.touch && event.target.matches?.('img[alt="Media preview"]')) event.preventDefault(); };
-      dialog.addEventListener('dragstart', viewer.onDragStart);
+      viewer.onDragStart = event => { if (viewer.touch && event.target === viewer.image) event.preventDefault(); };
       viewer.onClick = event => {
         if (Date.now() < (viewer.suppressClickUntil || 0) &&
-            (event.target === viewer.stage || event.target.matches?.('img[alt="Media preview"]'))) {
+            (event.target === viewer.stage || event.target === viewer.image)) {
           event.preventDefault(); event.stopImmediatePropagation();
         }
       };
-      if (typeof window.PointerEvent === 'function') {
+      const pointer = typeof window.PointerEvent === 'function';
+      if (pointer) {
         viewer.onPointerStart = event => {
           if (event.pointerType !== 'mouse') {
             viewer.pointers.add(event.pointerId);
@@ -6863,69 +6619,87 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         };
         for (const [name, handler] of [['pointerdown', viewer.onPointerStart], ['pointermove', viewer.onPointerMove],
             ['pointerup', viewer.onPointerEnd], ['pointercancel', viewer.onCancel], ['lostpointercapture', viewer.onCancel]]) dialog.addEventListener(name, handler);
-      } else {
-        viewer.onTouchStart = event => {
-          if (event.touches.length === 1 && !viewer.pinch) ctMediaStartPhotoGesture(viewer, event, event.touches[0]);
-          else { viewer.pinch = true; ctMediaCancelPhotoGesture(viewer); }
-        };
-        viewer.onTouchMove = event => {
-          if (event.touches.length === 1 && !viewer.pinch) ctMediaDragPhoto(viewer, event, event.touches[0]);
-          else { viewer.pinch = true; ctMediaCancelPhotoGesture(viewer); }
-        };
-        viewer.onTouchEnd = event => {
-          if (viewer.pinch) ctMediaCancelPhotoGesture(viewer);
-          else if (event.changedTouches.length === 1) ctMediaEndPhotoGesture(viewer, event, event.changedTouches[0]);
-          if (!event.touches?.length) viewer.pinch = false;
-        };
-        dialog.addEventListener('touchstart', viewer.onTouchStart, { passive: true });
-        dialog.addEventListener('touchmove', viewer.onTouchMove, { passive: false });
-        dialog.addEventListener('touchend', viewer.onTouchEnd, { passive: true });
-        dialog.addEventListener('touchcancel', viewer.onCancel);
       }
+      // Native v2.2.3 compares only start/end X, including pinch and vertical
+      // gestures. Capture blocks that handler only for a gesture already owned
+      // here, or for zoom/pinch/vertical intent, without cancelling browser zoom.
+      viewer.onTouchStart = event => {
+        const point = event.touches?.[0];
+        const cancelled = event.touches?.length !== 1 || ctPhotoViewportZoomed();
+        viewer.nativeTouch = { x: point?.clientX, y: point?.clientY, cancelled };
+        if (cancelled) { viewer.pinch = true; ctMediaCancelPhotoGesture(viewer); event.stopPropagation(); }
+        else if (!pointer) ctMediaStartPhotoGesture(viewer, event, point);
+      };
+      viewer.onTouchMove = event => {
+        const point = event.touches?.[0], gesture = viewer.nativeTouch;
+        if (event.touches?.length !== 1 || ctPhotoViewportZoomed()) {
+          if (gesture) gesture.cancelled = true;
+          viewer.pinch = true; ctMediaCancelPhotoGesture(viewer); event.stopPropagation(); return;
+        }
+        if (gesture && point && Math.abs(point.clientY - gesture.y) > 10 &&
+            Math.abs(point.clientY - gesture.y) >= Math.abs(point.clientX - gesture.x)) gesture.cancelled = true;
+        if (!pointer && !gesture?.cancelled) ctMediaDragPhoto(viewer, event, point);
+      };
+      viewer.onTouchEnd = event => {
+        if (!ctMediaPhotoViewerValid(viewer)) { event.stopPropagation(); ctMediaClearViewer(); return; }
+        const gesture = viewer.nativeTouch, point = event.changedTouches?.[0];
+        const vertical = gesture && point && Math.abs(point.clientY - gesture.y) > 10 &&
+          Math.abs(point.clientY - gesture.y) >= Math.abs(point.clientX - gesture.x);
+        const blocked = viewer.pinch || gesture?.cancelled || vertical || ctPhotoViewportZoomed();
+        if (blocked) ctMediaCancelPhotoGesture(viewer);
+        else if (!pointer && point) ctMediaEndPhotoGesture(viewer, event, point);
+        if (blocked || Date.now() < (viewer.suppressClickUntil || 0)) event.stopPropagation();
+        if (!event.touches?.length) { viewer.nativeTouch = null; viewer.pinch = false; }
+      };
+      dialog.addEventListener('touchstart', viewer.onTouchStart, { capture: true, passive: true });
+      dialog.addEventListener('touchmove', viewer.onTouchMove, { capture: true, passive: false });
+      dialog.addEventListener('touchend', viewer.onTouchEnd, { capture: true, passive: true });
+      dialog.addEventListener('touchcancel', viewer.onCancel, true);
+      dialog.addEventListener('dragstart', viewer.onDragStart);
+      dialog.addEventListener('click', viewer.onControlClick, true);
       dialog.addEventListener('click', viewer.onClick, true);
       document.addEventListener('visibilitychange', viewer.onVisibility);
       window.addEventListener('pagehide', viewer.onPageHide);
       window.addEventListener('pageshow', viewer.onPageShow);
-      document.addEventListener('keydown', viewer.onKey, true);
-      dialog.append(controls);
       ctMediaViewer = viewer;
-      // rE reuses its image and React can commit src after click() returns. The
-      // shared UI observer intentionally does not watch src, so watch this one
-      // verified dialog until it closes, instead of polling or rewriting src.
-      viewer.observer = new MutationObserver(() => ctMediaEnhanceViewer());
-      viewer.observer.observe(dialog, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+      viewer.observer = new MutationObserver(records => {
+        // A native keyboard action may leave and return to the old source before
+        // this observer runs. Retain that source history to release stale motion.
+        const motion = viewer.motion;
+        if (motion?.targetSource && records.some(record => record.target === viewer.image &&
+            ctMediaQualityURL(record.oldValue) === motion.targetSource)) motion.destinationSeen = true;
+        ctMediaEnhanceViewer();
+      });
+      viewer.observer.observe(dialog, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['src'] });
     }
-    ctMediaViewer.index = pending.index;
-    ctMediaWarmPhotoDecode(ctMediaViewer);
-    if (ctMediaViewer.requestedIndex === pending.index) {
-      ctMediaViewer.requestedIndex = null;
-      clearTimeout(ctMediaViewer.requestTimer);
+    const native = ctMediaNativePhotoViewer(viewer.dialog);
+    const slides = ctMediaSlides(viewer.state.grid);
+    const actual = slides.findIndex(slide => slide.firstElementChild.src === native?.image.src);
+    if (actual < 0 || native.total !== slides.length || native.index !== actual || native.stage !== viewer.stage || native.image !== viewer.image ||
+        native.prev !== viewer.prev || native.next !== viewer.next) { ctMediaClearViewer(); return; }
+    const motion = viewer.motion;
+    if (motion?.targetSource) {
+      if (native.image.src === motion.targetSource) motion.destinationSeen = true;
+      else if (motion.destinationSeen || native.image.src !== motion.startSource) {
+        ctMediaResetPhotoMotion(viewer); viewer.requestedIndex = null; clearTimeout(viewer.requestTimer);
+      }
     }
-    const count = `${pending.index + 1} / ${pending.state.slides.length}`;
-    if (ctMediaViewer.count.textContent !== count) ctMediaViewer.count.textContent = count;
-    const busy = !!ctMediaViewer.motion || ctMediaViewer.requestedIndex != null;
-    ctMediaViewer.prev.disabled = busy || pending.index === 0;
-    ctMediaViewer.next.disabled = busy || pending.index === pending.state.slides.length - 1;
+    viewer.index = actual;
+    ctMediaWarmPhotoDecode(viewer);
+    if (viewer.requestedIndex === actual) { viewer.requestedIndex = null; clearTimeout(viewer.requestTimer); }
+    // The native index label and disabled states are authoritative.
   }
   function ctMediaStyles() {
     if (document.getElementById('ct-media-style')) return;
     const style = document.createElement('style');
     style.id = 'ct-media-style';
     style.textContent = `
-      .ct-media-carousel { display:flex!important; gap:0!important; width:100%; min-width:0; overflow-x:auto!important; overflow-y:hidden!important; scroll-snap-type:x mandatory; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; }
-      .ct-media-carousel > div { flex:0 0 100%; min-width:0; aspect-ratio:auto!important; scroll-snap-align:start; scroll-snap-stop:always; display:flex; align-items:center; justify-content:center; }
-      .ct-media-carousel > div > img { width:100%; height:auto!important; max-height:min(70vh, 510px); object-fit:contain!important; }
-      .ct-media-carousel:focus-visible { outline:3px solid var(--color-tl-app-primary,#1688d4); outline-offset:2px; }
-      .ct-media-carousel-controls { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:4px; font:13px/1.4 system-ui,sans-serif; color:var(--color-tl-app-text-muted,#657786); }
-      .ct-media-carousel-controls button { min-width:44px; min-height:44px; border:0; border-radius:50%; color:inherit; background:transparent; font:26px/1 system-ui,sans-serif; cursor:pointer; }
-      .ct-media-carousel-controls button:hover:not(:disabled) { background:var(--color-tl-app-bg,#edf3f8); }
-      .ct-media-carousel-controls button:disabled { opacity:.3; cursor:default; }
-      .ct-media-carousel-controls button:focus-visible,.ct-media-upload-status button:focus-visible { outline:3px solid var(--color-tl-app-primary,#1688d4); }
+      .ct-media-native-gallery > div.absolute.bottom-3.flex > button { min-width:44px; min-height:44px; }
       .ct-media-centered-viewer { overflow:hidden!important; }
       .ct-media-viewport-viewer { inset:auto!important; top:var(--ct-media-view-top,0)!important; left:var(--ct-media-view-left,0)!important; width:var(--ct-media-view-width,100vw)!important; height:var(--ct-media-view-height,100dvh)!important; }
       .ct-media-centered-viewer > .ct-media-viewer-header { position:absolute!important; top:0; left:0; right:0; z-index:2; padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left))!important; pointer-events:none; }
       .ct-media-centered-viewer > .ct-media-viewer-header button { pointer-events:auto; min-width:44px; min-height:44px; }
-      .ct-media-photo-quality { position:absolute; top:max(12px,env(safe-area-inset-top)); right:max(12px,env(safe-area-inset-right)); z-index:3; display:flex; align-items:center; flex-wrap:wrap; gap:8px; max-width:calc(100% - 88px); color:#fff; font:12px/1.4 system-ui,sans-serif; }
+      .ct-media-photo-quality { position:absolute; bottom:max(12px,env(safe-area-inset-bottom)); right:max(12px,env(safe-area-inset-right)); z-index:3; display:flex; align-items:center; flex-wrap:wrap; gap:8px; max-width:calc(100% - 88px); color:#fff; font:12px/1.4 system-ui,sans-serif; }
       .ct-media-photo-quality a { display:inline-flex; align-items:center; min-height:44px; padding:0 8px; color:inherit; background:#0009; border-radius:4px; text-decoration:none; }
       .ct-media-photo-quality a:focus-visible { outline:3px solid #fff; outline-offset:2px; }
       .ct-media-photo-resolution { padding:5px 8px; background:#0009; border-radius:4px; white-space:nowrap; }
@@ -6939,8 +6713,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-media-photo-track { display:flex; width:100%; height:100%; will-change:transform; }
       .ct-media-photo-pane { flex:0 0 100%; min-width:0; height:100%; display:flex; align-items:center; justify-content:center; box-sizing:border-box; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left)); }
       .ct-media-photo-pane img { width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; user-select:none; }
-      .ct-media-viewer-controls { position:absolute; left:0; right:0; bottom:0; z-index:2; flex-shrink:0; margin:0; padding:0 12px max(12px,env(safe-area-inset-bottom)); color:white; }
-      .ct-media-viewer-controls button:hover:not(:disabled) { background:#ffffff26; }
       .ct-media-video-shell { position:relative; }
       .ct-media-video-tools { position:absolute; top:4px; right:4px; z-index:1; display:flex; align-items:center; gap:4px; }
       .ct-media-video-resolution { padding:5px 7px; border-radius:4px; background:#0009; color:#fff; white-space:nowrap; font:12px/1.4 system-ui,sans-serif; }
@@ -6953,11 +6725,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-media-video-tools [hidden] { display:none!important; }
       .ct-media-enhanced-video:fullscreen { width:100%!important; height:100%!important; max-width:none!important; max-height:none!important; margin:0!important; object-fit:contain!important; background:#000; }
       @media(hover:hover) and (pointer:fine) { .ct-media-video-shell:not(:hover):not(:focus-within) .ct-media-video-fullscreen { opacity:.45; } }
-      @media(max-width:480px) { .ct-media-viewer-controls { gap:24px; } .ct-media-video-fullscreen { opacity:1; } }
-      .ct-media-upload-status { display:flex; align-items:center; gap:10px; font:13px/1.5 system-ui,sans-serif; color:var(--color-tl-app-text-muted,#657786); }
-      .ct-media-upload-status button { flex-shrink:0; min-height:44px; padding:5px 10px; border:1px solid var(--color-tl-app-border,#b8c5d1); border-radius:8px; color:inherit; background:transparent; cursor:pointer; }
-      .ct-media-upload-status [hidden] { display:none!important; }
-      @media(prefers-reduced-motion:reduce) { .ct-media-carousel { scroll-behavior:auto!important; } .ct-media-video-fullscreen,.ct-media-centered-viewer,.ct-media-viewer-stage > img { animation:none!important; transition:none!important; } .ct-media-viewer-stage > img { transform:none!important; opacity:1!important; } }
+      @media(max-width:480px) { .ct-media-video-fullscreen { opacity:1; } }
+      @media(prefers-reduced-motion:reduce) { .ct-media-video-fullscreen,.ct-media-centered-viewer,.ct-media-viewer-stage > img { animation:none!important; transition:none!important; } .ct-media-viewer-stage > img { transform:none!important; opacity:1!important; } }
       @media(prefers-reduced-motion:reduce) { .ct-media-photo-track { transition:none!important; } }
     `;
     document.head.append(style);
@@ -6971,32 +6740,15 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (!state.video.isConnected) ctMediaRemoveVideo(state);
       else if (state.context && !ctMediaVideoContextMatches(state)) ctMediaVideoEnd(state, true);
     }
-    for (const state of ctMediaCarousels.values()) {
-      if (!state.grid.isConnected || !ctMediaSlides(state.grid).length) ctMediaRemoveCarousel(state);
+    for (const state of ctMediaGalleries.values()) {
+      if (!state.grid.isConnected || !ctMediaSlides(state.grid).length) ctMediaRemoveGallery(state);
     }
-    const inputs = [...root.querySelectorAll?.(`input[type="file"][accept="${ctMediaPhotoAccept}"]`) || []];
-    if (root.matches?.(`input[type="file"][accept="${ctMediaPhotoAccept}"]`)) inputs.push(root);
-    for (const input of inputs) {
-      const media = ctMediaUploadRoot(input);
-      if (media) {
-        for (const [button, label] of [[media.photoButton, ctMediaJapanese() ? '写真を追加' : 'Add photos'],
-            [media.videoButton, ctMediaJapanese() ? '動画を追加' : 'Add video']]) {
-          // Current native toolbar icons have no accessible name. Preserve a
-          // future native label, but keep our own label through React updates.
-          const current = button.getAttribute('aria-label');
-          if (!current || /^(?:写真を追加|動画を追加|Add photos|Add video)$/.test(current)) {
-            if (current !== label) button.setAttribute('aria-label', label);
-            if (!button.title || /^(?:写真を追加|動画を追加|Add photos|Add video)$/.test(button.title)) {
-              if (button.title !== label) button.title = label;
-            }
-          }
-        }
-      }
-      ctMediaEnhanceInput(input);
-    }
-    const grids = [...root.querySelectorAll?.('div.grid.rounded-2xl.overflow-hidden.border') || []];
-    if (root.matches?.('div.grid.rounded-2xl.overflow-hidden.border')) grids.push(root);
-    grids.forEach(ctMediaEnhanceCarousel);
+    const inputs = [...root.querySelectorAll?.('input[type="file"][accept="image/*"][multiple]') || []];
+    if (root.matches?.('input[type="file"][accept="image/*"][multiple]')) inputs.push(root);
+    inputs.forEach(ctMediaLabelUploadControls);
+    const grids = [...root.querySelectorAll?.('div.flex.snap-x.snap-mandatory.overflow-x-auto') || []];
+    if (root.matches?.('div.flex.snap-x.snap-mandatory.overflow-x-auto')) grids.push(root);
+    grids.forEach(ctMediaObserveGallery);
     const videos = [...root.querySelectorAll?.('video[controls]') || []];
     if (root.matches?.('video[controls]')) videos.push(root);
     videos.forEach(ctMediaEnhanceVideo);
@@ -7157,7 +6909,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         try {
           handle = request({ method: 'GET', url: target, anonymous: true, redirect: 'error', responseType: 'text',
             timeout: ctNewsState.timeout, headers: { Accept: 'application/rss+xml, application/xml, text/xml' },
-            onload: response => finish(parse(response)), onerror: () => finish(null),
+            onload: response => finish(parse(response)),
+            // Stay's public Safari bridge removes its per-request message
+            // listener only when an onloadend callback is registered. Accept a
+            // final loadend as well, without replacing an earlier completion.
+            onloadend: response => finish(parse(response)), onerror: () => finish(null),
             ontimeout: () => finish(null), onabort: () => finish(null) });
           if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => {
             // A mobile bridge can resolve its request receipt before onload.
@@ -8383,5 +8139,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.21.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.22.0 loaded');
 })();

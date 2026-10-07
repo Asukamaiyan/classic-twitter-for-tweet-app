@@ -1,5 +1,15 @@
 # Changelog
 
+## All distributions v6.22.0 — 2026-10-07
+
+Validation and publication in progress.
+
+- Remove the duplicate photo batch-upload helper and inline carousel controls now provided by Tweet 2.2.3. Native selection, uploads, counters, keyboard navigation and arrows remain authoritative. The current native limit is five images.
+- Reconnect photo centering, delivered-image information and smooth fullscreen swipes to the updated native viewer. Avoid committing another slide during pinch, zoom or vertical movement; reuse native previous/next controls without adding another counter or keyboard handler.
+- Localize new native photo controls in Japanese without rewriting captions, sources or native handlers.
+- Register bounded news/API request completion callbacks so compatible Stay bridges release request listeners and accept final text-only completions. Preserve endpoint checks, credentials handling, deadlines and native news fallback.
+- Retain profile Media/Favorites, grouped notification avatar navigation, safe UI translation, classic appearance and browser-local data; these still complement the current native client.
+
 ## All distributions v6.21.0 — 2026-10-06
 
 All six editions are published as 6.21.0. Validation passes 650 tests; ordinary public code URLs and complete installation/update guides match the generated release.
