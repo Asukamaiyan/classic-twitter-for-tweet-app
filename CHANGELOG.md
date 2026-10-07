@@ -1,5 +1,19 @@
 # Changelog
 
+## All distributions v6.23.1 — 2026-10-07
+
+All six editions are published with matching code and complete guides. Move the delivered-image link and dimensions above profile-photo navigation, preventing overlap with Next and Close on narrow screens. Keep native viewers, source URLs, photo gestures and zoom handling intact. Stay was updated to 6.23.1; final footer/Close device acceptance remains pending because XCTest rejects the visible web tabs before tapping. Publication, device evidence and temporary-app cleanup are recorded in VALIDATION.md.
+
+## All distributions v6.23.0 — 2026-10-07
+
+All six 6.23.0 editions are published with matching code and complete guides. iPhone Stay update, publisher selection/persistence and profile-photo swipes were verified; the delivered-image link overlap found on the device is repaired in 6.23.1.
+
+- Choose existing Japan-news publishers per topic in a compact Publishers disclosure. Retain at least one publisher, name failed sources, and suggest checking Stay site permission only in Safari. Use existing topic RSS feeds; arbitrary feed URLs and automatic article classification are not added.
+- Keep source preferences and cache identity consistent through rapid selection changes, late reads and cross-tab updates. Failed storage writes retain the previous selection and native World news remains available.
+- Add smooth horizontal dragging to enlarged profile Media/Favorites photos while retaining the original image, quality link, counter, buttons and keys. Prepare only the current and adjacent images, fill a reverse-direction pane when its decode completes, and keep the center photo visible while it is unavailable. Cancel motion for pinch, zoom, reduced motion, close, background and changed context.
+- Translate the verified native Feed heading on public `/user/` profiles into Japanese without changing display names or post content.
+- Recheck the logged-in native client and read-only GET response schemas without saving credentials or post bodies. Tweet 2.2.3 still restores the observed detail-to-feed reading position itself, so no duplicate reading-position tool is added. No Tweet API, grant or connection host is added.
+
 ## All distributions v6.22.0 — 2026-10-07
 
 All six editions published on Greasy Fork with matching generated code and guides. An iPhone 17 Pro Max with Stay 2.9.24 was updated to 6.22.0; Yahoo/NHK news, native photo navigation, swipes and approximately 2× pinch enlargement were verified. Nikkan site permission and pinch reduction remain pending; ITmedia has not been checked on the device. XCTest crashed internally before reduction; Safari was restored and temporary test apps removed.

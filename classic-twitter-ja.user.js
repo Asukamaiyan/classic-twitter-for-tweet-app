@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.22.0
+// @version      6.23.1
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -23,6 +23,7 @@
   'use strict';
   if (document.documentElement?.dataset.ctActiveVersion) return;
   const CT_LOCALE = 'ja';
+  const CT_PLATFORM = 'chrome';
     // Shared read-only transport. Authentication stays in memory only for one lookup.
   const ctNetworkState = {
     requestTimeout: 12000,
@@ -2885,7 +2886,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.22.0';
+    document.documentElement.dataset.ctActiveVersion = '6.23.1';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -3660,10 +3661,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-viewer{box-sizing:border-box;position:fixed;inset:var(--ct-photo-view-top,0px) auto auto var(--ct-photo-view-left,0px);margin:0;padding:0;border:0;background:#000;color:#fff;width:var(--ct-photo-view-width,100vw);height:var(--ct-photo-view-height,100dvh);max-width:none;max-height:none;overflow:hidden}
       .ct-profile-viewer[open]{display:grid;grid-template-rows:minmax(0,1fr)}
       .ct-profile-viewer::backdrop{background:#000c}
-      .ct-profile-viewer-stage{box-sizing:border-box;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right))}
+      .ct-profile-viewer-stage{position:relative;box-sizing:border-box;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right));touch-action:pan-y pinch-zoom}
+      .ct-profile-viewer-zoomed .ct-profile-viewer-stage{touch-action:pan-x pan-y pinch-zoom}
       .ct-profile-viewer img{display:block;width:100%;height:100%;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
+      .ct-profile-photo-covered{opacity:0}
+      .ct-profile-photo-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+      .ct-profile-photo-track{display:flex;width:100%;height:100%;will-change:transform}
+      .ct-profile-photo-pane{box-sizing:border-box;display:grid;place-items:center;flex:0 0 100%;min-width:0;min-height:0;height:100%;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right))}
       .ct-profile-viewer-nav{position:absolute;left:env(safe-area-inset-left);right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom);display:flex;align-items:center;justify-content:space-between;padding:8px;gap:8px}
       .ct-profile-viewer-nav button{min-width:44px;min-height:44px;border:1px solid #ffffff55;border-radius:4px;color:inherit;background:transparent;font:inherit;cursor:pointer}
+      .ct-profile-viewer>.ct-media-photo-quality{bottom:calc(68px + env(safe-area-inset-bottom))}
       @media(max-width:480px){.ct-profile-row{padding:12px;gap:10px}.ct-profile-photo img,.ct-profile-video{max-height:360px}}
       @media(prefers-reduced-motion:no-preference){.ct-profile-tab,.ct-profile-control{transition:color 120ms ease,background-color 120ms ease}}
     `;
@@ -3680,6 +3687,188 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const trigger = viewer.trigger?.isConnected ? viewer.trigger :
       ctProfileState.tablist?.querySelector('button[role="tab"][aria-selected="true"]');
     if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+  }
+  function ctProfilePhotoGestures(viewer, show) {
+    const { dialog, stage, image, images } = viewer;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const pointers = new Set(), decoded = new Map(), listeners = [];
+    let touch = null, motion = null, pinch = false, queued = null, waitTimer = null, suppressUntil = 0, closed = false;
+    const context = `${location.pathname}${location.search}\n${ctProfileUID() || ''}`;
+    const valid = () => !closed && ctProfileState.viewer === viewer && dialog.isConnected &&
+      viewer.trigger?.isConnected && viewer.gallery?.isConnected && !document.hidden && ctPageActive &&
+      context === `${location.pathname}${location.search}\n${ctProfileUID() || ''}` &&
+      viewer.sources === [...viewer.gallery.querySelectorAll(':scope > .ct-profile-photo > img')].map(node => node.src).join('\n');
+    const listen = (target, name, handler, options) => { target?.addEventListener?.(name, handler, options); listeners.push([target, name, handler, options]); };
+    const reset = () => {
+      const oldTouch = touch; touch = null;
+      if (oldTouch?.pointer != null) try { oldTouch.capture?.releasePointerCapture(oldTouch.pointer); } catch {}
+      clearTimeout(waitTimer); waitTimer = null; queued = null;
+      if (!motion) return;
+      const oldMotion = motion; motion = null;
+      cancelAnimationFrame(oldMotion.frame); clearTimeout(oldMotion.timer);
+      image.removeEventListener('load', oldMotion.loaded); image.removeEventListener('error', oldMotion.loaded);
+      image.classList.remove('ct-profile-photo-covered'); oldMotion.layer.remove();
+    };
+    const cancel = () => { if (touch?.locked || pinch) suppressUntil = Date.now() + 400; reset(); };
+    const forget = () => { for (const entry of decoded.values()) entry.image.removeEventListener('load', entry.loaded); decoded.clear(); };
+    const warm = () => {
+      if (!valid() || images.length < 2 || reduce?.matches || ctPhotoViewportZoomed()) { forget(); return; }
+      const wanted = new Set([viewer.index - 1, viewer.index, viewer.index + 1].filter(index => images[index]));
+      for (const [index, entry] of decoded) if (!wanted.has(index)) { entry.image.removeEventListener('load', entry.loaded); decoded.delete(index); }
+      for (const index of wanted) {
+        if (decoded.has(index)) continue;
+        const node = document.createElement('img'); node.alt = ''; node.draggable = false; node.decoding = 'async'; node.referrerPolicy = image.referrerPolicy;
+        const entry = { image: node, ready: false, loaded: null }; decoded.set(index, entry);
+        entry.loaded = () => {
+          if (!valid() || decoded.get(index) !== entry) return;
+          entry.ready = node.complete && node.naturalWidth > 0;
+          // The finger can reverse direction after the initially opposite photo
+          // finishes decoding. Fill that pane before covering the shown image.
+          const pane = motion?.panes.get(index);
+          if (entry.ready && pane && !pane.firstElementChild) pane.append(node);
+          if (entry.ready && queued === index) { reset(); viewer.index = index; show(); warm(); }
+        };
+        const canDecode = typeof node.decode === 'function';
+        if (!canDecode) node.addEventListener('load', entry.loaded);
+        node.src = images[index].url;
+        if (canDecode) {
+          try { Promise.resolve(node.decode()).then(entry.loaded, () => {}); } catch {}
+        } else entry.loaded();
+      }
+    };
+    const layer = target => {
+      if (motion || reduce?.matches) return;
+      warm();
+      if (!decoded.get(viewer.index)?.ready || images[target] && !decoded.get(target)?.ready) return;
+      const overlay = document.createElement('div'); overlay.className = 'ct-profile-photo-layer'; overlay.setAttribute('aria-hidden', 'true');
+      const track = document.createElement('div'); track.className = 'ct-profile-photo-track';
+      const panes = new Map();
+      for (const index of [viewer.index - 1, viewer.index, viewer.index + 1]) {
+        const pane = document.createElement('div'); pane.className = 'ct-profile-photo-pane';
+        const entry = decoded.get(index); if (entry?.ready) pane.append(entry.image); track.append(pane); panes.set(index, pane);
+      }
+      overlay.append(track); stage.append(overlay); image.classList.add('ct-profile-photo-covered');
+      motion = { layer: overlay, track, panes, frame: 0, timer: null, offset: 0, loaded: null };
+      track.style.transform = 'translate3d(-100%,0,0)';
+    };
+    const offset = dx => {
+      if (!motion) return;
+      motion.offset = dx; if (motion.frame) return;
+      const current = motion;
+      current.frame = requestAnimationFrame(() => {
+        current.frame = 0;
+        if (motion === current) current.track.style.transform = `translate3d(calc(-100% + ${current.offset}px),0,0)`;
+      });
+    };
+    const settle = target => {
+      if (!valid()) { ctProfileCloseViewer(); return; }
+      const current = motion, before = viewer.index, commit = target !== before;
+      if (commit && !reduce?.matches && !decoded.get(target)?.ready) {
+        // Keep the shown photo while the destination is unavailable. Late loads
+        // can select it only within this live gesture's bounded wait.
+        reset(); queued = target; waitTimer = setTimeout(reset, 1600); warm(); return;
+      }
+      if (commit) { viewer.index = target; show(); }
+      if (!current) { warm(); return; }
+      cancelAnimationFrame(current.frame); current.frame = 0;
+      current.track.style.transform = `translate3d(calc(-100% + ${current.offset}px),0,0)`;
+      current.track.getBoundingClientRect();
+      current.track.style.transition = 'transform 220ms cubic-bezier(.22,.68,0,1)';
+      current.track.style.transform = `translate3d(${commit ? target > before ? '-200%' : '0%' : '-100%'},0,0)`;
+      current.timer = setTimeout(() => {
+        if (motion !== current) return;
+        if (!valid()) { ctProfileCloseViewer(); return; }
+        const release = () => { if (motion === current) { reset(); warm(); } };
+        if (!commit || image.complete && image.naturalWidth > 0 && image.currentSrc === images[target].url) release();
+        else {
+          current.loaded = event => {
+            if (image.src === images[target].url && (event.type === 'error' ||
+                image.complete && image.naturalWidth > 0 && image.currentSrc === images[target].url)) release();
+          };
+          image.addEventListener('load', current.loaded); image.addEventListener('error', current.loaded);
+          current.timer = setTimeout(release, 1200);
+        }
+      }, 240);
+    };
+    const start = (event, point) => {
+      if (!valid()) { ctProfileCloseViewer(); return; }
+      if (!point || images.length < 2 || motion || queued != null || pinch || ctPhotoViewportZoomed() ||
+          event.target !== image && event.target !== stage) return;
+      touch = { x: point.clientX, y: point.clientY, at: performance.now(), locked: false, pointer: event.pointerId,
+        width: stage.clientWidth || window.innerWidth };
+    };
+    const drag = (event, point) => {
+      if (!touch || !point) return;
+      if (!valid()) { ctProfileCloseViewer(); return; }
+      if (pinch || ctPhotoViewportZoomed()) { cancel(); return; }
+      const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
+      if (!touch.locked) {
+        if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { touch = null; return; }
+        if (Math.abs(dx) < 10 || Math.abs(dx) <= Math.abs(dy) * 1.5) return;
+        touch.locked = true; layer(viewer.index + (dx < 0 ? 1 : -1));
+        if (event.pointerId != null) try { event.target.setPointerCapture(event.pointerId); touch.capture = event.target; } catch {}
+      }
+      if (event.cancelable) event.preventDefault();
+      const edge = viewer.index === 0 && dx > 0 || viewer.index === images.length - 1 && dx < 0;
+      const target = viewer.index + (dx < 0 ? 1 : -1);
+      // A reversed drag may face the still-undecoded neighbor. Keep the center
+      // photo visible until that pane is ready instead of exposing a black pane.
+      offset(images[target] && !decoded.get(target)?.ready ? 0 : edge ? dx * .22 : Math.max(-touch.width, Math.min(touch.width, dx)));
+    };
+    const end = (event, point) => {
+      const current = touch; if (!current || !point) return;
+      drag(event, point); if (touch !== current) return;
+      touch = null;
+      if (current.locked) {
+        const dx = point.clientX - current.x, fast = Math.abs(dx) >= 24 && Math.abs(dx) / Math.max(1, performance.now() - current.at) > .55;
+        const target = Math.max(0, Math.min(images.length - 1, viewer.index + (dx < 0 ? 1 : -1)));
+        suppressUntil = Date.now() + 400; settle(fast || Math.abs(dx) >= Math.min(90, current.width * .18) ? target : viewer.index);
+      }
+      if (current.pointer != null) try { current.capture?.releasePointerCapture(current.pointer); } catch {}
+    };
+    const pointer = typeof window.PointerEvent === 'function';
+    if (pointer) {
+      listen(dialog, 'pointerdown', event => {
+        if (event.pointerType !== 'mouse') {
+          pointers.add(event.pointerId);
+          if (event.isPrimary === false || pointers.size > 1) { pinch = true; cancel(); return; }
+        }
+        if (event.button === 0) start(event, event);
+      });
+      listen(dialog, 'pointermove', event => { if (touch?.pointer === event.pointerId) drag(event, event); });
+      listen(dialog, 'pointerup', event => {
+        pointers.delete(event.pointerId); if (pinch) cancel(); else if (touch?.pointer === event.pointerId) end(event, event);
+        if (!pointers.size) pinch = false;
+      });
+      listen(dialog, 'pointercancel', event => { pointers.delete(event.pointerId); cancel(); if (!pointers.size) pinch = false; });
+      listen(dialog, 'lostpointercapture', event => { if (touch?.pointer === event.pointerId) cancel(); });
+    }
+    listen(dialog, 'touchstart', event => {
+      if (event.touches?.length !== 1 || ctPhotoViewportZoomed()) { pinch = true; cancel(); }
+      else if (!pointer && !pinch) start(event, event.touches[0]);
+    }, { passive: true });
+    listen(dialog, 'touchmove', event => {
+      if (event.touches?.length !== 1 || ctPhotoViewportZoomed()) { pinch = true; cancel(); }
+      else if (!pointer && !pinch) drag(event, event.touches[0]);
+    }, { passive: false });
+    listen(dialog, 'touchend', event => {
+      if (pinch || ctPhotoViewportZoomed()) cancel(); else if (!pointer) end(event, event.changedTouches?.[0]);
+      if (!event.touches?.length) pinch = false;
+    });
+    listen(dialog, 'touchcancel', event => { cancel(); pinch = !!event.touches?.length; pointers.clear(); });
+    listen(dialog, 'dragstart', event => { if (touch && event.target === image) event.preventDefault(); });
+    listen(dialog, 'click', event => {
+      if (Date.now() < suppressUntil && (event.target === image || event.target === stage)) { event.preventDefault(); event.stopImmediatePropagation(); }
+    }, true);
+    const pause = () => { cancel(); forget(); pointers.clear(); pinch = false; };
+    listen(document, 'visibilitychange', () => { if (document.hidden) pause(); else warm(); });
+    listen(window, 'pagehide', pause);
+    listen(reduce, 'change', () => { cancel(); forget(); warm(); });
+    return {
+      move: step => { cancel(); if (!valid()) { ctProfileCloseViewer(); return; } viewer.index = Math.max(0, Math.min(images.length - 1, viewer.index + step)); show(); warm(); },
+      fit: result => { dialog.classList.toggle('ct-profile-viewer-zoomed', result.zoomed); if (result.zoomed || result.changed) { cancel(); forget(); } warm(); },
+      cleanup: () => { closed = true; pause(); for (const [target, name, handler, options] of listeners) target?.removeEventListener?.(name, handler, options); }
+    };
   }
   function ctProfileOpenViewer(images, index, trigger) {
     ctProfileCloseViewer();
@@ -3701,13 +3890,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     next.setAttribute('aria-label', ctProfileText('次の写真', 'Next photo'));
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×';
     close.setAttribute('aria-label', ctProfileText('閉じる', 'Close'));
+    const viewer = { dialog, stage, image: img, images: images.map(image => ({ ...image })), index, trigger,
+      gallery: trigger.closest('.ct-profile-gallery'), sources: images.map(image => image.url).join('\n') };
     const show = () => {
-      img.src = images[index].url;
-      img.alt = ctProfileText(`写真 ${index + 1}/${images.length}`, `Photo ${index + 1}/${images.length}`);
-      count.textContent = `${index + 1} / ${images.length}`;
-      previous.disabled = index === 0; next.disabled = index === images.length - 1;
+      img.src = images[viewer.index].url;
+      img.alt = ctProfileText(`写真 ${viewer.index + 1}/${images.length}`, `Photo ${viewer.index + 1}/${images.length}`);
+      count.textContent = `${viewer.index + 1} / ${images.length}`;
+      previous.disabled = viewer.index === 0; next.disabled = viewer.index === images.length - 1;
     };
-    const move = step => { index = Math.max(0, Math.min(images.length - 1, index + step)); show(); };
+    let gestures;
+    const move = step => gestures.move(step);
     previous.onclick = () => move(-1); next.onclick = () => move(1); close.onclick = ctProfileCloseViewer;
     dialog.addEventListener('keydown', event => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -3717,12 +3909,14 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     dialog.addEventListener('cancel', event => { event.preventDefault(); ctProfileCloseViewer(); });
     nav.append(previous, count, next, close); dialog.append(stage, nav); document.body.append(dialog);
     const viewport = window.visualViewport;
-    const fit = () => ctPhotoViewportFit(dialog, '--ct-photo-view-');
+    const fit = () => { const result = ctPhotoViewportFit(dialog, '--ct-photo-view-'); gestures.fit(result); };
     viewport?.addEventListener('resize', fit); viewport?.addEventListener('scroll', fit); window.addEventListener('resize', fit);
-    ctProfileState.viewer = { dialog, trigger, gallery: trigger.closest('.ct-profile-gallery'),
-      sources: images.map(image => image.url).join('\n'), cleanup: () => {
+    ctProfileState.viewer = viewer;
+    viewer.cleanup = () => {
+      gestures.cleanup();
       viewport?.removeEventListener('resize', fit); viewport?.removeEventListener('scroll', fit); window.removeEventListener('resize', fit);
-    } };
+    };
+    gestures = ctProfilePhotoGestures(viewer, show);
     fit();
     show();
     if (typeof ctMediaAttachPhotoQuality === 'function') ctMediaAttachPhotoQuality(dialog, img);
@@ -6777,7 +6971,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ])
   });
   const ctNewsPublishers = Object.freeze({ yahoo: 'Yahoo!ニュース', nhk: 'NHK NEWS WEB', nikkan: '日刊スポーツ', itmedia: 'ITmedia NEWS' });
-  function ctNewsFeedList(topic) { return ctNewsFeeds[topic] || []; }
+  function ctNewsFeedList(topic) {
+    ctNewsEnsureSourcePreferences();
+    const selected = ctNewsState.sources[topic] || [];
+    return (ctNewsFeeds[topic] || []).filter(feed => selected.includes(feed.publisher));
+  }
   const ctNewsLabels = new Map([
     ['News', 'nation'], ['ニュース', 'nation'], ['Sports', 'sports'], ['スポーツ', 'sports'],
     ['Entertainment', 'entertainment'], ['エンタメ', 'entertainment'], ['エンターテインメント', 'entertainment'],
@@ -6786,10 +6984,92 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const ctNewsState = {
     region: null, mounts: new Map(), cache: new Map(), pending: new Map(), retryAt: new Map(),
     ttl: 15 * 60 * 1000, retryDelay: 60 * 1000, timeout: 10000,
-    refreshTimer: null, refreshAt: 0, lifecycleBound: false, pageActive: true
+    refreshTimer: null, refreshAt: 0, lifecycleBound: false, pageActive: true,
+    sources: null, sourceRaw: null, sourceError: '', regionError: '', sourceMessages: new Map(),
+    sourceGenerations: new Map(), failures: new Map()
   };
   const ctNewsPreferenceKey = 'ct-news-region-v1';
   const ctNewsCacheKey = 'ct-japanese-news-cache-v1';
+  const ctNewsSourcesKey = 'ct-news-sources-v1';
+
+  function ctNewsDefaultSources() {
+    return Object.fromEntries(Object.entries(ctNewsFeeds).map(([topic, feeds]) => [topic, feeds.map(feed => feed.publisher)]));
+  }
+  function ctNewsParseSources(raw) {
+    const defaults = ctNewsDefaultSources();
+    if (raw === null) return defaults;
+    if (typeof raw !== 'string' || raw.length > 2048) throw new Error('sources');
+    const value = JSON.parse(raw);
+    if (!value || value.version !== 1 || !value.topics || typeof value.topics !== 'object' || Array.isArray(value.topics) ||
+        Object.keys(value).some(key => key !== 'version' && key !== 'topics') ||
+        Object.keys(value.topics).some(topic => !Object.hasOwn(ctNewsFeeds, topic))) throw new Error('sources');
+    for (const [topic, selected] of Object.entries(value.topics)) {
+      if (!Array.isArray(selected) || !selected.length || selected.length > ctNewsFeeds[topic].length ||
+          new Set(selected).size !== selected.length || selected.some(id => !defaults[topic].includes(id))) throw new Error('sources');
+      defaults[topic] = defaults[topic].filter(id => selected.includes(id));
+    }
+    return defaults;
+  }
+  function ctNewsEnsureSourcePreferences() {
+    if (ctNewsState.sources !== null) return;
+    ctNewsState.sources = ctNewsDefaultSources();
+    try {
+      ctNewsState.sourceRaw = localStorage.getItem(ctNewsSourcesKey);
+      ctNewsState.sources = ctNewsParseSources(ctNewsState.sourceRaw);
+    } catch {
+      ctNewsState.sourceError = CT_LOCALE === 'ja' ? '配信元の設定を読み込めませんでした。既定の配信元を使っています。' :
+        'Publisher settings could not be read. Using the default publishers.';
+    }
+  }
+  function ctNewsSourceKey(topic) { return ctNewsFeedList(topic).map(feed => feed.publisher).join('|'); }
+  function ctNewsInvalidateSources(topic) {
+    ctNewsState.sourceGenerations.set(topic, (ctNewsState.sourceGenerations.get(topic) || 0) + 1);
+    ctNewsState.cache.delete(topic); ctNewsState.retryAt.delete(topic); ctNewsState.failures.delete(topic);
+    // The old reads still have bounded transport deadlines. Detach their job;
+    // its generation guard prevents late completion from replacing this choice.
+    ctNewsState.pending.delete(topic);
+    for (const mount of ctNewsState.mounts.values()) if (mount.topic === topic) mount.loading = null;
+    ctNewsCancelRefresh();
+  }
+  function ctNewsSetSource(topic, publisher, enabled) {
+    ctNewsEnsureSourcePreferences();
+    if (!Object.hasOwn(ctNewsFeeds, topic) || !ctNewsFeeds[topic].some(feed => feed.publisher === publisher)) return false;
+    const selected = ctNewsState.sources[topic];
+    const next = ctNewsFeeds[topic].map(feed => feed.publisher).filter(id => id === publisher ? enabled : selected.includes(id));
+    if (!next.length) {
+      ctNewsState.sourceMessages.set(topic, CT_LOCALE === 'ja' ? '配信元は最低1つ選択してください。最後の配信元はそのままにしました。' :
+        'Select at least one publisher. The last publisher remains selected.');
+      return false;
+    }
+    if (next.join('|') === selected.join('|')) return true;
+    try {
+      if (localStorage.getItem(ctNewsSourcesKey) !== ctNewsState.sourceRaw) {
+        ctNewsState.sourceError = CT_LOCALE === 'ja' ? '別のタブで配信元の設定が変わりました。再読み込みしてから変更してください。' :
+          'Publisher settings changed in another tab. Reload before changing them.';
+        return false;
+      }
+      const sources = { ...ctNewsState.sources, [topic]: next };
+      const raw = JSON.stringify({ version: 1, topics: sources });
+      localStorage.setItem(ctNewsSourcesKey, raw);
+      ctNewsState.sources = sources; ctNewsState.sourceRaw = raw;
+      ctNewsState.sourceError = ''; ctNewsState.sourceMessages.delete(topic);
+      ctNewsInvalidateSources(topic);
+      return true;
+    } catch {
+      ctNewsState.sourceError = CT_LOCALE === 'ja' ? '配信元の設定を保存できませんでした。選択は変更していません。' :
+        'Publisher settings could not be saved. Your selection has not changed.';
+      return false;
+    }
+  }
+  function ctNewsSourceFailureText(publishers, partial) {
+    const names = publishers.map(id => ctNewsPublishers[id]).filter(Boolean).join('・');
+    const ja = CT_LOCALE === 'ja';
+    const hint = typeof CT_PLATFORM !== 'undefined' && CT_PLATFORM === 'safari' ?
+      ja ? ' Safariのページメニュー → Stayで、表示された配信元のサイト許可も確認してください。' :
+        ' Also check any publisher site permissions shown in Safari’s page menu → Stay.' : '';
+    return (ja ? `取得できない配信元: ${names}。${partial ? '一部取得できませんでした。取得済みのニュースを表示しています。' : '世界のニュースを表示しています。'}` :
+      `Unavailable publishers: ${names}. ${partial ? 'Some publishers are unavailable. Showing retrieved news.' : 'Showing world news.'}`) + hint;
+  }
 
   function ctNewsText(value, max = 512) {
     return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
@@ -6944,46 +7224,58 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const cache = JSON.parse(stored);
       for (const topic of Object.keys(ctNewsFeeds)) {
         const entry = cache?.[topic];
+        const feeds = ctNewsFeedList(topic), sourceKey = ctNewsSourceKey(topic);
+        const defaultSelection = ctNewsState.sources[topic].length === ctNewsFeeds[topic].length;
         if (!entry || entry.loading || entry.feedCount !== ctNewsFeedList(topic).length || !Number.isFinite(entry.at) || entry.at > Date.now() ||
-            Date.now() - entry.at >= ctNewsState.ttl || !Array.isArray(entry.articles)) continue;
-        const articles = entry.articles.slice(0, 10).map(article => ctNewsArticle(article)).filter(Boolean);
-        const failed = Array.isArray(entry.failed) ? entry.failed.filter(id => ctNewsFeedList(topic).some(feed => feed.publisher === id)) : [];
-        if (articles.length) ctNewsState.cache.set(topic, { at: entry.at, articles, failed, feedCount: entry.feedCount, loading: false });
+            Date.now() - entry.at >= ctNewsState.ttl || !Array.isArray(entry.articles) ||
+            (entry.sourceKey !== sourceKey && (entry.sourceKey !== undefined || !defaultSelection))) continue;
+        const articles = entry.articles.slice(0, 10).map(article => ctNewsArticle(article)).filter(article =>
+          article && feeds.some(feed => article.source === ctNewsPublishers[feed.publisher]));
+        const failed = Array.isArray(entry.failed) ? entry.failed.filter(id => feeds.some(feed => feed.publisher === id)) : [];
+        if (articles.length) ctNewsState.cache.set(topic, { at: entry.at, articles, failed, sourceKey, feedCount: entry.feedCount, loading: false });
       }
     } catch {}
   }
   async function ctLoadJapaneseNews(topic) {
     if (!Object.hasOwn(ctNewsFeeds, topic)) return null;
+    const sourceKey = ctNewsSourceKey(topic);
     const cached = ctNewsState.cache.get(topic);
-    if (cached && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) return cached.articles;
+    if (cached?.sourceKey === sourceKey && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) return cached.articles;
     if (ctNewsState.pending.has(topic)) return ctNewsState.pending.get(topic);
     if ((ctNewsState.retryAt.get(topic) || 0) > Date.now()) return null;
+    const generation = ctNewsState.sourceGenerations.get(topic) || 0;
+    const current = () => generation === (ctNewsState.sourceGenerations.get(topic) || 0) && sourceKey === ctNewsSourceKey(topic);
     const pending = (async () => {
       const feeds = ctNewsFeedList(topic);
       const batches = feeds.map(() => []);
+      ctNewsState.failures.delete(topic);
       // Start each publisher together. A slow or failed Yahoo request must not
       // hold the other publisher's usable headlines behind its timeout.
       await Promise.all(feeds.map(async (feed, index) => {
         try {
           const xml = await ctRequestNews(feed.url);
+          if (!current()) return;
           batches[index] = ctParseJapaneseNews(xml, feed.publisher);
         } catch { batches[index] = []; }
-        if (!batches[index].length) return;
+        if (!current() || !batches[index].length) return;
         const articles = ctNewsMergeArticles(batches);
-        ctNewsState.cache.set(topic, { at: Date.now(), articles, loading: true, failed: [], feedCount: feeds.length });
+        ctNewsState.cache.set(topic, { at: Date.now(), articles, loading: true, failed: [], sourceKey, feedCount: feeds.length });
         patchJapaneseNews();
       }));
+      if (!current()) return null;
       const entry = ctNewsState.cache.get(topic);
       if (!batches.some(batch => batch.length)) {
+        ctNewsState.failures.set(topic, { sourceKey, publishers: feeds.map(feed => feed.publisher) });
         ctNewsState.retryAt.set(topic, Date.now() + ctNewsState.retryDelay);
         return null;
       }
       ctNewsState.retryAt.delete(topic);
       entry.loading = false;
       entry.failed = feeds.filter((feed, index) => !batches[index].length).map(feed => feed.publisher);
-      try { sessionStorage.setItem(ctNewsCacheKey, JSON.stringify(Object.fromEntries([...ctNewsState.cache].filter(([, cached]) => !cached.loading)))); } catch {}
+      try { sessionStorage.setItem(ctNewsCacheKey, JSON.stringify(Object.fromEntries([...ctNewsState.cache].filter(([key, cached]) =>
+        !cached.loading && cached.sourceKey === ctNewsSourceKey(key))))); } catch {}
       return entry.articles;
-    })().finally(() => ctNewsState.pending.delete(topic));
+    })().finally(() => { if (ctNewsState.pending.get(topic) === pending) ctNewsState.pending.delete(topic); });
     ctNewsState.pending.set(topic, pending);
     return pending;
   }
@@ -7071,10 +7363,65 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       ctNewsState.pageActive = true;
       patchJapaneseNews();
     });
+    window.addEventListener('storage', event => {
+      if (event.key !== ctNewsSourcesKey && event.key !== null) return;
+      ctNewsEnsureSourcePreferences();
+      try {
+        const raw = localStorage.getItem(ctNewsSourcesKey);
+        if (raw === ctNewsState.sourceRaw) return;
+        const sources = ctNewsParseSources(raw);
+        for (const topic of Object.keys(ctNewsFeeds)) {
+          if (sources[topic].join('|') !== ctNewsState.sources[topic].join('|')) ctNewsInvalidateSources(topic);
+        }
+        ctNewsState.sources = sources; ctNewsState.sourceRaw = raw; ctNewsState.sourceError = '';
+        ctNewsState.sourceMessages.clear();
+      } catch {
+        ctNewsState.sourceError = CT_LOCALE === 'ja' ? '別のタブの配信元の設定を読み込めませんでした。現在の選択を保持しています。' :
+          'Publisher settings from another tab could not be read. Keeping your current selection.';
+      }
+      patchJapaneseNews();
+    });
   }
   function ctNewsSetText(node, text) { if (node.textContent !== text) node.textContent = text; }
   function ctNewsUnhide(mount) {
     if (mount.container.classList.contains('ct-news-native-hidden')) mount.container.classList.remove('ct-news-native-hidden');
+  }
+  function ctNewsRefreshSources(mount) {
+    const ja = CT_LOCALE === 'ja';
+    const japan = ctNewsState.region === 'jp';
+    if (mount.sources.hidden === japan) mount.sources.hidden = !japan;
+    if (mount.sourceTopic !== mount.topic) {
+      const topics = ja ? { nation: '国内ニュース', sports: 'スポーツ', entertainment: 'エンタメ', technology: 'IT' } :
+        { nation: 'National news', sports: 'Sports', entertainment: 'Entertainment', technology: 'Technology' };
+      const legend = document.createElement('legend');
+      legend.textContent = ja ? `${topics[mount.topic]}の配信元` : `Publishers for ${topics[mount.topic]}`;
+      const help = document.createElement('p'); help.className = 'ct-news-source-help';
+      help.textContent = ja ? 'このジャンルのRSSから取得します。最低1つ選択してください。' :
+        'Uses each publisher’s feed for this topic. Select at least one.';
+      const children = [legend, help];
+      for (const feed of ctNewsFeeds[mount.topic]) {
+        const label = document.createElement('label');
+        const input = document.createElement('input'); input.type = 'checkbox';
+        input.dataset.ctNewsPublisher = feed.publisher;
+        const topic = mount.topic;
+        input.addEventListener('change', () => {
+          // A detached selector must not change another native topic's setting.
+          const current = ctNewsTargets().find(target => target.container === mount.container && target.topic === topic);
+          if (current && ctNewsState.mounts.get(mount.container) === mount && ctNewsState.region === 'jp' &&
+              ctNewsState.pageActive && !document.hidden) ctNewsSetSource(topic, feed.publisher, input.checked);
+          patchJapaneseNews();
+        });
+        label.append(input, document.createTextNode(ctNewsPublishers[feed.publisher]));
+        children.push(label);
+      }
+      mount.sourceFields.replaceChildren(...children);
+      mount.sourceTopic = mount.topic;
+    }
+    for (const input of mount.sourceFields.querySelectorAll('input[data-ct-news-publisher]')) {
+      const checked = ctNewsState.sources[mount.topic].includes(input.dataset.ctNewsPublisher);
+      if (input.checked !== checked) input.checked = checked;
+    }
+    ctNewsSetText(mount.notice, [ctNewsState.regionError, ctNewsState.sourceError, ctNewsState.sourceMessages.get(mount.topic)].filter(Boolean).join(' '));
   }
   function ctNewsMakeMount(target) {
     const ja = CT_LOCALE === 'ja';
@@ -7094,17 +7441,28 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     retry.type = 'button'; retry.textContent = ja ? '再試行' : 'Retry';
     retry.dataset.ctNewsAction = 'retry'; retry.hidden = true;
     controls.append(japan, world, retry);
+    const notice = document.createElement('p'); notice.className = 'ct-news-preference-status';
+    notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
+    const sources = document.createElement('details'); sources.className = 'ct-news-sources';
+    const summary = document.createElement('summary'); summary.textContent = ja ? '配信元' : 'Publishers';
+    const sourceFields = document.createElement('fieldset'); sources.append(summary, sourceFields);
     const status = document.createElement('p');
     status.className = 'ct-news-status';
     status.setAttribute('role', 'status');
     const list = document.createElement('div');
     list.className = 'ct-news-list';
-    panel.append(controls, status, list);
+    panel.append(controls, notice, sources, status, list);
     target.container.before(panel);
-    const mount = { ...target, panel, status, list, japan, world, retry, rendered: null, loading: null };
+    const mount = { ...target, panel, status, list, japan, world, retry, notice, sources, sourceFields,
+      sourceTopic: null, rendered: null, loading: null };
     for (const button of [japan, world]) button.addEventListener('click', () => {
-      ctNewsState.region = button.dataset.ctNewsRegion;
-      try { localStorage.setItem(ctNewsPreferenceKey, ctNewsState.region); } catch {}
+      try {
+        localStorage.setItem(ctNewsPreferenceKey, button.dataset.ctNewsRegion);
+        ctNewsState.region = button.dataset.ctNewsRegion; ctNewsState.regionError = '';
+      } catch {
+        ctNewsState.regionError = ja ? 'ニュースの地域を保存できませんでした。選択は変更していません。' :
+          'News region could not be saved. Your selection has not changed.';
+      }
       patchJapaneseNews();
     });
     retry.addEventListener('click', () => {
@@ -7115,6 +7473,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       // Explicit retry may bypass the failure delay, never a pending request.
       ctNewsState.retryAt.delete(current.topic);
       ctNewsState.cache.delete(current.topic);
+      ctNewsState.failures.delete(current.topic);
       patchJapaneseNews();
     });
     return mount;
@@ -7153,6 +7512,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctNewsRefreshMount(mount) {
     const ja = CT_LOCALE === 'ja';
     const japan = ctNewsState.region === 'jp';
+    ctNewsRefreshSources(mount);
     for (const button of [mount.japan, mount.world]) {
       const selected = button.dataset.ctNewsRegion === ctNewsState.region;
       const value = String(selected);
@@ -7166,7 +7526,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       return;
     }
     const cached = ctNewsState.cache.get(mount.topic);
-    if (cached && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) {
+    if (cached?.sourceKey === ctNewsSourceKey(mount.topic) && Date.now() >= cached.at && Date.now() - cached.at < ctNewsState.ttl) {
       const partial = !cached.loading && cached.failed?.length > 0;
       if (mount.retry.hidden === partial) mount.retry.hidden = !partial;
       ctNewsRenderArticles(mount, cached.articles);
@@ -7174,7 +7534,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (!mount.container.classList.contains('ct-news-native-hidden')) mount.container.classList.add('ct-news-native-hidden');
       const sources = [...new Set(cached.articles.map(article => article.source))].join('・');
       const suffix = cached.loading ? ja ? ' · 他の配信元を読み込み中…' : ' · Loading another publisher…' :
-        partial ? ja ? ' · 一部取得できませんでした。取得済みのニュースを表示しています。' : ' · Some publishers are unavailable. Showing retrieved news.' :
+        partial ? ' · ' + ctNewsSourceFailureText(cached.failed, true) :
         ja ? ' · 見出しを押すと記事が開きます' : ' · Open a headline to read the article';
       ctNewsSetText(mount.status, sources + suffix);
       return;
@@ -7186,21 +7546,25 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!mount.list.hidden) mount.list.hidden = true;
     if ((ctNewsState.retryAt.get(mount.topic) || 0) > Date.now()) {
       if (mount.retry.hidden) mount.retry.hidden = false;
-      ctNewsSetText(mount.status, ja ? '日本のニュースを取得できなかったため、世界のニュースを表示しています。' : 'Japanese news is unavailable. Showing world news.');
+      const failure = ctNewsState.failures.get(mount.topic);
+      const failed = failure?.sourceKey === ctNewsSourceKey(mount.topic) ? failure.publishers : ctNewsFeedList(mount.topic).map(feed => feed.publisher);
+      ctNewsSetText(mount.status, ctNewsSourceFailureText(failed, false));
       return;
     }
     if (!mount.retry.hidden) mount.retry.hidden = true;
     ctNewsSetText(mount.status, ja ? '日本のニュースを読み込み中…' : 'Loading Japanese news…');
-    if (mount.loading === mount.topic) return;
     const topic = mount.topic;
-    mount.loading = topic;
+    const loading = `${topic}:${ctNewsState.sourceGenerations.get(topic) || 0}:${ctNewsSourceKey(topic)}`;
+    if (mount.loading === loading) return;
+    mount.loading = loading;
     ctLoadJapaneseNews(topic).finally(() => {
-      if (mount.loading === topic) mount.loading = null;
+      if (mount.loading === loading) mount.loading = null;
       if (mount.panel.isConnected && ctNewsState.mounts.get(mount.container) === mount) patchJapaneseNews();
     });
   }
   function patchJapaneseNews() {
     ctNewsBindLifecycle();
+    ctNewsEnsureSourcePreferences();
     if (ctNewsState.region === null) {
       let value;
       try { value = localStorage.getItem(ctNewsPreferenceKey); } catch {}
@@ -7217,7 +7581,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!targets.length) { ctNewsCancelRefresh(); return; }
     if (!document.getElementById('ct-japanese-news-style')) {
       const style = document.createElement('style'); style.id = 'ct-japanese-news-style';
-      style.textContent = `.ct-news-native-hidden{display:none!important}.ct-news-controls{display:flex;gap:8px;padding:12px 16px 4px}.ct-news-controls button{min-height:44px;border:1px solid var(--color-tl-app-border,#ccd6dd);border-radius:999px;background:transparent;color:inherit;font:inherit;font-size:13px;font-weight:700;padding:5px 14px;cursor:pointer}.ct-news-controls button[aria-pressed="true"]{background:#1d9bf0;border-color:#1d9bf0;color:#fff}.ct-news-controls button:focus-visible{outline:2px solid #1d9bf0;outline-offset:3px}.ct-news-status{margin:0;padding:4px 16px 10px;font-size:12px;line-height:1.5;color:inherit;opacity:.72}.ct-news-status:empty{display:none}.ct-news-article{display:block;padding:12px 16px;border-bottom:1px solid var(--color-tl-app-border,#ccd6dd);color:inherit;text-decoration:none}.ct-news-article:hover{background:rgba(127,127,127,.06)}.ct-news-article img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:16px;border:1px solid var(--color-tl-app-border,#ccd6dd)}.ct-news-article img[hidden]{display:none}.ct-news-article h3{font-size:17px;line-height:1.4;font-weight:700;margin:12px 0 6px}.ct-news-source{margin:0;font-size:13px;line-height:1.5;opacity:.7}.ct-news-list[hidden]{display:none}`;
+      style.textContent = `.ct-news-native-hidden{display:none!important}.ct-news-controls{display:flex;gap:8px;padding:12px 16px 4px}.ct-news-controls button{min-height:44px;border:1px solid var(--color-tl-app-border,#ccd6dd);border-radius:999px;background:transparent;color:inherit;font:inherit;font-size:13px;font-weight:700;padding:5px 14px;cursor:pointer}.ct-news-controls button[aria-pressed="true"]{background:#1d9bf0;border-color:#1d9bf0;color:#fff}.ct-news-controls button:focus-visible{outline:2px solid #1d9bf0;outline-offset:3px}.ct-news-status{margin:0;padding:4px 16px 10px;font-size:12px;line-height:1.5;color:inherit;opacity:.72}.ct-news-status:empty,.ct-news-preference-status:empty{display:none}.ct-news-preference-status{margin:0;padding:4px 16px;font-size:12px;line-height:1.5;color:var(--color-tl-app-danger,#c23636)}.ct-news-sources{padding:0 16px;font-size:13px}.ct-news-sources[hidden]{display:none}.ct-news-sources summary{display:flex;align-items:center;gap:6px;min-height:44px;cursor:pointer;width:fit-content;color:var(--color-tl-app-text-muted,#536471)}.ct-news-sources summary:before{content:"›";font-size:18px;line-height:1}.ct-news-sources[open] summary:before{transform:rotate(90deg)}.ct-news-sources summary:focus-visible,.ct-news-sources input:focus-visible{outline:2px solid #1d9bf0;outline-offset:3px}.ct-news-sources fieldset{margin:0;padding:0 0 8px;border:0;min-width:0}.ct-news-sources legend{font-weight:700}.ct-news-source-help{margin:4px 0;line-height:1.5;color:var(--color-tl-app-text-muted,#536471)}.ct-news-sources label{display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;overflow-wrap:anywhere}.ct-news-sources input{width:18px;height:18px;accent-color:#1d9bf0;margin:0;flex-shrink:0}.ct-news-article{display:block;padding:12px 16px;border-bottom:1px solid var(--color-tl-app-border,#ccd6dd);color:inherit;text-decoration:none}.ct-news-article:hover{background:rgba(127,127,127,.06)}.ct-news-article img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:16px;border:1px solid var(--color-tl-app-border,#ccd6dd)}.ct-news-article img[hidden]{display:none}.ct-news-article h3{font-size:17px;line-height:1.4;font-weight:700;margin:12px 0 6px}.ct-news-source{margin:0;font-size:13px;line-height:1.5;opacity:.7}.ct-news-list[hidden]{display:none}`;
       (document.head || document.documentElement).append(style);
     }
     for (const target of targets) {
@@ -7746,7 +8110,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctLocalizationNativeRecordException(record) {
     const el = record.attribute ? record.node : record.node.parentElement;
     if (nativeLocalizationAccountMenu(el) || isNativeSettingsNavigation(el) || isNativeSettingsValue(el)) return true;
-    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')];
+    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')] ||
+      (/^\/user\/[A-Za-z0-9_.-]+\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
     if (record.attribute || !routeTitle || clean(record.original) !== routeTitle ||
         !el?.matches('h2.truncate') || el.closest('article')) return false;
     const visibleHeading = [...document.querySelectorAll('main h2')].find(heading => {
@@ -8483,7 +8848,8 @@ if (/^just\s+now$/i.test(t)) {
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
     // protection for profile names and account values everywhere else.
-    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')];
+    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')] ||
+      (/^\/user\/[A-Za-z0-9_.-]+\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
     const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
       el === [...document.querySelectorAll('main h2')].find(heading => {
         for (let parent = heading; parent; parent = parent.parentElement) {
@@ -8600,7 +8966,7 @@ if (/^just\s+now$/i.test(t)) {
           !(heading.matches('aside h3.font-semibold.text-tl-app-text.shrink-0') &&
             heading.parentElement?.matches('div.bg-tl-app-card.border.border-tl-app-border') &&
             /^(?:Who to follow|Trends for you|おすすめユーザー|おすすめのトレンド)$/.test(text)) &&
-          !(location.pathname.replace(/\/$/, '') === '/profile' && heading.matches('h2.truncate') &&
+          !(/^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) && heading.matches('h2.truncate') &&
             heading.closest('.sticky') && /^(?:Feed|プロフィール)$/.test(text)) &&
           !(heading.matches('h3.text-xs.font-bold.uppercase.tracking-wider') &&
             /^(?:Compose New(?: Tweet)?|Edit post)$/.test(text) &&
@@ -8764,7 +9130,7 @@ if (/^just\s+now$/i.test(t)) {
       isNativeEditedIndicator(el) ? '編集済み' :
       isNativeTweetCount(el) && /^([\d,.]+[KMB]?) tweets?$/i.test(text) ? `${text.match(/^([\d,.]+[KMB]?)/)[1]}件のツイート` :
       isNativeTweetCount(el) && /^Tweets?$/i.test(text) ? 'ツイート' :
-      /^\/profile\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
+      /^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
         el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text) ||
         (ctLocalizationClassicText(text) !== text ? ctLocalizationClassicText(text) : null));
     // The native help list splits this sentence around a React-owned counter.
@@ -9549,6 +9915,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.22.0 loaded'
+    '🐦 Classic Twitter JP v6.23.1 loaded'
   );
 })();

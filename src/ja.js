@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.22.0
+// @version      6.23.1
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -23,6 +23,7 @@
   'use strict';
   if (document.documentElement?.dataset.ctActiveVersion) return;
   const CT_LOCALE = 'ja';
+  /* @platform */
   /* @include network */
   /* @include browser-notifications */
   /* @include enhancements */
@@ -556,7 +557,8 @@
   function ctLocalizationNativeRecordException(record) {
     const el = record.attribute ? record.node : record.node.parentElement;
     if (nativeLocalizationAccountMenu(el) || isNativeSettingsNavigation(el) || isNativeSettingsValue(el)) return true;
-    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')];
+    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')] ||
+      (/^\/user\/[A-Za-z0-9_.-]+\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
     if (record.attribute || !routeTitle || clean(record.original) !== routeTitle ||
         !el?.matches('h2.truncate') || el.closest('article')) return false;
     const visibleHeading = [...document.querySelectorAll('main h2')].find(heading => {
@@ -1293,7 +1295,8 @@ if (/^just\s+now$/i.test(t)) {
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
     // protection for profile names and account values everywhere else.
-    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')];
+    const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')] ||
+      (/^\/user\/[A-Za-z0-9_.-]+\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
     const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
       el === [...document.querySelectorAll('main h2')].find(heading => {
         for (let parent = heading; parent; parent = parent.parentElement) {
@@ -1410,7 +1413,7 @@ if (/^just\s+now$/i.test(t)) {
           !(heading.matches('aside h3.font-semibold.text-tl-app-text.shrink-0') &&
             heading.parentElement?.matches('div.bg-tl-app-card.border.border-tl-app-border') &&
             /^(?:Who to follow|Trends for you|おすすめユーザー|おすすめのトレンド)$/.test(text)) &&
-          !(location.pathname.replace(/\/$/, '') === '/profile' && heading.matches('h2.truncate') &&
+          !(/^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) && heading.matches('h2.truncate') &&
             heading.closest('.sticky') && /^(?:Feed|プロフィール)$/.test(text)) &&
           !(heading.matches('h3.text-xs.font-bold.uppercase.tracking-wider') &&
             /^(?:Compose New(?: Tweet)?|Edit post)$/.test(text) &&
@@ -1574,7 +1577,7 @@ if (/^just\s+now$/i.test(t)) {
       isNativeEditedIndicator(el) ? '編集済み' :
       isNativeTweetCount(el) && /^([\d,.]+[KMB]?) tweets?$/i.test(text) ? `${text.match(/^([\d,.]+[KMB]?)/)[1]}件のツイート` :
       isNativeTweetCount(el) && /^Tweets?$/i.test(text) ? 'ツイート' :
-      /^\/profile\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
+      /^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
         el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text) ||
         (ctLocalizationClassicText(text) !== text ? ctLocalizationClassicText(text) : null));
     // The native help list splits this sentence around a React-owned counter.
@@ -2359,6 +2362,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.22.0 loaded'
+    '🐦 Classic Twitter JP v6.23.1 loaded'
   );
 })();

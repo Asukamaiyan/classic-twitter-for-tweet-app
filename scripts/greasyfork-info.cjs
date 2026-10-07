@@ -111,8 +111,8 @@ function render(edition) {
     : '';
   const current = japanese ? 'このページのスクリプト' : 'The script on this page';
   const features = japanese
-    ? '昔のTwitter風の表示、星のお気に入り、通知フィルターなどを追加。日本ニュースはYahoo・NHK・日刊スポーツ・ITmediaの各分類に合う配信元を使い、取得できた記事から表示します。全配信元が失敗した場合は元ニュースと「再試行」を表示。写真のズーム・横スワイプ、小さな写真・動画／お気に入り行も利用できます。本文・名前・下書き・サイトのテーマを保持します。'
-    : 'Adds classic Twitter styling, star Favorites and notification filters. Japan news combines topic-matched feeds from Yahoo, NHK, Nikkan Sports and ITmedia, displaying received articles first. A complete failure keeps native news and Retry. Includes photo zoom/swipes and compact Media/Favorites rows. Preserves post text, names, drafts and the site theme.';
+    ? '昔のTwitter風の表示、星のお気に入り、通知フィルターを追加。日本ニュースの「配信元」でYahoo・NHK・日刊スポーツ・ITmediaをジャンルごとに選択できます（最低1つ）。失敗した配信元は名前を表示し、全て失敗したときは元ニュースと「再試行」を表示。任意RSSの追加は未対応です。プロフィールの写真・動画／お気に入りでも拡大写真が指に追従して切り替わります。本文・名前・下書き・サイトのテーマを保持します。'
+    : 'Adds classic Twitter styling, star Favorites and notification filters. In Japan news, Publishers selects the existing Yahoo, NHK, Nikkan Sports and ITmedia feeds per topic (at least one). Failures name unavailable publishers; a complete failure keeps native news and Retry. Arbitrary RSS URLs are not supported. Enlarged profile Media/Favorites photos follow horizontal dragging. Preserves post text, names, drafts and the site theme.';
   const safariFeature = edition.platform === 'safari'
     ? japanese ? '<p>Safari版は写真・動画の長押しで配信ファイル情報も表示します。</p>' : '<p>The Safari edition also shows delivered media file information on a long press.</p>'
     : '';

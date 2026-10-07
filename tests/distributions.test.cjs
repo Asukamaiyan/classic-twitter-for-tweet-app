@@ -35,6 +35,7 @@ test('six editions preserve existing identifiers and share their platform implem
     assert.equal(source.match(/^\/\/ @namespace\s+(.+)$/m)?.[1], 'https://tweet.app/');
     assert.equal(source.match(/^\/\/ @version\s+(.+)$/m)?.[1], releaseVersion);
     assert.match(source, new RegExp(`const CT_LOCALE = '${locale}'`));
+    assert.match(source, new RegExp(`const CT_PLATFORM = '${platform}'`));
     for (const host of ['news.yahoo.co.jp', 'news.web.nhk', 'www.nikkansports.com', 'rss.itmedia.co.jp']) {
       assert.equal(source.includes(`// @connect      ${host}`), true, 'each publisher uses an explicit public feed permission');
     }
@@ -45,7 +46,7 @@ test('six editions preserve existing identifiers and share their platform implem
     }
     if (platform === 'android') {
       const desktop = fs.readFileSync(path.join(root, `classic-twitter-${locale}.user.js`), 'utf8');
-      const withoutName = code => code.replace(/^\/\/ @name\s+.*$/m, '');
+      const withoutName = code => code.replace(/^\/\/ @name\s+.*$/m, '').replace(/const CT_PLATFORM = '[^']+';/, '');
       assert.equal(withoutName(source), withoutName(desktop), 'Android uses the verified common core without a divergent copy');
     }
   }

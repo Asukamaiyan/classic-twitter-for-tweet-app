@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.22.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.23.1** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 日本語・英語各3版をGreasy Forkへ6.22.0として公開済みです。
+**配布状況:** 日本語・英語各3版をGreasy Forkへ6.23.1として公開済みです。
 
 ## 導入・更新
 
@@ -53,7 +53,9 @@
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
 
-6.22.0はTweet 2.2.3に対応。写真の複数選択とタイムラインのスライドはTweet標準へ統一し、重複する処理・ボタンを削除しました。標準の上限は5枚です。bioの改行を保持し、拡大写真に **「配信画像を開く」** と画像サイズ、動画に読み込んだ解像度を表示します。写真の切替は現在・前後だけを先にデコードし、準備中は表示済みの写真を保持します。確認できた配信ソースをそのまま使いますが、配信データ以上の高画質化や4K／HDR保持はできません。日本ニュースのYahoo・NHK・日刊スポーツ・ITmedia対応も維持します。
+6.23.1はTweet 2.2.3に対応。日本ニュースの **「配信元」** から、国内はYahoo!／NHK、スポーツ・エンタメはYahoo!／日刊スポーツ、ITはYahoo!／ITmediaを選べます。ジャンルごとに最低1つを選択し、取得できない配信元は名前を表示します。ジャンル別RSSを使う方式で、任意のRSS追加や本文からの自動分類は未対応です。
+
+プロフィールの写真・動画／お気に入り欄でも、拡大写真が指に追従して左右に切り替わります。方向を反転しても未準備の写真で黒くならず、ピンチ・ズーム中は写真を切り替えません。写真の複数選択とタイムラインのスライドはTweet標準を使い、同じ処理を重ねません。標準の上限は5枚です。bioの改行、拡大写真の **「配信画像を開く」** と画像サイズ、動画の読み込んだ解像度も維持します。配信データ以上の高画質化や4K／HDR保持はできません。
 
 **通知：** 「便利ツール」→ **「通知数が増えたらお知らせする」** をオンにしてブラウザの通知を許可。初期状態はオフです。Tweetを開いている間に、元の未読数が増えた場合だけ一般的なお知らせを出し、名前・本文は出しません。複数タブでは1つだけが担当します。ページを閉じたりスマホで停止すると届かず、iPhoneの通常Safariタブなど非対応環境では理由を表示します。閉じたページへ届くPush通知はTweet側の対応が必要です。
 
@@ -75,7 +77,9 @@
 
 お気に入りはミュート一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。自動同期はなく、サイトデータを消すと失われます。
 
-画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。iPhone 17 Pro Max＋Stay 2.9.24で6.22.0への更新を確認。実機でYahoo・NHKの日本ニュース表示と写真の中央配置・前後切替を確認しました。左右スワイプと約2倍の実ピンチ拡大も確認しました。日刊スポーツは追加許可待ち、ITmediaは実機未確認です。ピンチ縮小の直前にXCTestの内部エラーが発生したため、縮小は未確認。Safari再起動で通常倍率へ復元済みです。長時間操作、Android＋Tampermonkeyは未検証です。
+画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。Stayの6.23.1更新は実機確認済み。6.23.0のニュース選択・再読み込み後の保持・プロフィール写真の左右スワイプも確認済みですが、6.23.1の画質表示と閉じるボタンは実機テストのタップ判定で止まり、最終確認待ちです。
+
+**6.22.0での実機記録：** iPhone 17 Pro Max＋Stay 2.9.24で更新、Yahoo!・NHKのニュース、写真の中央配置・前後切替、左右スワイプ、約2倍のピンチ拡大を確認しました。日刊スポーツは追加許可待ち、ITmediaは実機未確認。縮小の直前にXCTestの内部エラーが発生し、ピンチ縮小は未確認です。Safari再起動で通常倍率へ復元済み。長時間操作、Android＋Tampermonkeyは未検証です。
 
 [変更履歴](CHANGELOG.md) · [API調査](docs/API_RESEARCH.md) · [検証記録](docs/VALIDATION.md)
 
@@ -111,13 +115,17 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.22.0 supports Tweet 2.2.3. Native multi-image selection (up to five images) and inline slides replace the duplicate extension handlers and controls. It preserves profile bio line breaks, opens delivered images directly and shows decoded image/video dimensions. Adjacent photos are prepared before swipe motion; pending or failed decoding keeps the native photo visible. It cannot increase delivered resolution or guarantee 4K/HDR retention. Optional browser alerts are off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported. Japan news continues to combine Yahoo, NHK, Nikkan Sports and ITmedia. Updating to 6.22.0 was confirmed on an iPhone 17 Pro Max with Stay 2.9.24; Yahoo/NHK news and centered photos with native navigation were verified on the device. Nikkan Sports is awaiting additional site permission; ITmedia has not been checked on the device. Physical swipes and an approximately 2× pinch enlargement were verified. XCTest crashed internally before pinch reduction, which remains unverified; restarting Safari restored normal scale. Android and actual OS notification delivery remain unverified.
+Version 6.23.1 supports Tweet 2.2.3 and is published for all six editions; device checks are recorded separately. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
+
+Optional browser alerts remain off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported.
+
+**Version 6.22.0 device evidence:** Updating with Stay 2.9.24, Yahoo/NHK news, centered native photos, navigation, physical swipes and approximately 2× pinch enlargement were verified on an iPhone 17 Pro Max. Nikkan Sports awaits additional site permission; ITmedia and pinch reduction remain unverified. XCTest crashed internally before reduction; restarting Safari restored normal scale. Android and actual OS notification delivery remain unverified.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 
 Post and verified reply ages update as time passes. Creation dates use your browser’s time zone, with dates and clock times in conversation details and local Media/Favorites. Edit dates and parent-post dates are kept separate; unknown or ambiguous reply times are not guessed.
 
-Use Tools → Search older posts to recover currently confirmed Favorites through older For you/Following pages (up to 100 pages per run; pause/continue while the tab is visible). This covers returned timelines and cannot guarantee your entire history. Your profile displays saved Favorites directly, without search/filter/sort controls. Counts and Refresh stay in the top row; open **Details** for the saved Tweet date range, recovery coverage/progress and same-account JSON backups/import. Open **Coverage** in Media for its read limits. Errors and storage warnings stay visible. There is no 500-record eviction; storage failures require a backup before closing. Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync automatically across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Full physical Android/Tampermonkey and Safari/Stay acceptance remains pending.
+Use Tools → Search older posts to recover currently confirmed Favorites through older For you/Following pages (up to 100 pages per run; pause/continue while the tab is visible). This covers returned timelines and cannot guarantee your entire history. Your profile displays saved Favorites directly, without search/filter/sort controls. Counts and Refresh stay in the top row; open **Details** for the saved Tweet date range, recovery coverage/progress and same-account JSON backups/import. Open **Coverage** in Media for its read limits. Errors and storage warnings stay visible. There is no 500-record eviction; storage failures require a backup before closing. Post text, names, drafts and the site theme stay intact. Favorites are browser-local and account-specific; other saved tools are shared within this browser. Data does not sync automatically across devices. Upload/translation limits and retained 4K HDR depend on Tweet. Stay was updated to 6.23.1 on an iPhone 17 Pro Max. Publisher selection, reload persistence and profile-photo swipes were confirmed at 6.23.0; final on-device footer/Close acceptance at 6.23.1 is pending because XCTest rejects visible web controls as not hittable. Physical Android/Tampermonkey, pinch reduction and actual OS alert delivery remain unverified.
 
 ## 開発
 
