@@ -159,6 +159,63 @@ test('a successful callback remains authoritative over later failed Promise comp
   assert.equal(f.timers.size, 0);
 });
 
+test('Safari loadend-only completion supplies final text and clears the request deadline', async t => {
+  const f = setup(t, { gm(options) {
+    queueMicrotask(() => options.onloadend({ status: 200, readyState: 4, response: xml, responseURL: options.url }));
+  } });
+  assert.equal(await f.request(feed), xml);
+  assert.equal(f.timers.size, 0);
+});
+
+test('Stay loadend registration permits its bridge to release each request listener', async t => {
+  // Stay's public bridge registers a window message listener in __xhr and
+  // removes it inside the details.onloadend branch. Keep this lifecycle
+  // contract when success, errors or deadline aborts settle the request.
+  // https://github.com/shenruisi/Stay/blob/9b78d761d307234d4ed5ea72ac423804ea0c4301/Stay/tampermonkey/lib/gm-api-create.js#L1059-L1116
+  const listeners = new Set();
+  let mode = 'success';
+  const f = setup(t, { gm(options) {
+    const listener = {};
+    listeners.add(listener);
+    const end = response => {
+      if (options.onloadend) {
+        options.onloadend(response);
+        listeners.delete(listener);
+      }
+    };
+    if (mode === 'success') queueMicrotask(() => {
+      options.onload({ status: 200, responseText: xml, responseURL: options.url });
+      end({ status: 200, responseText: xml, responseURL: options.url });
+    });
+    if (mode === 'failure') queueMicrotask(() => {
+      options.onerror({ status: 0 });
+      end({ status: 0, responseText: '' });
+    });
+    return { abort() { options.onabort({ status: 0 }); end({ status: 0, responseText: '' }); } };
+  } });
+  for (mode of ['success', 'failure', 'timeout']) {
+    const result = f.request(feed);
+    if (mode === 'timeout') f.expire();
+    assert.equal(await result, mode === 'success' ? xml : null);
+    assert.equal(listeners.size, 0, `${mode} must release the Safari bridge listener`);
+    assert.equal(f.timers.size, 0);
+  }
+});
+
+test('a failed or timed-out request cannot be revived by a later successful loadend', async t => {
+  for (const completion of ['error', 'deadline']) {
+    let details;
+    const f = setup(t, { gm(options) { details = options; return { abort() {} }; } });
+    const result = f.request(feed);
+    if (completion === 'error') details.onerror({ status: 0 });
+    else f.expire();
+    assert.equal(await result, null);
+    details.onloadend({ status: 200, readyState: 4, responseText: xml, responseURL: feed });
+    await flush();
+    assert.equal(f.timers.size, 0);
+  }
+});
+
 test('unknown URLs never use either transport and canonical fetch URLs preserve the anonymous fallback', async t => {
   let details, calls = 0;
   const f = setup(t, { fetch(url, options) {

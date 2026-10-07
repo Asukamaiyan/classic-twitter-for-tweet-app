@@ -5,13 +5,12 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const media = fs.readFileSync(path.join(__dirname, '../src/media.js'), 'utf8');
 const viewport = fs.readFileSync(path.join(__dirname, '../src/photo-viewport.js'), 'utf8');
+const {galleryMarkup,installNativeViewer}=require('./helpers/native-media.cjs');
 
 function harness(t, { decode = true, index = 0, locale = 'ja' } = {}) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body><main>
     <textarea id="public-tweet-input">Keep this draft</textarea>
-    <div id="gallery" class="grid gap-0.5 rounded-2xl overflow-hidden border">
-      ${Array.from({ length: 4 }, (_, i) => `<div class="relative overflow-hidden"><img src="https://media.tweet.app/public-${i}.webp" class="cursor-pointer" alt="Attached media"></div>`).join('')}
-    </div>
+    ${galleryMarkup(4)}
     <video id="video" src="https://media.tweet.app/provided.mp4" controls playsinline loop class="w-full object-contain"></video>
     </main></body></html>`, {
     url: 'https://app.tweet.app/feed', runScripts: 'outside-only', pretendToBeVisual: true
@@ -34,23 +33,8 @@ function harness(t, { decode = true, index = 0, locale = 'ja' } = {}) {
   window.ctNetworkState = { authUID: 'account-a' };
   const { document } = window;
   const images = [...document.querySelectorAll('#gallery img')];
-  let dialog;
-  const clicked = [];
-  images.forEach((image, i) => image.addEventListener('click', event => {
-    event.stopPropagation(); clicked.push(i);
-    if (!dialog?.isConnected) {
-      dialog = document.createElement('div');
-      dialog.className = 'fixed';
-      dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', 'Media viewer');
-      const header = document.createElement('div');
-      const close = document.createElement('button'); close.setAttribute('aria-label', 'Close media viewer');
-      close.addEventListener('click', () => dialog.remove()); header.append(close);
-      const stage = document.createElement('div');
-      const preview = document.createElement('img'); preview.alt = 'Media preview'; preview.referrerPolicy = 'no-referrer'; stage.append(preview);
-      dialog.append(header, stage); document.body.append(dialog);
-    }
-    dialog.querySelector('img').src = image.src;
-  }));
+  const native=installNativeViewer(window,images);
+  const clicked=native.clicked;
   window.eval(`const CT_LOCALE=${JSON.stringify(locale)};\n${viewport}\n${media}\nwindow.qa={ctMediaEnhance,ctMediaPhotoLayer,ctMediaResetPhotoMotion,ctMediaClearViewer,ctMediaAttachPhotoQuality,ctMediaReleasePhotoQuality,ctMediaPhotoQuality,get viewer(){return ctMediaViewer}};`);
   const qa = window.qa;
   const enhance = () => qa.ctMediaEnhance();
@@ -58,7 +42,7 @@ function harness(t, { decode = true, index = 0, locale = 'ja' } = {}) {
   t.after(() => window.close());
   return {
     window, document, images, requests, qa, enhance, clicked, reduce, visual,
-    get dialog() { return dialog; }, get preview() { return dialog.querySelector('img[alt="Media preview"]'); },
+    get dialog() { return native.dialog; }, get preview() { return native.dialog.querySelector('img'); },
     async ready() { for (const request of requests) request.resolve(); await Promise.resolve(); await Promise.resolve(); },
     layer(target) { return qa.ctMediaPhotoLayer(qa.viewer, target); }
   };
@@ -70,7 +54,7 @@ test('a pending photo decode never covers the already displayed native image', a
   assert.equal(f.layer(1), null);
   assert.equal(f.preview.classList.contains('ct-media-photo-covered'), false);
   assert.equal(f.document.querySelector('.ct-media-photo-layer'), null);
-  f.dialog.querySelector('.ct-media-viewer-controls button:last-child').click();
+  f.dialog.querySelector('[data-native-next]').click();
   assert.equal(f.preview.src, f.images[1].src);
   assert.deepEqual(f.clicked, [0, 1]);
   assert.equal(f.document.querySelector('#public-tweet-input').value, 'Keep this draft');
@@ -101,7 +85,7 @@ test('decode failure uses the native switch without leaving a blank overlay or r
   assert.equal(f.layer(1), null);
   assert.equal(f.layer(1), null);
   assert.equal(f.requests.length, 2);
-  f.dialog.querySelector('.ct-media-viewer-controls button:last-child').click();
+  f.dialog.querySelector('[data-native-next]').click();
   assert.equal(f.preview.src, f.images[1].src);
   assert.equal(f.preview.classList.contains('ct-media-photo-covered'), false);
 });

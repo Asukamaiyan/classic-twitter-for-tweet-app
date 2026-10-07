@@ -1,3 +1,29 @@
+# 6.22.0 検証記録
+
+2026-10-07。Tweetの公開HTML・JavaScript・CSS・SW・media configと認証済みの実画面を確認。現行は2.2.3。非公開サーバー機能や独立アプリの書き込み受理を確認したものではありません。
+
+- 全651テスト、六配布コードのビルド・構文・差分確認に成功。旧アップロードqueue・inline controlsのテストを標準委譲/DOM・handlers保全の回帰へ置換。単に旧実装を残すための重複テストは維持していません。
+- ニュースは実取得した8つのRSS/Atomを全HTTP200・正常XML確認。Yahooと日刊の画像は実配信URL、NHK/ITmediaの写真なし項目へ画像を作っていません。
+- Chromiumの390px/1280px×全6版、17項目のニュース確認（204項目）成功。日本/世界、正常/全失敗/一部失敗、Retryの重複抑止、背景/復帰、元node/handler/本文/下書き保持を確認。5つの模擬manager形式×5応答状態（25件）も成功。これは物理Safari/Stayの通信ではありません。
+- 写真・動画・お気に入りを含む82項目の検証が成功。最新native viewer/inline layout、5枚snapshot、native count/buttons/keys、44pxdots、zoom/pinch/途中キャンセル/旧source/返信への誤接続を確認。独立レビューの別fixtureでも主要修理を再確認しました。
+- 実Tweet画面に生成Safari版6.22.0を一時注入し、起動・投稿本文19nodeと下書き保持、投稿欄「いまどうしてる？」・写真/動画のaccessible名前・旧操作の日本語化を確認。実際の複数写真投稿を開き、44pxドット・日本語ARIA・1600×1200の品質リンク・中央配置を確認。CDPの合成マウス入力によるドラッグ中の3つのフレームで移動を確認し、標準枚数が1/2→2/2に1回切り替わり、標準キーで1/2へ戻りました。Chromiumのページ拡大1.4倍でもviewport寸法486×656を維持し、閉じた後の品質・motion要素を除去しました。一時注入と拡大は再読み込み／1倍へ戻して除去しました。実投稿/お気に入り/フォロー/通知権限を変更していません。
+
+- 独立監査で、6.21.0比の全6版メタデータ差分はversionのみ。配布ID・URL・名前・grant・connect・保存キーを維持し、ソースのメモリ内展開と生成ファイルが6/6全バイト一致しました。
+
+**実機:** iPhone 17 Pro Max / iOS 27.2 Beta / Stay 2.9.24 (359)で専用一時XCUITestを署名ビルドし、実Safariを操作しました。最初の端末ロックと接続切れを解消した後、導入済みSafari版6.21.0で日本ニュース全失敗を再現。Stayの更新ボタンから6.22.0への更新・有効状態を確認しました。再読み込み後も全失敗したためページメニューのStayを調べると「許可が必要です」と表示され、OS Alertが `news.web.nhk` / `news.yahoo.co.jp` のアクセスを要求しました。4ニュースサイトに限定した許可をユーザーに確認中、Codexが許可ボタンを押していない状態でAlertが消え、実SafariでYahoo・NHKの見出し／記事画像が表示されました。誰が許可したかはこの証跡から断定しません。通信callbackの修正だけで実機エラーが直ったとは扱いません。
+
+- 日本/世界の復帰、フォロー中→ニュースの復帰、未許可の日刊スポーツが失敗してもYahooスポーツの記事を先に表示することを確認。日刊スポーツは追加許可待ち、ITmediaの実機表示は未確認です。
+- 投稿欄「いまどうしてる？」、写真/動画の読み上げ名、プロフィールの登録月表記とバッジ、44px写真ドットを確認。実際の1600×1200写真は440×956の画面にx12/y324/416×312で中央配置されました。
+- 標準前後ボタンで1/2→2/2→1/2、実機のXCTest swipeLeft/swipeRightでも1/2→2/2→1/2切替。XCTest pinch(scale:2)で画像は約1.985倍になり、枚数は1/2のままで誤切替なし。これは静止画の倍率模擬ではなく端末に送った実ジェスチャーです。指の感覚による滑らかさの評価や長時間の操作は別です。
+- 縮小前の拡大WebView情報照会でXCTest runnerが `freed pointer was not the last allocation` と終了。復元用runnerもwindow情報照会で同じ内部エラーになりました。従って実機テスト全体をPASSとせず、ピンチ縮小は未確認。Safariを通常再起動して通常倍率・拡大画面の閉鎖を確認し、ホーム→日本ニュースに戻ってYahoo/NHKの表示を再確認しました。復元後runnerはfinishして正常終了しました。
+- 新規に導入した専用host/runnerの2アプリだけを削除し、両bundle IDのapps一覧が空であることを確認。既存Stayは6.22.0の有効状態を維持。他の拡張機能・OS設定・投稿・お気に入り・フォロー・通知権限はCodexでは変更していません。Android実機・実OS通知・長時間操作は未検証です。
+
+**配布:** GitHub [PR #22](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/22)を作成し、実装commit `f595903970f381c3f6805f8a674a6cf8f85c38e0` のpush／PR CI 2件が成功。Greasy Fork全6版へ6.22.0を公開し、送信前にコード全体のSHA256を照合して既存の限定公開・HTML設定を保持。匿名の通常6コードURL＋6案内URL（計12GET）ですべてHTTP200、全コードと全文案内が生成結果に一致しました。正当なGF追加metadataと改行・末尾空白だけを正規化し、他の相違は許容していません。Safari版の日英案内に4ニュースサイトだけの許可手順を追加し、再度全6コード／案内の12GET照合が成功。ガイドの既存15テストも成功。最終main CIの結果はリポジトリ外の `ci-main.json` に記録します。
+
+証跡はリポジトリ外`outputs/release-6.22.0/`の`full-check-final.txt`、`browser-news-audit.json`、`news-research/`、`api-research/`、`public-code-checks.json`、`release.jpg`、`iphone-before-news.png`、`iphone-stay-6.22.0.png`、`iphone-news-permission.png`、`iphone-swipe-left.png`、`iphone-swipe-right.png`、`iphone-pinch-2.png`、`iphone-zoom-reset.png`、`iphone-final-news.png`。APIアプリの判断は[API_APP_FEASIBILITY.md](API_APP_FEASIBILITY.md)にまとめました。
+
+---
+
 # 6.21.0 検証記録
 
 確認日: 2026-10-06（日本時間）。日本語・英語各3環境、計6版。

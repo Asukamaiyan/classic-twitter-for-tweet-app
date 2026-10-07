@@ -6,6 +6,7 @@ const { JSDOM } = require('jsdom');
 const root = path.join(__dirname, '..');
 const distributions = require('../scripts/distributions.cjs');
 const releaseVersion = require('../package.json').version;
+const {galleryMarkup,installNativeViewer}=require('./helpers/native-media.cjs');
 
 function closeFixture(dom) {
   // JSDOM deletes document without firing pagehide. Run the normal lifecycle
@@ -180,7 +181,7 @@ for (const { file, locale } of distributions) {
       ${['For you', 'Following', 'News', 'Sports', 'Entertainment', 'Technology'].map((name, i) => `<button class="rounded-full whitespace-nowrap ${i === 0 ? 'bg-sky-500 text-white' : ''}">${name}</button>`).join('')}
       </div></div><div id="native-body"><article>
       <p class="whitespace-pre-wrap break-words">News Photos Home</p>
-      <div class="grid gap-0.5 rounded-2xl overflow-hidden border"><div class="relative overflow-hidden"><img alt="Attached media" class="cursor-pointer" src="https://storage.googleapis.com/first.png"></div><div class="relative overflow-hidden"><img alt="Attached media" class="cursor-pointer" src="https://storage.googleapis.com/second.png"></div></div>
+      ${galleryMarkup(2)}
       </article></div></div><textarea id="public-tweet-input" placeholder="What's happening, Alice?">My draft</textarea>
       </main></body></html>`, {url:'https://app.tweet.app/feed', runScripts:'outside-only', pretendToBeVisual:true});
     const {window} = dom;
@@ -202,19 +203,7 @@ for (const { file, locale } of distributions) {
       } else window.setTimeout(() => options.onload({status:401,responseText:'{}'}),0);
       return {abort(){}};
     };
-    for (const image of window.document.querySelectorAll('img[alt="Attached media"]')) {
-      image.addEventListener('click', () => window.queueMicrotask(() => {
-        let viewer = window.document.querySelector('[aria-label="Media viewer"]');
-        if (!viewer) {
-          viewer = window.document.createElement('div');
-          viewer.setAttribute('role','dialog'); viewer.setAttribute('aria-modal','true'); viewer.setAttribute('aria-label','Media viewer');
-          viewer.innerHTML = '<img alt="Media preview">';
-          window.document.body.append(viewer);
-        }
-        // Match React's delayed src-only update, not a replacement image node.
-        viewer.querySelector('img').src = image.src;
-      }));
-    }
+    const nativePhotos=installNativeViewer(window,[...window.document.querySelectorAll('#gallery img')],{asyncCommit:true});
     let mutations = 0;
     const observer = new window.MutationObserver(() => mutations++);
     observer.observe(window.document.body,{childList:true,subtree:true,attributes:true,characterData:true});
@@ -223,19 +212,22 @@ for (const { file, locale } of distributions) {
       await new Promise(resolve => setTimeout(resolve,400));
       assert.deepEqual(errors,[]);
       assert.equal(window.document.documentElement.dataset.ctActiveVersion,releaseVersion);
-      assert.equal(window.document.querySelector('.ct-media-carousel-controls [role="status"]').textContent,'1 / 2');
+      assert.equal(window.document.querySelector('[data-inline-count]').textContent,'1/2');
+      assert.equal(window.document.querySelector('.ct-media-carousel-controls'),null);
       assert.equal(window.document.querySelector('article p').textContent,'News Photos Home');
       assert.equal(window.document.querySelector('textarea').value,'My draft');
       assert.equal(window.document.querySelector('textarea').placeholder,locale === 'en' ? "What's happening, Alice?" : 'いまどうしてる？');
       assert.equal(requests.length,0,'home must not request a news feed');
-      window.document.querySelector('img[alt="Attached media"]').click();
+      window.document.querySelector('#gallery img').click();
       await new Promise(resolve => setTimeout(resolve,200));
-      assert.equal(window.document.querySelector('.ct-media-viewer-controls [role="status"]').textContent,'1 / 2');
-      window.document.querySelector('.ct-media-viewer-controls button:last-child').click();
+      assert.equal(nativePhotos.dialog.querySelector('[data-native-count]').textContent,'1/2');
+      assert.equal(nativePhotos.dialog.querySelector('.ct-media-viewer-controls'),null);
+      nativePhotos.dialog.querySelector('[data-native-next]').click();
       await new Promise(resolve => setTimeout(resolve,200));
-      assert.match(window.document.querySelector('[aria-label="Media viewer"] img').src,/second\.png$/);
-      assert.equal(window.document.querySelector('.ct-media-viewer-controls [role="status"]').textContent,'2 / 2','gallery must observe a React src-only commit');
-      window.document.querySelector('[aria-label="Media viewer"]').remove();
+      assert.match(nativePhotos.dialog.querySelector('img').src,/gallery-1\.jpg$/);
+      assert.equal(nativePhotos.dialog.querySelector('[data-native-count]').textContent,'2/2','native counter remains authoritative');
+      assert.equal(nativePhotos.calls.next,1,'one control press invokes the native selection once');
+      nativePhotos.dialog.remove();
       const tabs = window.document.querySelectorAll('.sticky button');
       tabs[0].classList.remove('bg-sky-500','text-white');
       tabs[2].classList.add('bg-sky-500','text-white');

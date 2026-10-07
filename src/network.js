@@ -75,6 +75,10 @@
             timeout: ctNetworkState.requestTimeout, redirect: 'error', anonymous: true,
             responseType: 'text',
             onload: response => finish(parse(response)),
+            // Stay's Safari bridge releases its per-request message listener
+            // only when onloadend is registered. A final loadend can also
+            // supply the response; finish keeps the first result authoritative.
+            onloadend: response => finish(parse(response)),
             onerror: () => finish(null), ontimeout: () => finish(null), onabort: () => finish(null)
           });
           if (handle && typeof handle.then === 'function') {

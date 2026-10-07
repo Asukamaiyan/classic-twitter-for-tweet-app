@@ -151,7 +151,11 @@
         try {
           handle = request({ method: 'GET', url: target, anonymous: true, redirect: 'error', responseType: 'text',
             timeout: ctNewsState.timeout, headers: { Accept: 'application/rss+xml, application/xml, text/xml' },
-            onload: response => finish(parse(response)), onerror: () => finish(null),
+            onload: response => finish(parse(response)),
+            // Stay's public Safari bridge removes its per-request message
+            // listener only when an onloadend callback is registered. Accept a
+            // final loadend as well, without replacing an earlier completion.
+            onloadend: response => finish(parse(response)), onerror: () => finish(null),
             ontimeout: () => finish(null), onabort: () => finish(null) });
           if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => {
             // A mobile bridge can resolve its request receipt before onload.

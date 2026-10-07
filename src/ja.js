@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.21.0
+// @version      6.22.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -445,6 +445,11 @@
     ['Saved', '保存しました'],
     ['Cancel', 'キャンセル'],
     ['Close', '閉じる'],
+    ['Close media viewer', '写真・動画を閉じる'],
+    ['Previous image', '前の画像'],
+    ['Next image', '次の画像'],
+    ['Media viewer', '写真・動画ビューア'],
+    ['Choose image', '画像を選択'],
     ['Confirm', '確認'],
     ['Delete', '削除'],
 
@@ -1330,9 +1335,30 @@ if (/^just\s+now$/i.test(t)) {
     return { row, paragraph, element: el };
   }
 
+  function nativeMediaUploadJapaneseText(el, text) {
+    if (!el?.matches('span') || el.closest('[data-ct-local-ui],[data-user-content],blockquote,[aria-label^="Quoted post"]')) return null;
+    const error = el.parentElement;
+    const upload = error?.parentElement;
+    if (!error?.matches('div.p-3.border.text-red-500.flex.items-center.gap-2') ||
+        !error.classList.contains('bg-red-500/10') || !error.classList.contains('border-red-500/15') ||
+        error.children.length !== 2 || !error.firstElementChild.matches('svg.lucide-circle-alert') ||
+        !upload?.matches('div.w-full.mt-3.space-y-3') ||
+        !upload.querySelector('input[type="file"][accept="image/*"][multiple]') ||
+        !upload.querySelector('input[type="file"][accept="video/mp4,video/quicktime"]') ||
+        !(upload.parentElement?.querySelector('textarea#public-tweet-input,textarea#public-modal-tweet-input') ||
+          upload.closest('form[role="form"]')?.querySelector('textarea'))) return null;
+    let match;
+    if ((match = text.match(/^Maximum of (\d{1,2}) images allowed per post\.$/))) return `写真は1ツイートに${match[1]}枚まで追加できます。`;
+    if ((match = text.match(/^Images must be (\d{1,3}) MB or smaller\.$/))) return `写真は1枚${match[1]}MB以下にしてください。`;
+    // The native suffix contains user file names. Keep it byte-for-byte intact.
+    if ((match = text.match(/^(\d{1,3}) (?:image was|images were) not added\.(?: ([\s\S]*))?$/))) return `${match[1]}枚の写真を追加できませんでした。${match[2] == null ? '' : ' ' + match[2]}`;
+    return null;
+  }
+
   function isLocalizationUI(node) {
     const el = node?.parentElement;
     if (isProtectedLocalizationElement(el)) return false;
+    if (nativeMediaUploadJapaneseText(el, node.nodeValue)) return true;
     if (localizationNotificationAction(node) || isNativeNotificationTimestamp(el)) return true;
     if (localizationNotificationRow(el)) return false;
     if (isNativeParentPostTimestamp(el)) return true;
@@ -1474,12 +1500,38 @@ if (/^just\s+now$/i.test(t)) {
   function patchUIAttributes(root = document) {
     const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
     const controls = [];
-    if (host instanceof Element && host.matches('button,[role="tab"],[role="menuitem"],input,textarea')) controls.push(host);
-    host?.querySelectorAll?.('button,[role="tab"],[role="menuitem"],input,textarea').forEach(el => controls.push(el));
+    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,[role="dialog"][aria-modal="true"][aria-label="Media viewer"],div[aria-label="Choose image"]';
+    if (host instanceof Element && host.matches(selector)) controls.push(host);
+    host?.querySelectorAll?.(selector).forEach(el => controls.push(el));
+    // Tweet 2.2.3 owns these photo controls. Match their actual structure so an
+    // image caption, quoted post or unrelated image button cannot become UI.
+    const nativePhotoUI = el => {
+      if (el.closest('[data-ct-local-ui],[id^="ct-"],[data-user-content],blockquote,[aria-label^="Quoted post"]')) return null;
+      const dialog = el.closest('[role="dialog"][aria-modal="true"]');
+      if (dialog && /^(?:Media viewer|写真・動画ビューア)$/.test(dialog.getAttribute('aria-label') || '') &&
+          dialog.matches('div.fixed.inset-0.flex.flex-col') &&
+          dialog.querySelector(':scope > div > button > svg.lucide-x') &&
+          dialog.querySelector(':scope > div.flex-1.min-h-0 > img.object-contain[draggable="false"]')) {
+        if (el === dialog || el.matches('button') && (el.querySelector(':scope > svg.lucide-x,:scope > svg.lucide-chevron-left,:scope > svg.lucide-chevron-right'))) return { count: 0 };
+      }
+      const gallery = el.closest('div.relative.overflow-hidden.rounded-2xl.border.bg-black');
+      const track = gallery?.querySelector(':scope > div.snap-x.snap-mandatory.overflow-x-auto');
+      if (!track || !gallery.closest('article')) return null;
+      const photos = [...track.children];
+      if (photos.length < 2 || photos.length > 5 || !photos.every(button => button.matches('button.w-full.min-w-full.shrink-0.snap-start') &&
+          button.children.length === 1 && button.firstElementChild.matches('img.h-full.w-full.object-cover'))) return null;
+      if (el.parentElement === track) return { count: photos.length, index: photos.indexOf(el) + 1, open: true };
+      if (el.parentElement === gallery && el.matches('button') && el.querySelector(':scope > svg.lucide-chevron-left,:scope > svg.lucide-chevron-right')) return { count: photos.length };
+      const dots = [...gallery.children].find(child => /^(?:Choose image|画像を選択)$/.test(child.getAttribute('aria-label') || '') &&
+        child.children.length === photos.length && [...child.children].every(button => button.matches('button[aria-current]')));
+      if (el === dots) return { count: photos.length };
+      return el.parentElement === dots ? { count: photos.length, index: [...dots.children].indexOf(el) + 1, show: true } : null;
+    };
     for (const el of controls) {
-      if (isOwnedLocalizationElement(el) ||
+      const photo = nativePhotoUI(el);
+      if (!photo && isOwnedLocalizationElement(el) ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
-          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || el.querySelector('img')) continue;
+          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || !photo && el.querySelector('img')) continue;
       if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
           el.querySelector(':scope > svg.lucide-x') &&
           el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
@@ -1493,10 +1545,13 @@ if (/^just\s+now$/i.test(t)) {
         const likers = el.matches('[data-testid="tweet-like-action-count"]') &&
           value?.match(/^View (\d+) likes?$/);
         const choice = nativeLocalizationPoll(el)?.compose && value?.match(/^Remove choice (\d+)$/);
-        const out = value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
+        const image = photo && value?.match(/^(Open|Show) image ([1-5]) of ([2-5])$/);
+        const imageLabel = image && Number(image[2]) === photo.index && Number(image[3]) === photo.count &&
+          (image[1] === 'Open' ? photo.open : photo.show) ? `${image[3]}枚中${image[2]}枚目の画像を${image[1] === 'Open' ? '開く' : '表示'}` : null;
+        const out = imageLabel || (value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
           choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
-          likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value);
+          likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value));
         if (out && value !== out) ctRememberLocalization(el, attr, out);
       }
     }
@@ -1513,7 +1568,7 @@ if (/^just\s+now$/i.test(t)) {
     const sourceLanguage = isNativeTranslationMetadata(el) && node === el.firstChild && text.match(/^Translated from (.{1,80})$/);
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
-    let out = nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+    let out = nativeMediaUploadJapaneseText(el, node.nodeValue) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
       (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
@@ -2304,6 +2359,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.21.0 loaded'
+    '🐦 Classic Twitter JP v6.22.0 loaded'
   );
 })();

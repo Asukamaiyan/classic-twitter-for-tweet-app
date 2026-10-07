@@ -222,6 +222,83 @@ test('late callback and Promise cannot replace the first completed result', asyn
   assert.equal(result.first, true);
 });
 
+test('Safari loadend-only JSON response preserves anonymous GET and validated auth headers', async () => {
+  let request;
+  const c = harness({ GM: { xmlHttpRequest(options) {
+    request = options;
+    queueMicrotask(() => options.onloadend({ status: 200, readyState: 4,
+      responseText: null, response: '{"loadend":true}', responseURL: options.url }));
+    return { abort() { assert.fail('completed loadend must clear the deadline'); } };
+  } } });
+  const result = await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}`, Cookie: 'never-send' });
+  assert.equal(result.loadend, true);
+  assert.equal(request.method, 'GET');
+  assert.equal(request.anonymous, true);
+  assert.equal(request.headers.Authorization, `Bearer ${tokenA}`);
+  assert.equal(request.headers.Cookie, undefined);
+});
+
+test('Stay bridge can release request listeners on success, failure and deadline abort', async () => {
+  // Stay removes its per-request window message listener in the registered
+  // details.onloadend branch. This contract also applies to authenticated
+  // read-only lookups; it must not retain completed request closures.
+  // https://github.com/shenruisi/Stay/blob/9b78d761d307234d4ed5ea72ac423804ea0c4301/Stay/tampermonkey/lib/gm-api-create.js#L1059-L1116
+  for (const mode of ['success', 'failure', 'timeout']) {
+    const listeners = new Set();
+    let aborts = 0;
+    const c = harness({ GM_xmlhttpRequest(options) {
+      const listener = {};
+      listeners.add(listener);
+      const end = response => {
+        if (options.onloadend) {
+          options.onloadend(response);
+          listeners.delete(listener);
+        }
+      };
+      if (mode === 'success') queueMicrotask(() => {
+        options.onload({ status: 200, response: '{"ok":true}', responseURL: options.url });
+        end({ status: 200, response: '{"ok":true}', responseURL: options.url });
+      });
+      if (mode === 'failure') queueMicrotask(() => {
+        options.onerror({ status: 0 });
+        end({ status: 0, responseText: '' });
+      });
+      return { abort() { aborts++; options.onabort({ status: 0 }); end({ status: 0, responseText: '' }); } };
+    } });
+    const result = await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}` });
+    assert.equal(result?.ok ?? null, mode === 'success' ? true : null);
+    assert.equal(listeners.size, 0, `${mode} must release the Safari bridge listener`);
+    assert.equal(aborts, mode === 'timeout' ? 1 : 0);
+  }
+});
+
+test('late loadend cannot replace a successful callback or revive failed and timed-out requests', async () => {
+  for (const mode of ['success', 'failure', 'timeout']) {
+    let details;
+    const c = harness({ GM_xmlhttpRequest(options) {
+      details = options;
+      if (mode === 'success') options.onload({ status: 200, response: '{"first":true}' });
+      if (mode === 'failure') options.onerror({ status: 0 });
+      return { abort() {} };
+    } });
+    const result = await c.network.requestJSON(apiURL);
+    details.onloadend({ status: 200, readyState: 4, response: '{"first":false}', responseURL: apiURL });
+    assert.equal(result?.first ?? null, mode === 'success' ? true : null);
+  }
+});
+
+test('loadend-only redirects, status errors and non-text payloads remain rejected', async () => {
+  for (const response of [
+    { status: 200, response: '{}', responseURL: 'https://api.tweet.app/api/posts' },
+    { status: 200, response: '{}', responseURL: 'https://other.test/api/posts' },
+    { status: 403, response: '{}' },
+    { status: 200, response: { ok: true } }
+  ]) {
+    const c = harness({ GM_xmlhttpRequest(options) { options.onloadend(response); } });
+    assert.equal(await c.network.requestJSON(apiURL), null);
+  }
+});
+
 test('fetch has an abort deadline, redirect denial and no ambient cookies', async () => {
   let options;
   const c = harness({ fetch: (url, value) => { options = value; return new Promise(() => {}); } });

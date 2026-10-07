@@ -116,6 +116,11 @@ function render(edition) {
   const safariFeature = edition.platform === 'safari'
     ? japanese ? '<p>Safari版は写真・動画の長押しで配信ファイル情報も表示します。</p>' : '<p>The Safari edition also shows delivered media file information on a long press.</p>'
     : '';
+  const safariNewsPermission = edition.platform === 'safari'
+    ? japanese
+      ? '<p>日本ニュースが出ないとき：Safariのページメニュー → Stay → 表示されたニュースサイトだけを許可 → ニュースの「再試行」。対象は <code>news.yahoo.co.jp</code> / <code>news.web.nhk</code> / <code>www.nikkansports.com</code> / <code>rss.itmedia.co.jp</code>。</p>'
+      : '<p>If Japan news does not appear: Safari’s page menu → Stay → allow only the news sites shown → Retry in News. Sites: <code>news.yahoo.co.jp</code> / <code>news.web.nhk</code> / <code>www.nikkansports.com</code> / <code>rss.itmedia.co.jp</code>.</p>'
+    : '';
 
   return [
     `<h2>${escapeHtml(heading)}</h2>`,
@@ -124,6 +129,7 @@ function render(edition) {
     `<h3>${install}</h3><ol>${steps.map(step => `<li>${step}</li>`).join('')}</ol>`,
     platformNote,
     `<h3>${update}</h3><p>${updateText}</p>`,
+    safariNewsPermission,
     `<p><strong>${japanese ? '有効にするのは環境と言語に合う1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。' : 'Enable only one edition for your browser and language. Disable the previous edition when switching.'}</strong></p>`,
     `<h3>${japanese ? '版を選ぶ' : 'Choose an edition'}</h3>`,
     editionTable(edition.locale),
