@@ -4,9 +4,11 @@
 
 - `npm run check` 全678件、6生成版の構文検査が成功。関連98件も成功。
 - Chromiumの日英×320/390/1280px（6ケース）で、画質情報とnavの間隔8px、画面内配置、全buttonの44px以上、下書き保持を確認。現行moduleと番号付きSVGに画質リンクを表示した制御fixtureであり、実配信画像の通信とは別です。
-- 公開・実機更新・最終GitHub結果は確認後に追記します。
+- 全6版をGreasy Forkへ6.23.1として公開。通常6コード＋6案内の匿名GET（計12件、再試行なし）はHTTP200、生成コード／案内全文と一致しました。独立監査で6.23.0比の本体差分はプロフィール専用CSSと版番号、metadata差分はversionのみ。既存のgrant/connect、配布ID、保存呼出しを保持しています。
+- iPhone 17 Pro MaxのStayで6.23.1へ更新し、有効状態を確認。6.23.0のニュース選択と実配信写真の左右スワイプは下記で確認済みですが、6.23.1の画質表示と閉じるボタンの最終実機受け入れは未確認です。別アプリのUV Index画面はユーザーが閉じ、その後の新規スクリーンショットで消失を確認。写真・動画と標準返信の両tabが、同じ可視位置・enabled状態でもXCTestで`isHittable=false`となり、タップ前に停止しました。製品のclick handlerまで到達しておらず、原因は未確定です。ユーザーへ写真を開く手操作を依頼しています。
+- 実機harnessの6.23.1初回runは、起動していないShortcuts appのsnapshot検査でXCTestエラーが記録されて失敗しました。元xcresultを保持し、Tweetの不具合や全体PASSとは扱いません。別の再実行で最終確認と復元を行います。
 
-証跡はリポジトリ外`outputs/release-6.23.1/`の`full-check.txt`、`browser-profile-audit.json`。ニュースと認証済みAPIの調査は下記6.23.0記録を引き継ぎます。
+証跡はリポジトリ外`outputs/release-6.23.1/`の`full-check.txt`、`browser-profile-audit.json`、`public-code-checks.json`、`metadata-audit.json`、`iphone-stay-6.23.1.png`、`release.jpg`。ニュースと認証済みAPIの調査は下記6.23.0記録を引き継ぎます。
 
 ---
 
@@ -24,6 +26,11 @@
 - 実Tweetの公開プロフィールへ生成Safari版を一時注入し、native見出しFeed→プロフィール、40件の投稿本文、元のtextarea値とプロフィール名の保持を確認。追加ツールのtextareaと翻訳対象のstatic見出しをuser dataから区別して照合しました。再読み込みで注入コード・専用UI・version属性の除去を確認。Stayのdocument-start実行とは別のChromium検証です。
 - 独立配布監査で6.22の固定commitに対し、名前・namespace・URL・grant・connect・6配布IDを維持しmetadata差分はversionだけと確認。全6コードがsource展開と完全一致、既存28保存呼出し署名/キーは不変。新規保存キーはニュースの`ct-news-sources-v1`のみ。全6案内の必要なもの・初回4手順・更新・リンクも保持しています。
 - GitHub [PR #23](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/23)の実装commit `e083121` のpush/PR CI2件が成功。Greasy Forkの全6版へ6.23.0を公開し、送信前にコード全文のSHA256と案内の一致を確認して既存限定公開/HTML設定を保持。通常6コード＋6案内（12GET）を匿名取得し、全HTTP200・全文一致を確認しました。GFが正当に付与した更新URLメタデータと改行/末尾空白だけを正規化しています。最終commit/マージ後CIは別途記録します。
+
+**6.23.0実機:** iPhone 17 Pro Max / iOS 27.2 Beta / Stay 2.9.24 (359)。Stayの更新ボタンで6.22.0→6.23.0、有効状態を確認。Safariの国内ニュースでYahoo/NHKと画像を表示、配信元の44px選択領域、NHKだけへの切替、最後の配信元をオフにしない説明を確認しました。再読み込み後もNHKだけを選んだ状態を保持し、その後Yahoo/NHKの両方オンへ戻しました。新規キーは初期値と同じ選択へ復元したもので、初回のキー未作成状態をバイト単位で戻したとは扱いません。
+
+- 実公開プロフィールに「プロフィール」と「写真・動画」を表示し、実2枚画像を取得。1600×1200の配信情報、実機XCTestのswipeLeftで1/2→2/2、swipeRightで2/2→1/2を確認しました。指の感覚による滑らかさの評価ではありません。画質リンクがnavに重なり、閉じるタップ後もviewerが残ることを発見し、6.23.1の専用CSSで修正しました。
+- 初回runnerは画面記録のFoundation JSON encoding error3852で停止。Tweetの処理エラーとは断定しません。専用harnessの文字列記録だけを修正し、同3852に限りUTF-8へ再構成、元error・警告・補修フラグを記録。ホストで同エラーの再現と11確認が成功しました。復帰時の1snapshotは補修ありの証跡として扱い、その後のニュース選択・画像操作は補修なしで取得しました。元の失敗xcresultを保持し、テスト全体PASSへ置き換えていません。
 
 参照した公式資料は[Tweetbotのtimeline操作](https://tapbots.com/support/tweetbot6/tips/timeline)、[その他の操作](https://tapbots.com/support/tweetbot6/tips/misc)、[Ivoryのフィルター表示説明](https://tapbots.com/support/ivory/general/timeline_missing_posts)。選択状態の明示と短い操作導線を設計の参考にしました。プロフィール写真のスワイプは本スクリプトの改善です。Tweetbotは終了済み、IvoryはMastodon用で、TweetのAPI仕様とは扱いません。
 
