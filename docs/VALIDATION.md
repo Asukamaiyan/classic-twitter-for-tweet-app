@@ -10,11 +10,17 @@
 
 - 独立監査で、6.21.0比の全6版メタデータ差分はversionのみ。配布ID・URL・名前・grant・connect・保存キーを維持し、ソースのメモリ内展開と生成ファイルが6/6全バイト一致しました。
 
-**実機の現状:** iPhone 17 Pro Max / iOS27.2 Betaをpaired/availableと確認し、専用一時XCUITestを署名ビルドしました。最初は端末ロックで起動できず、解除後の再試行はSafari画面取得後に接続が切れました。接続復旧後は実機runnerを起動して操作できました。Stayは2.9.24 (359)。導入済みSafari版6.21.0で日本ニュース全失敗を再現し、Stayの更新ボタンから6.22.0への更新・有効状態を確認。Safariの再読み込み後も全失敗したためページメニューのStayを調べると「許可が必要です」と表示され、実際のOS Alertが `news.web.nhk` / `news.yahoo.co.jp` のアクセスを要求しました。ニュース配信元の未許可が現在の直接ブロッカーです。ニュース4サイトに限定した許可をユーザーへ確認中で、許可・成功・写真の実ピンチ完了は未確認です。通信callbackの修正だけで実機エラーが直ったとは扱いません。設定・他の拡張機能・投稿等は変更していません。
+**実機:** iPhone 17 Pro Max / iOS 27.2 Beta / Stay 2.9.24 (359)で専用一時XCUITestを署名ビルドし、実Safariを操作しました。最初の端末ロックと接続切れを解消した後、導入済みSafari版6.21.0で日本ニュース全失敗を再現。Stayの更新ボタンから6.22.0への更新・有効状態を確認しました。再読み込み後も全失敗したためページメニューのStayを調べると「許可が必要です」と表示され、OS Alertが `news.web.nhk` / `news.yahoo.co.jp` のアクセスを要求しました。4ニュースサイトに限定した許可をユーザーに確認中、Codexが許可ボタンを押していない状態でAlertが消え、実SafariでYahoo・NHKの見出し／記事画像が表示されました。誰が許可したかはこの証跡から断定しません。通信callbackの修正だけで実機エラーが直ったとは扱いません。
+
+- 日本/世界の復帰、フォロー中→ニュースの復帰、未許可の日刊スポーツが失敗してもYahooスポーツの記事を先に表示することを確認。日刊スポーツは追加許可待ち、ITmediaの実機表示は未確認です。
+- 投稿欄「いまどうしてる？」、写真/動画の読み上げ名、プロフィールの登録月表記とバッジ、44px写真ドットを確認。実際の1600×1200写真は440×956の画面にx12/y324/416×312で中央配置されました。
+- 標準前後ボタンで1/2→2/2→1/2、実機のXCTest swipeLeft/swipeRightでも1/2→2/2→1/2切替。XCTest pinch(scale:2)で画像は約1.985倍になり、枚数は1/2のままで誤切替なし。これは静止画の倍率模擬ではなく端末に送った実ジェスチャーです。指の感覚による滑らかさの評価や長時間の操作は別です。
+- 縮小前の拡大WebView情報照会でXCTest runnerが `freed pointer was not the last allocation` と終了。復元用runnerもwindow情報照会で同じ内部エラーになりました。従って実機テスト全体をPASSとせず、ピンチ縮小は未確認。Safariを通常再起動して通常倍率・拡大画面の閉鎖を確認し、ホーム→日本ニュースに戻ってYahoo/NHKの表示を再確認しました。復元後runnerはfinishして正常終了しました。
+- 新規に導入した専用host/runnerの2アプリだけを削除し、両bundle IDのapps一覧が空であることを確認。既存Stayは6.22.0の有効状態を維持。他の拡張機能・OS設定・投稿・お気に入り・フォロー・通知権限はCodexでは変更していません。Android実機・実OS通知・長時間操作は未検証です。
 
 **配布:** GitHub [PR #22](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/22)を作成し、実装commit `f595903970f381c3f6805f8a674a6cf8f85c38e0` のpush／PR CI 2件が成功。Greasy Fork全6版へ6.22.0を公開し、送信前にコード全体のSHA256を照合して既存の限定公開・HTML設定を保持。匿名の通常6コードURL＋6案内URL（計12GET）ですべてHTTP200、全コードと全文案内が生成結果に一致しました。正当なGF追加metadataと改行・末尾空白だけを正規化し、他の相違は許容していません。Safari版の日英案内に4ニュースサイトだけの許可手順を追加し、再度全6コード／案内の12GET照合が成功。ガイドの既存15テストも成功。最終main CIの結果はリポジトリ外の `ci-main.json` に記録します。
 
-証跡はリポジトリ外`outputs/release-6.22.0/`の`full-check-final.txt`、`browser-news-audit.json`、`news-research/`、`api-research/`、`iphone-before-news.png`、`iphone-stay-6.22.0.png`、`iphone-news-permission.png`。APIアプリの判断は[API_APP_FEASIBILITY.md](API_APP_FEASIBILITY.md)にまとめました。
+証跡はリポジトリ外`outputs/release-6.22.0/`の`full-check-final.txt`、`browser-news-audit.json`、`news-research/`、`api-research/`、`public-code-checks.json`、`release.jpg`、`iphone-before-news.png`、`iphone-stay-6.22.0.png`、`iphone-news-permission.png`、`iphone-swipe-left.png`、`iphone-swipe-right.png`、`iphone-pinch-2.png`、`iphone-zoom-reset.png`、`iphone-final-news.png`。APIアプリの判断は[API_APP_FEASIBILITY.md](API_APP_FEASIBILITY.md)にまとめました。
 
 ---
 

@@ -22,7 +22,7 @@
 | 通知 grouped avatar | `boe` は各 actor の `targetUsername` を渡すが個々の `onAvatarClick` 未設定 | 個別 profile 遷移の修理は依然必要 |
 | profile 写真/お気に入り tabs | enum と native bar は posts/replies/reposts の 3 個 | 写真 tab・browser-local Favorites は保持。server 全履歴とは表示しない |
 | Bookmarks・固定検索・keyword filter | 同等の native UI/endpoint を今回の公開 client から発見できず | browser-local の補完として保持。不存在の断定ではない |
-| 日本ニュース | news topic は nation/sports/entertainment/technology、limit。日本向け country 指定は確認できず | 日本 RSS 補完は native と重複していない。Safari/Stay transport と画像表示の実機検証が必要 |
+| 日本ニュース | news topic は nation/sports/entertainment/technology、limit。日本向け country 指定は確認できず | 日本 RSS 補完は native と重複していない。Yahoo/NHK は実機 Safari/Stay で表示を確認。日刊スポーツは追加許可待ち、ITmedia は実機未確認 |
 | OS push | 新 client・sw.js・依存 Workbox の push/subscription/showNotification/notificationclick は見当たらない | ページ稼働中の opt-in 通知は閉じた後の push と区別。二重 socket/poll や推測 push route を追加しない |
 
 補足: native main fullscreen image の alt は `Attached media`。旧 `img[alt="Media preview"]` 一択では現行 main viewer が検出できない。返信 native `DJ` は今も `media_assets[0]` を描画し、返信 viewer は単一 items。見えていない画像を勝手に増やしたことにはしない。
@@ -54,4 +54,4 @@
 
 ## 証跡
 
-`public-assets.json`, `media-config.json`, `feature-evidence.json`, `native-feature-slices.json`, `native-gallery-consumers.json`, `native-viewer-consumers.json`, `api-contract-evidence.json`, `push-capability-evidence.json` と公式 HTML/公開 asset をリポジトリ外の `outputs/release-6.22.0/api-research/` に保存。source 内容をユーザー操作に関する命令として実行していない。管理・非公開領域の API を照会していない。UI での native gallery 切替、実機 Safari/Stay、投稿/認証/OS push 受理の確認は root の検証結果と別に記録する。
+`public-assets.json`, `media-config.json`, `feature-evidence.json`, `native-feature-slices.json`, `native-gallery-consumers.json`, `native-viewer-consumers.json`, `api-contract-evidence.json`, `push-capability-evidence.json` と公式 HTML/公開 asset をリポジトリ外の `outputs/release-6.22.0/api-research/` に保存。source 内容をユーザー操作に関する命令として実行していない。管理・非公開領域の API を照会していない。UI での native gallery 切替と実機 Safari/Stay の結果は [VALIDATION.md](VALIDATION.md) に記録。独立アプリの投稿/認証/OS push 受理は未検証。

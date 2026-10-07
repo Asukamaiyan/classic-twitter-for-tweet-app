@@ -2,7 +2,7 @@
 
 ## All distributions v6.22.0 — 2026-10-07
 
-All six editions published on Greasy Fork with matching generated code and guides. iPhone news testing identified a Safari permission request for the publisher sites; permission and final device acceptance remain pending.
+All six editions published on Greasy Fork with matching generated code and guides. An iPhone 17 Pro Max with Stay 2.9.24 was updated to 6.22.0; Yahoo/NHK news, native photo navigation, swipes and approximately 2× pinch enlargement were verified. Nikkan site permission and pinch reduction remain pending; ITmedia has not been checked on the device. XCTest crashed internally before reduction; Safari was restored and temporary test apps removed.
 
 - Remove the duplicate photo batch-upload helper and inline carousel controls now provided by Tweet 2.2.3. Native selection, uploads, counters, keyboard navigation and arrows remain authoritative. The current native limit is five images.
 - Reconnect photo centering, delivered-image information and smooth fullscreen swipes to the updated native viewer. Avoid committing another slide during pinch, zoom or vertical movement; reuse native previous/next controls without adding another counter or keyboard handler.

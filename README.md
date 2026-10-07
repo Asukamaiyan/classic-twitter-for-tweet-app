@@ -75,7 +75,7 @@
 
 お気に入りはミュート一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。自動同期はなく、サイトデータを消すと失われます。
 
-画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。iPhone 17 Pro Max＋Stay 2.9.24で6.22.0への更新を確認。日本ニュースは配信元サイトへのSafari許可待ちです。写真の実ピンチ・長時間操作、Android＋Tampermonkeyは未検証です。
+画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。iPhone 17 Pro Max＋Stay 2.9.24で6.22.0への更新を確認。実機でYahoo・NHKの日本ニュース表示と写真の中央配置・前後切替を確認しました。左右スワイプと約2倍の実ピンチ拡大も確認しました。日刊スポーツは追加許可待ち、ITmediaは実機未確認です。ピンチ縮小の直前にXCTestの内部エラーが発生したため、縮小は未確認。Safari再起動で通常倍率へ復元済みです。長時間操作、Android＋Tampermonkeyは未検証です。
 
 [変更履歴](CHANGELOG.md) · [API調査](docs/API_RESEARCH.md) · [検証記録](docs/VALIDATION.md)
 
@@ -111,7 +111,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.22.0 supports Tweet 2.2.3. Native multi-image selection (up to five images) and inline slides replace the duplicate extension handlers and controls. It preserves profile bio line breaks, opens delivered images directly and shows decoded image/video dimensions. Adjacent photos are prepared before swipe motion; pending or failed decoding keeps the native photo visible. It cannot increase delivered resolution or guarantee 4K/HDR retention. Optional browser alerts are off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported. Japan news continues to combine Yahoo, NHK, Nikkan Sports and ITmedia. Updating to 6.22.0 was confirmed on an iPhone 17 Pro Max with Stay 2.9.24; Japan news is awaiting Safari permission for its publisher sites. Physical pinch, Android and actual OS alerts remain unverified.
+Version 6.22.0 supports Tweet 2.2.3. Native multi-image selection (up to five images) and inline slides replace the duplicate extension handlers and controls. It preserves profile bio line breaks, opens delivered images directly and shows decoded image/video dimensions. Adjacent photos are prepared before swipe motion; pending or failed decoding keeps the native photo visible. It cannot increase delivered resolution or guarantee 4K/HDR retention. Optional browser alerts are off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported. Japan news continues to combine Yahoo, NHK, Nikkan Sports and ITmedia. Updating to 6.22.0 was confirmed on an iPhone 17 Pro Max with Stay 2.9.24; Yahoo/NHK news and centered photos with native navigation were verified on the device. Nikkan Sports is awaiting additional site permission; ITmedia has not been checked on the device. Physical swipes and an approximately 2× pinch enlargement were verified. XCTest crashed internally before pinch reduction, which remains unverified; restarting Safari restored normal scale. Android and actual OS notification delivery remain unverified.
 
 Turn off **Use classic appearance** in Tools to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available.
 

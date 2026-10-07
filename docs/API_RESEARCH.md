@@ -308,7 +308,7 @@ The shared API transport also accepts bounded string `response` when Stay does n
 
 ## 6.22.0: Tweet 2.2.3 refresh (2026-10-07)
 
-The official HTML now references `index-DlHW_XhF.js` (1,694,765 bytes; SHA-256 `3a76472beaecbb7eb86bb7adc5fe0e636d3488b4dac863a758ab6bc4e1451057`). The public media configuration increases image count from four to five; byte, daily and video limits remain server-controlled. Native image input accepts multiple files and uploads all selected images, and the native feed/viewer provides slide selection and counters. Remove the earlier duplicate batch and inline-slide implementations. Retain fullscreen motion/zoom/centering/quality presentation only where it complements the verified new viewer.
+The official HTML now references `index-DlHW_XhF.js` (1,694,765 bytes; SHA-256 `3a76472beaecbb7eb86bb7adc5fe0e636d3488b4dac863a758ab6bc4e1451057`). The public media configuration increases image count from four to five; byte, daily and video limits remain server-controlled. Native image input accepts multiple files and uploads accepted selections sequentially within the five-image limit, and the native feed/viewer provides slide selection and counters. Remove the earlier duplicate batch and inline-slide implementations. Retain fullscreen motion/zoom/centering/quality presentation only where it complements the verified new viewer.
 
 Native profile tabs remain Tweets/Replies/Reposts; Media/Favorites are still complementary. Native grouped avatars still lack individual profile handlers. Reply notification polling was already removed in 6.11.0 and is not reintroduced. Native notifications, polls, account mute/report and followed hashtags remain authoritative.
 
