@@ -167,3 +167,11 @@ Reduce repeated userscript DOM traversal on visible native changes, favorite com
 ## 6.22.0: Tweet 2.2.3 native ownership
 
 Use native multiple-image upload, five-image limit, inline carousel and fullscreen controls/counter/key navigation. Remove the obsolete batch/inline implementations. Keep smooth fullscreen motion, zoom/centering/quality presentation and native 44px dot targets as verified improvements. Capture all current native carousel media when saving a known favorite; reject quotes and user images. News/API transport final callbacks settle once and clean up Stay-compatible listeners. Physical Safari/Stay acceptance remains required for the reported iPhone failure.
+
+## 6.23.0 配信元の選択とプロフィール写真操作
+
+日本ニュースの「配信元」で、国内はYahoo!／NHK、スポーツ・エンタメはYahoo!／日刊スポーツ、ITはYahoo!／ITmediaから選択する。既存のジャンル別RSSだけを使い、最低1配信元を残す。任意URL追加や本文の自動分類を提供したことにはしない。保存できない変更は反映せず説明を表示する。別タブの設定を上書きせず、古い通信が新しい配信元の選択・キャッシュを復活させない。失敗した選択済み配信元だけを名指しし、取得済み記事／全失敗時の元ニュースと再試行を維持する。SafariだけにStayのサイト許可を確認する案内を表示し、通信エラーを許可不足と断定しない。
+
+追加した写真・動画／お気に入りタブの拡大写真を左右にスワイプできるようにし、指に追従する描画と短い着地を加える。既存画像・配信画像リンク・枚数・前後ボタン・キー操作を保持する。現在・前後の最大3枚だけを準備し、途中の方向反転でも未準備のpaneへ移動して黒くならない。準備が遅い場合は元画像を保持し、期限を過ぎた完了で勝手に切り替えない。縦移動・複数指・ズーム・モーション軽減と、閉じる・背景・経路・アカウント・画像一覧変更を検証し、不要な状態とイベントを解除する。ブラウザのzoom模擬とiPhone実ピンチを別々に記録する。
+
+日本語版では確認できた公開 `/user/` プロフィールの標準見出し `Feed` を「プロフィール」にする。名前、bio、本文、下書きは変えない。実際のログイン済み通信から読み取りschemaと認証headerの有無だけを記録し、認証値・投稿本文を保存しない。標準の詳細から戻る操作で読書位置が戻ることを確認したため、同じ機能を追加しない。独立アプリの認証・書き込み・外部利用契約が確認できたとは扱わない。

@@ -253,8 +253,13 @@
       .ct-profile-viewer{box-sizing:border-box;position:fixed;inset:var(--ct-photo-view-top,0px) auto auto var(--ct-photo-view-left,0px);margin:0;padding:0;border:0;background:#000;color:#fff;width:var(--ct-photo-view-width,100vw);height:var(--ct-photo-view-height,100dvh);max-width:none;max-height:none;overflow:hidden}
       .ct-profile-viewer[open]{display:grid;grid-template-rows:minmax(0,1fr)}
       .ct-profile-viewer::backdrop{background:#000c}
-      .ct-profile-viewer-stage{box-sizing:border-box;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right))}
+      .ct-profile-viewer-stage{position:relative;box-sizing:border-box;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right));touch-action:pan-y pinch-zoom}
+      .ct-profile-viewer-zoomed .ct-profile-viewer-stage{touch-action:pan-x pan-y pinch-zoom}
       .ct-profile-viewer img{display:block;width:100%;height:100%;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
+      .ct-profile-photo-covered{opacity:0}
+      .ct-profile-photo-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+      .ct-profile-photo-track{display:flex;width:100%;height:100%;will-change:transform}
+      .ct-profile-photo-pane{box-sizing:border-box;display:grid;place-items:center;flex:0 0 100%;min-width:0;min-height:0;height:100%;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right))}
       .ct-profile-viewer-nav{position:absolute;left:env(safe-area-inset-left);right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom);display:flex;align-items:center;justify-content:space-between;padding:8px;gap:8px}
       .ct-profile-viewer-nav button{min-width:44px;min-height:44px;border:1px solid #ffffff55;border-radius:4px;color:inherit;background:transparent;font:inherit;cursor:pointer}
       @media(max-width:480px){.ct-profile-row{padding:12px;gap:10px}.ct-profile-photo img,.ct-profile-video{max-height:360px}}
@@ -273,6 +278,188 @@
     const trigger = viewer.trigger?.isConnected ? viewer.trigger :
       ctProfileState.tablist?.querySelector('button[role="tab"][aria-selected="true"]');
     if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+  }
+  function ctProfilePhotoGestures(viewer, show) {
+    const { dialog, stage, image, images } = viewer;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const pointers = new Set(), decoded = new Map(), listeners = [];
+    let touch = null, motion = null, pinch = false, queued = null, waitTimer = null, suppressUntil = 0, closed = false;
+    const context = `${location.pathname}${location.search}\n${ctProfileUID() || ''}`;
+    const valid = () => !closed && ctProfileState.viewer === viewer && dialog.isConnected &&
+      viewer.trigger?.isConnected && viewer.gallery?.isConnected && !document.hidden && ctPageActive &&
+      context === `${location.pathname}${location.search}\n${ctProfileUID() || ''}` &&
+      viewer.sources === [...viewer.gallery.querySelectorAll(':scope > .ct-profile-photo > img')].map(node => node.src).join('\n');
+    const listen = (target, name, handler, options) => { target?.addEventListener?.(name, handler, options); listeners.push([target, name, handler, options]); };
+    const reset = () => {
+      const oldTouch = touch; touch = null;
+      if (oldTouch?.pointer != null) try { oldTouch.capture?.releasePointerCapture(oldTouch.pointer); } catch {}
+      clearTimeout(waitTimer); waitTimer = null; queued = null;
+      if (!motion) return;
+      const oldMotion = motion; motion = null;
+      cancelAnimationFrame(oldMotion.frame); clearTimeout(oldMotion.timer);
+      image.removeEventListener('load', oldMotion.loaded); image.removeEventListener('error', oldMotion.loaded);
+      image.classList.remove('ct-profile-photo-covered'); oldMotion.layer.remove();
+    };
+    const cancel = () => { if (touch?.locked || pinch) suppressUntil = Date.now() + 400; reset(); };
+    const forget = () => { for (const entry of decoded.values()) entry.image.removeEventListener('load', entry.loaded); decoded.clear(); };
+    const warm = () => {
+      if (!valid() || images.length < 2 || reduce?.matches || ctPhotoViewportZoomed()) { forget(); return; }
+      const wanted = new Set([viewer.index - 1, viewer.index, viewer.index + 1].filter(index => images[index]));
+      for (const [index, entry] of decoded) if (!wanted.has(index)) { entry.image.removeEventListener('load', entry.loaded); decoded.delete(index); }
+      for (const index of wanted) {
+        if (decoded.has(index)) continue;
+        const node = document.createElement('img'); node.alt = ''; node.draggable = false; node.decoding = 'async'; node.referrerPolicy = image.referrerPolicy;
+        const entry = { image: node, ready: false, loaded: null }; decoded.set(index, entry);
+        entry.loaded = () => {
+          if (!valid() || decoded.get(index) !== entry) return;
+          entry.ready = node.complete && node.naturalWidth > 0;
+          // The finger can reverse direction after the initially opposite photo
+          // finishes decoding. Fill that pane before covering the shown image.
+          const pane = motion?.panes.get(index);
+          if (entry.ready && pane && !pane.firstElementChild) pane.append(node);
+          if (entry.ready && queued === index) { reset(); viewer.index = index; show(); warm(); }
+        };
+        const canDecode = typeof node.decode === 'function';
+        if (!canDecode) node.addEventListener('load', entry.loaded);
+        node.src = images[index].url;
+        if (canDecode) {
+          try { Promise.resolve(node.decode()).then(entry.loaded, () => {}); } catch {}
+        } else entry.loaded();
+      }
+    };
+    const layer = target => {
+      if (motion || reduce?.matches) return;
+      warm();
+      if (!decoded.get(viewer.index)?.ready || images[target] && !decoded.get(target)?.ready) return;
+      const overlay = document.createElement('div'); overlay.className = 'ct-profile-photo-layer'; overlay.setAttribute('aria-hidden', 'true');
+      const track = document.createElement('div'); track.className = 'ct-profile-photo-track';
+      const panes = new Map();
+      for (const index of [viewer.index - 1, viewer.index, viewer.index + 1]) {
+        const pane = document.createElement('div'); pane.className = 'ct-profile-photo-pane';
+        const entry = decoded.get(index); if (entry?.ready) pane.append(entry.image); track.append(pane); panes.set(index, pane);
+      }
+      overlay.append(track); stage.append(overlay); image.classList.add('ct-profile-photo-covered');
+      motion = { layer: overlay, track, panes, frame: 0, timer: null, offset: 0, loaded: null };
+      track.style.transform = 'translate3d(-100%,0,0)';
+    };
+    const offset = dx => {
+      if (!motion) return;
+      motion.offset = dx; if (motion.frame) return;
+      const current = motion;
+      current.frame = requestAnimationFrame(() => {
+        current.frame = 0;
+        if (motion === current) current.track.style.transform = `translate3d(calc(-100% + ${current.offset}px),0,0)`;
+      });
+    };
+    const settle = target => {
+      if (!valid()) { ctProfileCloseViewer(); return; }
+      const current = motion, before = viewer.index, commit = target !== before;
+      if (commit && !reduce?.matches && !decoded.get(target)?.ready) {
+        // Keep the shown photo while the destination is unavailable. Late loads
+        // can select it only within this live gesture's bounded wait.
+        reset(); queued = target; waitTimer = setTimeout(reset, 1600); warm(); return;
+      }
+      if (commit) { viewer.index = target; show(); }
+      if (!current) { warm(); return; }
+      cancelAnimationFrame(current.frame); current.frame = 0;
+      current.track.style.transform = `translate3d(calc(-100% + ${current.offset}px),0,0)`;
+      current.track.getBoundingClientRect();
+      current.track.style.transition = 'transform 220ms cubic-bezier(.22,.68,0,1)';
+      current.track.style.transform = `translate3d(${commit ? target > before ? '-200%' : '0%' : '-100%'},0,0)`;
+      current.timer = setTimeout(() => {
+        if (motion !== current) return;
+        if (!valid()) { ctProfileCloseViewer(); return; }
+        const release = () => { if (motion === current) { reset(); warm(); } };
+        if (!commit || image.complete && image.naturalWidth > 0 && image.currentSrc === images[target].url) release();
+        else {
+          current.loaded = event => {
+            if (image.src === images[target].url && (event.type === 'error' ||
+                image.complete && image.naturalWidth > 0 && image.currentSrc === images[target].url)) release();
+          };
+          image.addEventListener('load', current.loaded); image.addEventListener('error', current.loaded);
+          current.timer = setTimeout(release, 1200);
+        }
+      }, 240);
+    };
+    const start = (event, point) => {
+      if (!valid()) { ctProfileCloseViewer(); return; }
+      if (!point || images.length < 2 || motion || queued != null || pinch || ctPhotoViewportZoomed() ||
+          event.target !== image && event.target !== stage) return;
+      touch = { x: point.clientX, y: point.clientY, at: performance.now(), locked: false, pointer: event.pointerId,
+        width: stage.clientWidth || window.innerWidth };
+    };
+    const drag = (event, point) => {
+      if (!touch || !point) return;
+      if (!valid()) { ctProfileCloseViewer(); return; }
+      if (pinch || ctPhotoViewportZoomed()) { cancel(); return; }
+      const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
+      if (!touch.locked) {
+        if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { touch = null; return; }
+        if (Math.abs(dx) < 10 || Math.abs(dx) <= Math.abs(dy) * 1.5) return;
+        touch.locked = true; layer(viewer.index + (dx < 0 ? 1 : -1));
+        if (event.pointerId != null) try { event.target.setPointerCapture(event.pointerId); touch.capture = event.target; } catch {}
+      }
+      if (event.cancelable) event.preventDefault();
+      const edge = viewer.index === 0 && dx > 0 || viewer.index === images.length - 1 && dx < 0;
+      const target = viewer.index + (dx < 0 ? 1 : -1);
+      // A reversed drag may face the still-undecoded neighbor. Keep the center
+      // photo visible until that pane is ready instead of exposing a black pane.
+      offset(images[target] && !decoded.get(target)?.ready ? 0 : edge ? dx * .22 : Math.max(-touch.width, Math.min(touch.width, dx)));
+    };
+    const end = (event, point) => {
+      const current = touch; if (!current || !point) return;
+      drag(event, point); if (touch !== current) return;
+      touch = null;
+      if (current.locked) {
+        const dx = point.clientX - current.x, fast = Math.abs(dx) >= 24 && Math.abs(dx) / Math.max(1, performance.now() - current.at) > .55;
+        const target = Math.max(0, Math.min(images.length - 1, viewer.index + (dx < 0 ? 1 : -1)));
+        suppressUntil = Date.now() + 400; settle(fast || Math.abs(dx) >= Math.min(90, current.width * .18) ? target : viewer.index);
+      }
+      if (current.pointer != null) try { current.capture?.releasePointerCapture(current.pointer); } catch {}
+    };
+    const pointer = typeof window.PointerEvent === 'function';
+    if (pointer) {
+      listen(dialog, 'pointerdown', event => {
+        if (event.pointerType !== 'mouse') {
+          pointers.add(event.pointerId);
+          if (event.isPrimary === false || pointers.size > 1) { pinch = true; cancel(); return; }
+        }
+        if (event.button === 0) start(event, event);
+      });
+      listen(dialog, 'pointermove', event => { if (touch?.pointer === event.pointerId) drag(event, event); });
+      listen(dialog, 'pointerup', event => {
+        pointers.delete(event.pointerId); if (pinch) cancel(); else if (touch?.pointer === event.pointerId) end(event, event);
+        if (!pointers.size) pinch = false;
+      });
+      listen(dialog, 'pointercancel', event => { pointers.delete(event.pointerId); cancel(); if (!pointers.size) pinch = false; });
+      listen(dialog, 'lostpointercapture', event => { if (touch?.pointer === event.pointerId) cancel(); });
+    }
+    listen(dialog, 'touchstart', event => {
+      if (event.touches?.length !== 1 || ctPhotoViewportZoomed()) { pinch = true; cancel(); }
+      else if (!pointer && !pinch) start(event, event.touches[0]);
+    }, { passive: true });
+    listen(dialog, 'touchmove', event => {
+      if (event.touches?.length !== 1 || ctPhotoViewportZoomed()) { pinch = true; cancel(); }
+      else if (!pointer && !pinch) drag(event, event.touches[0]);
+    }, { passive: false });
+    listen(dialog, 'touchend', event => {
+      if (pinch || ctPhotoViewportZoomed()) cancel(); else if (!pointer) end(event, event.changedTouches?.[0]);
+      if (!event.touches?.length) pinch = false;
+    });
+    listen(dialog, 'touchcancel', event => { cancel(); pinch = !!event.touches?.length; pointers.clear(); });
+    listen(dialog, 'dragstart', event => { if (touch && event.target === image) event.preventDefault(); });
+    listen(dialog, 'click', event => {
+      if (Date.now() < suppressUntil && (event.target === image || event.target === stage)) { event.preventDefault(); event.stopImmediatePropagation(); }
+    }, true);
+    const pause = () => { cancel(); forget(); pointers.clear(); pinch = false; };
+    listen(document, 'visibilitychange', () => { if (document.hidden) pause(); else warm(); });
+    listen(window, 'pagehide', pause);
+    listen(reduce, 'change', () => { cancel(); forget(); warm(); });
+    return {
+      move: step => { cancel(); if (!valid()) { ctProfileCloseViewer(); return; } viewer.index = Math.max(0, Math.min(images.length - 1, viewer.index + step)); show(); warm(); },
+      fit: result => { dialog.classList.toggle('ct-profile-viewer-zoomed', result.zoomed); if (result.zoomed || result.changed) { cancel(); forget(); } warm(); },
+      cleanup: () => { closed = true; pause(); for (const [target, name, handler, options] of listeners) target?.removeEventListener?.(name, handler, options); }
+    };
   }
   function ctProfileOpenViewer(images, index, trigger) {
     ctProfileCloseViewer();
@@ -294,13 +481,16 @@
     next.setAttribute('aria-label', ctProfileText('次の写真', 'Next photo'));
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×';
     close.setAttribute('aria-label', ctProfileText('閉じる', 'Close'));
+    const viewer = { dialog, stage, image: img, images: images.map(image => ({ ...image })), index, trigger,
+      gallery: trigger.closest('.ct-profile-gallery'), sources: images.map(image => image.url).join('\n') };
     const show = () => {
-      img.src = images[index].url;
-      img.alt = ctProfileText(`写真 ${index + 1}/${images.length}`, `Photo ${index + 1}/${images.length}`);
-      count.textContent = `${index + 1} / ${images.length}`;
-      previous.disabled = index === 0; next.disabled = index === images.length - 1;
+      img.src = images[viewer.index].url;
+      img.alt = ctProfileText(`写真 ${viewer.index + 1}/${images.length}`, `Photo ${viewer.index + 1}/${images.length}`);
+      count.textContent = `${viewer.index + 1} / ${images.length}`;
+      previous.disabled = viewer.index === 0; next.disabled = viewer.index === images.length - 1;
     };
-    const move = step => { index = Math.max(0, Math.min(images.length - 1, index + step)); show(); };
+    let gestures;
+    const move = step => gestures.move(step);
     previous.onclick = () => move(-1); next.onclick = () => move(1); close.onclick = ctProfileCloseViewer;
     dialog.addEventListener('keydown', event => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -310,12 +500,14 @@
     dialog.addEventListener('cancel', event => { event.preventDefault(); ctProfileCloseViewer(); });
     nav.append(previous, count, next, close); dialog.append(stage, nav); document.body.append(dialog);
     const viewport = window.visualViewport;
-    const fit = () => ctPhotoViewportFit(dialog, '--ct-photo-view-');
+    const fit = () => { const result = ctPhotoViewportFit(dialog, '--ct-photo-view-'); gestures.fit(result); };
     viewport?.addEventListener('resize', fit); viewport?.addEventListener('scroll', fit); window.addEventListener('resize', fit);
-    ctProfileState.viewer = { dialog, trigger, gallery: trigger.closest('.ct-profile-gallery'),
-      sources: images.map(image => image.url).join('\n'), cleanup: () => {
+    ctProfileState.viewer = viewer;
+    viewer.cleanup = () => {
+      gestures.cleanup();
       viewport?.removeEventListener('resize', fit); viewport?.removeEventListener('scroll', fit); window.removeEventListener('resize', fit);
-    } };
+    };
+    gestures = ctProfilePhotoGestures(viewer, show);
     fit();
     show();
     if (typeof ctMediaAttachPhotoQuality === 'function') ctMediaAttachPhotoQuality(dialog, img);

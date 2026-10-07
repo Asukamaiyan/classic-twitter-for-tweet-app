@@ -1,3 +1,20 @@
+# 6.23.0 検証記録
+
+2026-10-07。認証済みTweet 2.2.3 / build 1791314488を通常の画面操作とDevToolsのNetwork/Runtimeで確認しました。新規公開・実機更新の結果は確認後に追記します。
+
+- 凍結したソースで `npm run check` が全678件成功。6配布版の生成・構文検査、ニュースの選択/保存/遅延応答・写真の反転/準備待ち・日本語化の保護範囲を含みます。独立レビューでも写真関連162件が成功し、反転時の未準備paneを再現して修正後を確認しました。
+- Chromiumで6版×390/1280pxのニュース操作を確認。既存17項目と配信元選択14項目、合計372項目が成功。既存2配信元、最少1つ、ジャンルごとの保持、選択元だけの取得、World復元、失敗元名、SafariだけのStay案内、44px選択領域、本文・下書き・native handler保全を確認。RSSは同日取得済みの実XML、管理アプリ通信は模擬です。実Safari/Stayの通信とは区別します。
+- 写真は現行プロフィールmoduleをChromiumの専用ページで日英×390/1280px確認。番号付きテスト画像で、CDPの合成マウス入力中に3フレームの異なるtransformと全3pane画像を確認。2/3→3/3へ1回切替、同じ表示img nodeの保持、待機終了後のlayer除去、矢印キーで2/3、Escapeの閉鎖とtriggerへのfocus復帰、下書き保持が成功。visual scale2でも幅390pxのlayoutを維持し、有効な一次タッチ入力で拡大中の誤切替なし。Reduce Motionは動くlayerを作らず切り替わります。合成入力であり実指の滑らかさの評価ではありません。
+- 通常native操作から `/api/posts`、投稿詳細、返信、user settings、未読数、media/public config等のGET 200を観測。post/replyの`createdAt`は時間帯付きISO形式。認証・App Checkはヘッダー有無のbooleanだけを記録し、値・トークン・投稿本文は保存していません。管理領域や推測endpointを照会せず、投稿/返信/お気に入り/フォロー等のwriteは実行していません。
+- native投稿詳細からBackでfeedのscrollYが3508.5→3508.5に戻りました。この確認済み動作に重複する位置保存機能は追加していません。再読み込み・全route・全managerを保証する確認ではありません。観測区間のconsole error/warningとRuntime例外は0であり、全起動過程/長時間の無エラー保証とは区別します。
+- 現行media設定は画像10MB/5枚/日20枚、動画50MB/30秒/日5本。送信・4K/HDR保持・制限解除は試していません。外部appの認証受理・公式API契約も未確認です。
+
+参照した公式資料は[Tweetbotのtimeline操作](https://tapbots.com/support/tweetbot6/tips/timeline)、[その他の操作](https://tapbots.com/support/tweetbot6/tips/misc)、[Ivoryのフィルター表示説明](https://tapbots.com/support/ivory/general/timeline_missing_posts)。選択状態の明示と写真操作の一貫性を取り入れました。Tweetbotは終了済み、IvoryはMastodon用で、TweetのAPI仕様とは扱いません。
+
+証跡はリポジトリ外`outputs/release-6.23.0/`の`full-check.txt`、`authenticated-api-audit.json`、`browser-news-audit.json`、`browser-profile-audit.json`、`news-mobile.jpg`。過去の実機結果は以下の6.22.0記録と区別します。
+
+---
+
 # 6.22.0 検証記録
 
 2026-10-07。Tweetの公開HTML・JavaScript・CSS・SW・media configと認証済みの実画面を確認。現行は2.2.3。非公開サーバー機能や独立アプリの書き込み受理を確認したものではありません。

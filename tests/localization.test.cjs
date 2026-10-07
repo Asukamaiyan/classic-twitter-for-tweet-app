@@ -102,7 +102,21 @@ for (const route of ['/profile', '/user/alice']) test(`ja: verified composer hea
     <textarea id="public-modal-tweet-input">Compose New</textarea></div>`, route);
   f.run(); assert.equal(f.text('compose'), 'ツイートを作成'); assert.equal(f.text('name'), 'Compose New');
   assert.equal(f.document.querySelector('textarea').value, 'Compose New');
-  if (route === '/profile') assert.equal(f.text('title'), 'プロフィール');
+  assert.equal(f.text('title'), 'プロフィール');
+  f.dom.window.close();
+});
+
+test('ja: public profile Feed title survives native redraw without translating a matching name or bio', () => {
+  const f = fixture('ja', `<main><div class="sticky"><button>Back</button><h2 class="truncate" id="title">Feed</h2></div>
+    <h2 class="font-bold truncate" id="name">Feed</h2><p data-testid="profile-bio" id="bio">Feed</p>
+    <article><p class="tl-user-text" id="body">Feed</p></article></main>`, '/user/alice');
+  f.run();
+  assert.equal(f.text('title'), 'プロフィール');
+  for (const id of ['name', 'bio', 'body']) assert.equal(f.text(id), 'Feed');
+  f.document.getElementById('title').firstChild.nodeValue = 'Feed';
+  f.run();
+  assert.equal(f.text('title'), 'プロフィール');
+  for (const id of ['name', 'bio', 'body']) assert.equal(f.text(id), 'Feed');
   f.dom.window.close();
 });
 

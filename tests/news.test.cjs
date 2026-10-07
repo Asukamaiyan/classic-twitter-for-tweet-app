@@ -55,13 +55,14 @@ function setup(t, options = {}) {
   const clock = options.clock ? fakeClock(window) : null;
   if (options.region) window.localStorage.setItem('ct-news-region-v1', options.region);
   if (options.cache) window.sessionStorage.setItem('ct-japanese-news-cache-v1', options.cache);
+  if (options.sources !== undefined) window.localStorage.setItem('ct-news-sources-v1', options.sources);
   if (options.gm) window.GM_xmlhttpRequest = options.gm;
   if (options.modernGM) window.GM = options.modernGM;
   if (options.lexicalGM) window.fixtureGM = options.lexicalGM;
   if (options.fetch) window.fetch = options.fetch;
   // Keep the original Yahoo transport/lifecycle cases scoped to one publisher;
   // multisource cases below use the actual full registry with allFeeds:true.
-  window.eval(`const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};\n${options.lexicalGM ? 'const GM = window.fixtureGM;' : ''}\n${source}\n${options.allFeeds ? '' : "ctNewsFeedList = topic => (ctNewsFeeds[topic] || []).filter(feed => feed.publisher === 'yahoo');"}\nwindow.news = { patch: patchJapaneseNews, parse: ctParseJapaneseNews, url: ctNewsURL, load: ctLoadJapaneseNews, request: ctRequestNews, state: ctNewsState, targets: ctNewsTargets, feeds: ctNewsFeeds, merge: ctNewsMergeArticles };`);
+  window.eval(`const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};\nconst CT_PLATFORM = ${JSON.stringify(options.platform || 'chrome')};\n${options.lexicalGM ? 'const GM = window.fixtureGM;' : ''}\n${source}\n${options.allFeeds ? '' : "ctNewsFeedList = topic => (ctNewsFeeds[topic] || []).filter(feed => feed.publisher === 'yahoo');"}\nwindow.news = { patch: patchJapaneseNews, parse: ctParseJapaneseNews, url: ctNewsURL, load: ctLoadJapaneseNews, request: ctRequestNews, state: ctNewsState, targets: ctNewsTargets, feeds: ctNewsFeeds, merge: ctNewsMergeArticles };`);
   const news = window.news;
   news.state.timeout = 30;
   t.after(() => window.close());
@@ -781,4 +782,234 @@ test('a request that fails in the background waits for foreground and honors its
   await clock.tick(1);
   assert.equal(calls, 2);
   assert.equal(document.querySelector('.ct-news-article h3').textContent, 'Recovered');
+});
+
+const sourcesKey = 'ct-news-sources-v1';
+const sourceSettings = topics => JSON.stringify({ version: 1, topics });
+function changePublisher(f, publisher, checked) {
+  const input = f.document.querySelector(`[data-ct-news-publisher="${publisher}"]`);
+  assert.ok(input);
+  input.checked = checked;
+  input.dispatchEvent(new f.window.Event('change', { bubbles: true }));
+  return input;
+}
+function publisherSuccess(options) {
+  gmSuccess(options.url.includes('nikkansports') ? atom() : rss(item(
+    options.url.includes('yahoo') ? 'Yahoo news' : 'NHK news', options.url.includes('yahoo') ? articleURL : nhkURL, '')))(options);
+}
+
+test('publisher choices persist per topic, only selected feeds load, and native contents and drafts stay intact', async t => {
+  const calls = [];
+  const f = setup(t, { allFeeds: true, html: layout('News', '<textarea id="draft">Keep my draft</textarea><video id="player"></video>'),
+    gm: options => { calls.push(options.url); publisherSuccess(options); } });
+  const native = f.document.getElementById('native-news'), draft = f.document.getElementById('draft'), video = f.document.getElementById('player');
+  let clicks = 0;
+  f.document.getElementById('native-story').addEventListener('click', event => { event.preventDefault(); clicks++; });
+  f.news.patch(); await flush();
+  assert.equal(calls.length, 2);
+  const details = f.document.querySelector('.ct-news-sources');
+  details.open = true;
+  changePublisher(f, 'yahoo', false); await flush();
+  assert.equal(calls.length, 3);
+  assert.match(calls[2], /news\.web\.nhk/);
+  assert.deepEqual(JSON.parse(f.window.localStorage.getItem(sourcesKey)).topics.nation, ['nhk']);
+  assert.equal(details.open, true);
+  assert.equal(f.document.querySelector('.ct-news-article h3').textContent, 'NHK news');
+  select(f.document, 'Sports'); f.news.patch(); await flush();
+  assert.deepEqual([...f.document.querySelectorAll('[data-ct-news-publisher]')].map(input => [input.dataset.ctNewsPublisher, input.checked]), [['yahoo', true], ['nikkan', true]]);
+  assert.match(f.document.querySelector('.ct-news-sources legend').textContent, /スポーツ/);
+  changePublisher(f, 'nikkan', false); await flush();
+  assert.match(calls.at(-1), /sports\.xml$/);
+  assert.deepEqual(JSON.parse(f.window.localStorage.getItem(sourcesKey)).topics.sports, ['yahoo']);
+  assert.deepEqual(JSON.parse(f.window.localStorage.getItem(sourcesKey)).topics.nation, ['nhk']);
+  select(f.document, 'News'); f.news.patch(); await flush();
+  assert.equal(f.document.querySelector('[data-ct-news-publisher="yahoo"]').checked, false);
+  assert.equal(f.document.getElementById('native-news'), native);
+  assert.equal(f.document.getElementById('draft'), draft); assert.equal(draft.value, 'Keep my draft');
+  assert.equal(f.document.getElementById('player'), video);
+  f.document.querySelector('[data-ct-news-region="world"]').click();
+  assert.equal(details.hidden, true);
+  assert.equal(native.classList.contains('ct-news-native-hidden'), false);
+  f.document.getElementById('native-story').click(); assert.equal(clicks, 1);
+});
+
+for (const locale of ['ja', 'en']) test(`${locale}: the final publisher stays checked with an accessible explanation and no extra request`, async t => {
+  let calls = 0;
+  const f = setup(t, { allFeeds: true, locale, region: 'jp', sources: sourceSettings({ nation: ['nhk'] }), gm: options => { calls++; publisherSuccess(options); } });
+  f.news.patch(); await flush();
+  const input = changePublisher(f, 'nhk', false); await flush();
+  assert.equal(input.checked, true);
+  assert.equal(calls, 1);
+  assert.equal(f.document.querySelector('.ct-news-sources summary').textContent, locale === 'ja' ? '配信元' : 'Publishers');
+  assert.match(f.document.querySelector('.ct-news-preference-status').textContent, locale === 'ja' ? /最低1つ/ : /at least one/);
+  assert.equal(f.document.querySelector('.ct-news-preference-status').getAttribute('aria-live'), 'polite');
+  assert.match(input.closest('label').textContent, /NHK NEWS WEB/);
+  const css = f.document.getElementById('ct-japanese-news-style').textContent;
+  assert.match(css, /\.ct-news-sources label\{[^}]*min-height:44px/);
+  assert.match(css, /\.ct-news-sources input:focus-visible/);
+});
+
+test('failed publisher preference writes restore the checked inputs and keep the old cache, setting and native region', async t => {
+  let calls = 0;
+  const stored = sourceSettings({ nation: ['yahoo', 'nhk'] });
+  const f = setup(t, { allFeeds: true, sources: stored, gm: options => { calls++; publisherSuccess(options); } });
+  f.news.patch(); await flush();
+  const cached = f.news.state.cache.get('nation');
+  const prototype = Object.getPrototypeOf(f.window.localStorage), original = prototype.setItem;
+  prototype.setItem = function (key, value) { if (key === sourcesKey || key === 'ct-news-region-v1') throw new Error('QuotaExceededError'); return original.call(this, key, value); };
+  changePublisher(f, 'yahoo', false); await flush();
+  assert.equal(f.document.querySelector('[data-ct-news-publisher="yahoo"]').checked, true);
+  assert.equal(f.window.localStorage.getItem(sourcesKey), stored);
+  assert.equal(f.news.state.cache.get('nation'), cached);
+  assert.equal(calls, 2);
+  assert.match(f.document.querySelector('.ct-news-preference-status').textContent, /保存できません/);
+  f.document.querySelector('[data-ct-news-region="world"]').click();
+  assert.equal(f.news.state.region, 'jp');
+  assert.equal(f.document.querySelector('[data-ct-news-region="jp"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(f.document.getElementById('native-news').classList.contains('ct-news-native-hidden'), true);
+});
+
+test('source preference validation rejects unknown topics, empty selections, URLs, duplicates and oversized data without destroying older storage', async t => {
+  for (const stored of ['{', 'x'.repeat(2049), sourceSettings({ nation: [] }), sourceSettings({ nation: ['nhk', 'nhk'] }),
+    sourceSettings({ nation: ['https://evil.test/rss'] }), sourceSettings({ unknown: ['yahoo'] }), JSON.stringify({ version: 2, topics: {} })]) {
+    let calls = 0;
+    const f = setup(t, { allFeeds: true, sources: stored, gm: options => { calls++; publisherSuccess(options); } });
+    f.window.localStorage.setItem('ct-local-tools-v1', 'preserved-tools');
+    f.window.localStorage.setItem('ct-favorites-v1', 'preserved-favorites');
+    f.news.patch(); await flush();
+    assert.equal(calls, 2);
+    assert.match(f.document.querySelector('.ct-news-preference-status').textContent, /読み込めません/);
+    assert.equal(f.window.localStorage.getItem(sourcesKey), stored);
+    assert.equal(f.window.localStorage.getItem('ct-local-tools-v1'), 'preserved-tools');
+    assert.equal(f.window.localStorage.getItem('ct-favorites-v1'), 'preserved-favorites');
+  }
+});
+
+test('a source selection generation rejects late success and failure even after choosing the original set again', async t => {
+  const requests = [];
+  const f = setup(t, { allFeeds: true, clock: true, gm: options => requests.push(options) });
+  f.news.patch();
+  changePublisher(f, 'yahoo', false);
+  changePublisher(f, 'yahoo', true);
+  assert.equal(requests.length, 5);
+  const newest = requests.slice(3);
+  for (const request of newest) request.onload({ status: 200, responseText: rss(item('Current ' + (request.url.includes('yahoo') ? 'Yahoo' : 'NHK'), request.url.includes('yahoo') ? articleURL : nhkURL, '')) });
+  await flush();
+  const current = f.news.state.cache.get('nation');
+  assert.equal(current.loading, false);
+  requests[0].onload({ status: 200, responseText: rss(item('Stale Yahoo')) });
+  requests[1].onerror(); requests[2].onerror(); await flush();
+  assert.equal(f.news.state.cache.get('nation'), current);
+  assert.equal(f.news.state.retryAt.size, 0);
+  assert.equal(f.news.state.pending.size, 0);
+  assert.equal(f.document.querySelector('[data-ct-news-action="retry"]').hidden, true);
+  assert.ok([...f.document.querySelectorAll('.ct-news-article h3')].every(node => node.textContent.startsWith('Current ')));
+  assert.equal(f.clock.timers.size, 1);
+});
+
+test('an old job cannot remove the current pending source job or persist excluded publisher articles', async t => {
+  const requests = [];
+  const f = setup(t, { allFeeds: true, clock: true, gm: options => requests.push(options) });
+  f.news.patch(); changePublisher(f, 'yahoo', false);
+  requests[0].onload({ status: 200, responseText: rss(item('Excluded Yahoo')) }); requests[1].onerror(); await flush();
+  assert.equal(f.news.state.pending.size, 1);
+  assert.equal(f.news.state.cache.size, 0);
+  assert.equal(f.news.state.retryAt.size, 0);
+  assert.equal(f.window.sessionStorage.getItem('ct-japanese-news-cache-v1'), null);
+  requests[2].onload({ status: 200, responseText: rss(item('Selected NHK', nhkURL, '')) }); await flush();
+  const cached = JSON.parse(f.window.sessionStorage.getItem('ct-japanese-news-cache-v1')).nation;
+  assert.equal(cached.sourceKey, 'nhk'); assert.equal(cached.feedCount, 1);
+  assert.deepEqual(cached.articles.map(article => article.source), ['NHK NEWS WEB']);
+});
+
+test('reload reuses only a cache for the selected source set and TTL refresh requests only that set', async t => {
+  const selected = sourceSettings({ nation: ['nhk'] });
+  const cache = { nation: { at: Date.parse('2026-09-30T03:00:00Z'), sourceKey: 'nhk', feedCount: 1, failed: [],
+    articles: [{ title: 'Selected cached', url: nhkURL, publishedAt: '2026-09-27T03:00:00Z' }, { title: 'Excluded cached', url: articleURL }] } };
+  const calls = [];
+  const f = setup(t, { allFeeds: true, clock: true, sources: selected, cache: JSON.stringify(cache), gm: options => { calls.push(options.url); publisherSuccess(options); } });
+  f.news.patch(); await flush();
+  assert.equal(calls.length, 0);
+  assert.deepEqual([...f.document.querySelectorAll('.ct-news-article h3')].map(node => node.textContent), ['Selected cached']);
+  await f.clock.tick(f.news.state.ttl);
+  assert.equal(calls.length, 1); assert.match(calls[0], /news\.web\.nhk/);
+  const stale = setup(t, { allFeeds: true, clock: true, sources: selected,
+    cache: JSON.stringify({ nation: { ...cache.nation, sourceKey: 'yahoo' } }), gm: publisherSuccess });
+  stale.news.patch(); await flush();
+  assert.equal(stale.document.querySelector('.ct-news-article h3').textContent, 'NHK news');
+});
+
+test('cross-tab changes update choices while stale saves and invalid external data cannot overwrite another tab', async t => {
+  let calls = 0;
+  const f = setup(t, { allFeeds: true, clock: true, gm: options => { calls++; publisherSuccess(options); } });
+  f.news.patch(); await flush();
+  const external = sourceSettings({ nation: ['nhk'] });
+  f.window.localStorage.setItem(sourcesKey, external);
+  changePublisher(f, 'nhk', false); await flush();
+  assert.equal(f.window.localStorage.getItem(sourcesKey), external);
+  assert.equal(calls, 2);
+  assert.match(f.document.querySelector('.ct-news-preference-status').textContent, /別のタブ/);
+  f.window.dispatchEvent(new f.window.StorageEvent('storage', { key: sourcesKey, newValue: external, storageArea: f.window.localStorage })); await flush();
+  assert.equal(calls, 3);
+  assert.equal(f.document.querySelector('[data-ct-news-publisher="yahoo"]').checked, false);
+  f.window.localStorage.setItem(sourcesKey, sourceSettings({ nation: [] }));
+  f.window.dispatchEvent(new f.window.StorageEvent('storage', { key: sourcesKey, storageArea: f.window.localStorage })); await flush();
+  assert.equal(calls, 3);
+  assert.equal(f.document.querySelector('[data-ct-news-publisher="nhk"]').checked, true);
+  assert.match(f.document.querySelector('.ct-news-preference-status').textContent, /現在の選択を保持/);
+});
+
+for (const locale of ['ja', 'en']) for (const partial of [false, true]) test(`${locale}: ${partial ? 'partial' : 'total'} failure names only selected failed publishers and Safari suggests checking permission without assuming its cause`, async t => {
+  const f = setup(t, { allFeeds: true, locale, platform: 'safari', region: 'jp', html: layout('Sports'),
+    gm: options => { if (partial && options.url.includes('yahoo')) publisherSuccess(options); else queueMicrotask(() => options.onerror()); } });
+  f.news.patch(); await flush();
+  const status = f.document.querySelector('.ct-news-status').textContent;
+  assert.match(status, /日刊スポーツ/); assert.match(status, /Stay/);
+  assert.match(status, locale === 'ja' ? /取得できない配信元/ : /Unavailable publishers/);
+  assert.match(status, locale === 'ja' ? /も確認/ : /Also check/);
+  assert.doesNotMatch(status, /NHK|ITmedia/);
+  assert.equal(f.document.querySelector('[data-ct-news-action="retry"]').hidden, false);
+  const desktop = setup(t, { allFeeds: true, locale, region: 'jp', html: layout('Sports'), gm: options => queueMicrotask(() => options.onerror()) });
+  desktop.news.patch(); await flush(); assert.doesNotMatch(desktop.document.querySelector('.ct-news-status').textContent, /Stay/);
+});
+
+test('World, hidden and detached publisher inputs cannot change settings or start reads; a background cross-tab change waits for foreground', async t => {
+  for (const change of [
+    f => f.document.querySelector('[data-ct-news-region="world"]').click(),
+    f => f.clock.setHidden(true),
+    f => { f.window.history.replaceState({}, '', '/notifications'); f.news.patch(); }
+  ]) {
+    let calls = 0;
+    const f = setup(t, { allFeeds: true, clock: true, gm: options => { calls++; publisherSuccess(options); } });
+    f.news.patch(); await flush();
+    const input = f.document.querySelector('[data-ct-news-publisher="yahoo"]');
+    change(f); input.checked = false; input.dispatchEvent(new f.window.Event('change', { bubbles: true })); await flush();
+    assert.equal(f.window.localStorage.getItem(sourcesKey), null);
+    assert.equal(calls, 2);
+  }
+  const calls = [];
+  const f = setup(t, { allFeeds: true, clock: true, gm: options => { calls.push(options.url); publisherSuccess(options); } });
+  f.news.patch(); await flush(); f.clock.setHidden(true);
+  f.window.localStorage.setItem(sourcesKey, sourceSettings({ nation: ['nhk'] }));
+  f.window.dispatchEvent(new f.window.StorageEvent('storage', { key: sourcesKey, storageArea: f.window.localStorage })); await flush();
+  assert.equal(calls.length, 2);
+  assert.equal(f.clock.timers.size, 0);
+  f.clock.setHidden(false); await flush();
+  assert.equal(calls.length, 3); assert.match(calls[2], /news\.web\.nhk/);
+  assert.equal(f.document.querySelector('[data-ct-news-publisher="yahoo"]').checked, false);
+});
+
+test('a single selected failed publisher is named without blaming unselected media, and Retry contacts only that publisher', async t => {
+  const calls = [];
+  const f = setup(t, { allFeeds: true, platform: 'safari', sources: sourceSettings({ nation: ['nhk'] }),
+    gm: options => { calls.push(options); queueMicrotask(() => options.onerror()); } });
+  f.news.patch(); await flush();
+  assert.equal(calls.length, 1);
+  const status = f.document.querySelector('.ct-news-status').textContent;
+  assert.match(status, /取得できない配信元: NHK NEWS WEB/);
+  assert.doesNotMatch(status, /Yahoo|日刊スポーツ|ITmedia/);
+  f.document.querySelector('[data-ct-news-action="retry"]').click(); await flush();
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(request => request.url.includes('news.web.nhk')));
+  assert.ok(calls.every(request => request.anonymous && request.method === 'GET' && request.headers.Authorization === undefined));
 });

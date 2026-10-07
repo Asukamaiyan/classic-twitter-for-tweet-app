@@ -1126,3 +1126,206 @@ test('long backup errors and storage warnings remain visible outside details and
   assert.equal(h.window.getComputedStyle(message).display, 'none'); assert.equal(h.window.getComputedStyle(warning).display, 'none');
   assert.equal(panel.firstElementChild.nextElementSibling.dataset.ctProfilePost, 'saved');
 });
+
+async function photoGestures(t, { pointer = true, ready = true, count = 4, locale = 'en' } = {}) {
+  const h = harness(t, { locale }); await h.ready();
+  const reduce = new h.window.EventTarget(); reduce.matches = false; h.window.matchMedia = () => reduce;
+  const viewport = new h.window.EventTarget(); Object.assign(viewport, { width: 390, height: 844, scale: 1, offsetTop: 0, offsetLeft: 0 });
+  Object.defineProperty(h.window, 'visualViewport', { configurable: true, value: viewport });
+  if (pointer) h.window.PointerEvent = function PointerEvent() {};
+  else h.window.PointerEvent = undefined;
+  h.window.HTMLDialogElement.prototype.showModal = function() { this.setAttribute('open', ''); };
+  h.window.HTMLDialogElement.prototype.close = function() { this.removeAttribute('open'); };
+  const preparations = [], frames = new Map(), timers = new Map(); let serial = 0;
+  h.window.HTMLImageElement.prototype.decode = function() {
+    return new Promise((resolve, reject) => preparations.push({ image: this, resolve, reject }));
+  };
+  const media = Array.from({ length: count }, (_, index) => ({ type: 'image', url: `https://images.example/gesture-${index}.jpg`, poster: '' }));
+  h.api.save(item('gesture', { media })); await h.select('favorites');
+  h.window.requestAnimationFrame = callback => { const id = ++serial; frames.set(id, callback); return id; };
+  h.window.cancelAnimationFrame = id => frames.delete(id);
+  h.window.setTimeout = callback => { const id = ++serial; timers.set(id, callback); return id; };
+  h.window.clearTimeout = id => timers.delete(id);
+  const trigger = h.document.querySelector('.ct-profile-photo'); trigger.click();
+  const dialog = h.document.querySelector('dialog'), stage = dialog.querySelector('.ct-profile-viewer-stage'), image = stage.querySelector(':scope > img');
+  Object.defineProperty(stage, 'clientWidth', { configurable: true, value: 390 });
+  const loaded = node => {
+    for (const [key, value] of Object.entries({ complete: true, naturalWidth: 1600, naturalHeight: 1200, currentSrc: node.src })) Object.defineProperty(node, key, { configurable: true, value });
+  };
+  const prepare = async index => {
+    const entry = preparations.find(entry => entry.image.src === media[index].url); assert.ok(entry, `prepared photo ${index}`);
+    loaded(entry.image); entry.resolve(); await new Promise(resolve => setImmediate(resolve));
+  };
+  if (ready && count > 1) { await prepare(0); await prepare(1); }
+  const pointerEvent = (name, x, y = 200, extra = {}) => {
+    const event = new h.window.Event(name, { bubbles: true, cancelable: true });
+    Object.assign(event, { pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0, clientX: x, clientY: y, ...extra }); image.dispatchEvent(event); return event;
+  };
+  const touchEvent = (name, points, changed = points) => {
+    const event = new h.window.Event(name, { bubbles: true, cancelable: true });
+    Object.assign(event, { touches: points.map(([x, y]) => ({ clientX: x, clientY: y })), changedTouches: changed.map(([x, y]) => ({ clientX: x, clientY: y })) }); image.dispatchEvent(event); return event;
+  };
+  return Object.assign(h, { dialog, stage, image, trigger, viewport, reduce, preparations, frames, timers, prepare, loaded, pointerEvent, touchEvent,
+    flushFrames() { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback()); },
+    flushTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); },
+    swipe(from = 300, to = 100) { pointerEvent('pointerdown', from); pointerEvent('pointermove', to); pointerEvent('pointerup', to); }
+  });
+}
+
+test('profile photo pointer drag follows each animation frame and settles while preserving the original image, controls and focus', async t => {
+  const h = await photoGestures(t); const calls = h.calls.length;
+  h.pointerEvent('pointerdown', 300); const drag = h.pointerEvent('pointermove', 170);
+  const track = h.stage.querySelector('.ct-profile-photo-track'); assert.ok(track); assert.equal(drag.defaultPrevented, true);
+  assert.equal(track.parentElement.getAttribute('aria-hidden'), 'true'); assert.equal(track.children.length, 3);
+  assert.equal(track.style.transform, 'translate3d(-100%,0,0)'); assert.equal(h.frames.size, 1);
+  h.pointerEvent('pointermove', 140); assert.equal(h.frames.size, 1); h.flushFrames();
+  assert.equal(track.style.transform, 'translate3d(calc(-100% + -160px),0,0)');
+  h.pointerEvent('pointerup', 140); assert.equal(h.api.state.viewer.index, 1);
+  assert.equal(h.image.src, 'https://images.example/gesture-1.jpg'); assert.equal(track.style.transform, 'translate3d(-200%,0,0)');
+  assert.match(track.style.transition, /220ms/); assert.equal(h.stage.querySelector(':scope > img'), h.image);
+  assert.equal(h.dialog.querySelector('.ct-profile-viewer-nav span').textContent, '2 / 4');
+  h.loaded(h.image); h.flushTimers(); assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+  assert.equal(h.image.classList.contains('ct-profile-photo-covered'), false); assert.equal(h.preparations.length, 3);
+  assert.equal(h.calls.length, calls); h.dialog.querySelector('[aria-label=Close]').click(); assert.equal(h.document.activeElement, h.trigger);
+});
+
+test('profile TouchEvent fallback moves once and a short or edge swipe returns smoothly without changing the photo', async t => {
+  const h = await photoGestures(t, { pointer: false, count: 2, locale: 'ja' });
+  h.touchEvent('touchstart', [[100, 200]]); h.touchEvent('touchmove', [[220, 200]]); h.flushFrames();
+  assert.equal(h.stage.querySelector('.ct-profile-photo-track').style.transform, 'translate3d(calc(-100% + 26.4px),0,0)');
+  h.touchEvent('touchend', [], [[220, 200]]); assert.equal(h.api.state.viewer.index, 0); h.flushTimers();
+  h.touchEvent('touchstart', [[300, 200]]); h.touchEvent('touchmove', [[100, 202]]); h.touchEvent('touchend', [], [[100, 202]]);
+  assert.equal(h.api.state.viewer.index, 1); assert.match(h.image.alt, /写真 2\/2/);
+  h.loaded(h.image); h.flushTimers();
+  h.touchEvent('touchstart', [[100, 200]]); h.touchEvent('touchmove', [[115, 200]]); h.touchEvent('touchend', [], [[115, 200]]);
+  assert.equal(h.api.state.viewer.index, 1); assert.equal(h.stage.querySelector('.ct-profile-photo-track').style.transform, 'translate3d(-100%,0,0)');
+  h.flushTimers(); assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+});
+
+test('profile photo keeps the currently displayed image until an undecoded destination becomes ready and ignores expired preparation', async t => {
+  const h = await photoGestures(t, { ready: false, count: 2 }); await h.prepare(0);
+  h.swipe(); assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+  assert.equal(h.api.state.viewer.index, 0); assert.equal(h.image.src, 'https://images.example/gesture-0.jpg');
+  assert.equal(h.image.classList.contains('ct-profile-photo-covered'), false);
+  const undecoded = h.preparations.find(entry => entry.image.src.endsWith('gesture-1.jpg')).image;
+  h.loaded(undecoded); undecoded.dispatchEvent(new h.window.Event('load'));
+  assert.equal(h.api.state.viewer.index, 0, 'load alone must not expose a photo before its decode promise resolves');
+  await h.prepare(1); assert.equal(h.api.state.viewer.index, 1); assert.equal(h.image.src, 'https://images.example/gesture-1.jpg');
+  const expired = await photoGestures(t, { ready: false, count: 2 }); expired.swipe(); expired.flushTimers();
+  await expired.prepare(1); assert.equal(expired.api.state.viewer.index, 0); assert.equal(expired.image.src, 'https://images.example/gesture-0.jpg');
+});
+
+test('failed profile photo preparation preserves the visible image and existing button and keyboard navigation', async t => {
+  const h = await photoGestures(t, { ready: false, count: 2 });
+  h.preparations.find(entry => entry.image.src.endsWith('gesture-1.jpg')).reject(new Error('Decode failed')); await Promise.resolve();
+  h.swipe(); assert.equal(h.image.src, 'https://images.example/gesture-0.jpg'); assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+  h.dialog.querySelector('[aria-label="Next photo"]').click(); assert.equal(h.image.src, 'https://images.example/gesture-1.jpg');
+  h.dialog.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+  assert.equal(h.image.src, 'https://images.example/gesture-0.jpg');
+});
+
+test('vertical movement, a second pointer and pinch followed by one finger preserve browser gestures and never switch profile photos', async t => {
+  for (const kind of ['vertical', 'pointer-pinch', 'touch-pinch', 'touch-cancel']) {
+    const h = await photoGestures(t, { pointer: kind !== 'touch-pinch' && kind !== 'touch-cancel', count: 2 });
+    if (kind === 'vertical') {
+      h.pointerEvent('pointerdown', 300, 100); const event = h.pointerEvent('pointermove', 260, 240); assert.equal(event.defaultPrevented, false);
+      h.pointerEvent('pointerup', 50, 300);
+    } else if (kind === 'pointer-pinch') {
+      h.pointerEvent('pointerdown', 300); h.pointerEvent('pointermove', 240);
+      const event = h.pointerEvent('pointerdown', 100, 200, { pointerId: 2, isPrimary: false }); assert.equal(event.defaultPrevented, false);
+      assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+      h.pointerEvent('pointerup', 100, 200, { pointerId: 2, isPrimary: false }); h.pointerEvent('pointermove', 50); h.pointerEvent('pointerup', 50);
+    } else {
+      h.touchEvent('touchstart', [[300, 200]]); h.touchEvent('touchmove', [[240, 200]]);
+      const event = h.touchEvent('touchstart', [[240, 200], [100, 200]]); assert.equal(event.defaultPrevented, false);
+      assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+      h.touchEvent(kind === 'touch-cancel' ? 'touchcancel' : 'touchend', [[240, 200]], [[100, 200]]);
+      assert.equal(h.touchEvent('touchmove', [[50, 200]]).defaultPrevented, false); h.touchEvent('touchend', [], [[50, 200]]);
+    }
+    assert.equal(h.api.state.viewer.index, 0); assert.equal(h.image.src, 'https://images.example/gesture-0.jpg');
+  }
+});
+
+test('zoom cancels active profile photo motion without refitting the magnified image or preventing zoomed pan', async t => {
+  const h = await photoGestures(t, { count: 2 }); const style = h.dialog.getAttribute('style');
+  h.pointerEvent('pointerdown', 300); h.pointerEvent('pointermove', 220); assert.ok(h.stage.querySelector('.ct-profile-photo-layer'));
+  Object.assign(h.viewport, { scale: 2, width: 195, height: 422, offsetTop: 80, offsetLeft: 35 }); h.viewport.dispatchEvent(new h.window.Event('resize'));
+  assert.equal(h.dialog.getAttribute('style'), style); assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null); assert.equal(h.frames.size, 0);
+  h.pointerEvent('pointermove', 40); h.pointerEvent('pointerup', 40); assert.equal(h.api.state.viewer.index, 0);
+  h.pointerEvent('pointerdown', 300); assert.equal(h.pointerEvent('pointermove', 40).defaultPrevented, false); h.pointerEvent('pointerup', 40);
+  assert.equal(h.api.state.viewer.index, 0); assert.equal(h.dialog.classList.contains('ct-profile-viewer-zoomed'), true);
+  h.api.viewerClose(); assert.equal(h.dialog.isConnected, false); assert.equal(h.frames.size, 0); assert.equal(h.timers.size, 0);
+});
+
+test('reduced motion changes cancel profile photo animation and retain instant accessible navigation', async t => {
+  const h = await photoGestures(t, { count: 2 }); h.pointerEvent('pointerdown', 300); h.pointerEvent('pointermove', 220);
+  h.reduce.matches = true; h.reduce.dispatchEvent(new h.window.Event('change'));
+  assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null); assert.equal(h.frames.size, 0); h.pointerEvent('pointerup', 40);
+  assert.equal(h.api.state.viewer.index, 0); h.swipe(); assert.equal(h.api.state.viewer.index, 1);
+  assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null); h.dialog.querySelector('[aria-label="Previous photo"]').click();
+  assert.equal(h.api.state.viewer.index, 0);
+});
+
+test('close, route, account and background changes discard profile photo frames, timers, capture and late decoded images', async t => {
+  for (const kind of ['close', 'route', 'account', 'pagehide', 'background']) {
+    const h = await photoGestures(t, { count: 2 }); const captures = new Set();
+    h.image.setPointerCapture = id => captures.add(id); h.image.releasePointerCapture = id => captures.delete(id);
+    h.pointerEvent('pointerdown', 300); h.pointerEvent('pointermove', 220); assert.equal(captures.size, 1); assert.equal(h.frames.size, 1);
+    if (kind === 'close') h.api.viewerClose();
+    else if (kind === 'route') { h.route('/feed', 'viewer'); h.api.patch(); }
+    else if (kind === 'account') { h.setAuth({ uid: 'uid-other', token: 'token-other' }); h.api.patch(); }
+    else if (kind === 'pagehide') h.window.dispatchEvent(new h.window.Event('pagehide'));
+    else { Object.defineProperty(h.document, 'hidden', { configurable: true, value: true }); h.document.dispatchEvent(new h.window.Event('visibilitychange')); }
+    assert.equal(h.frames.size, 0); assert.equal(h.timers.size, 0); assert.equal(captures.size, 0); assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+    for (const entry of h.preparations) { h.loaded(entry.image); entry.resolve(); } await Promise.resolve();
+    h.flushFrames(); h.flushTimers(); assert.equal(h.image.src, 'https://images.example/gesture-0.jpg');
+    if (kind !== 'background') assert.equal(h.api.state.viewer, null);
+  }
+});
+
+test('a profile keyboard or button action interrupts slide presentation and a stale image load cannot release a newer destination', async t => {
+  const h = await photoGestures(t); h.swipe(); const firstTrack = h.stage.querySelector('.ct-profile-photo-track');
+  h.dialog.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+  assert.equal(h.api.state.viewer.index, 0); assert.equal(firstTrack.isConnected, false); assert.equal(h.timers.size, 0);
+  h.swipe(); h.flushTimers(); assert.ok(h.stage.querySelector('.ct-profile-photo-layer'));
+  Object.defineProperties(h.image, { complete: { configurable: true, value: true }, naturalWidth: { configurable: true, value: 1600 },
+    currentSrc: { configurable: true, value: 'https://images.example/gesture-0.jpg' } }); h.image.dispatchEvent(new h.window.Event('load'));
+  assert.ok(h.stage.querySelector('.ct-profile-photo-layer'));
+  h.loaded(h.image); h.image.dispatchEvent(new h.window.Event('load')); assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+  assert.equal(h.dialog.querySelector('.ct-profile-viewer-nav span').textContent, '2 / 4');
+});
+
+test('reversing a profile photo drag fills a newly decoded opposite pane before sliding onto it', async t => {
+  const h = await photoGestures(t, { ready: false, count: 3 });
+  await h.prepare(1); h.dialog.querySelector('[aria-label="Next photo"]').click(); await h.prepare(2);
+  assert.equal(h.api.state.viewer.index, 1);
+  h.pointerEvent('pointerdown', 300); h.pointerEvent('pointermove', 180);
+  const track = h.stage.querySelector('.ct-profile-photo-track');
+  assert.ok(track); assert.equal(track.children[0].querySelector('img'), null);
+  assert.equal(track.children[1].querySelector('img').src, 'https://images.example/gesture-1.jpg');
+  assert.equal(track.children[2].querySelector('img').src, 'https://images.example/gesture-2.jpg');
+  await h.prepare(0);
+  assert.equal(track.children[0].querySelector('img').src, 'https://images.example/gesture-0.jpg');
+  h.pointerEvent('pointermove', 420); h.flushFrames();
+  assert.equal(track.style.transform, 'translate3d(calc(-100% + 120px),0,0)');
+  h.pointerEvent('pointerup', 420); assert.equal(h.api.state.viewer.index, 0);
+  assert.equal(track.style.transform, 'translate3d(0%,0,0)');
+  assert.equal(h.image.classList.contains('ct-profile-photo-covered'), true);
+  assert.equal(track.children[0].querySelector('img').src, h.image.src);
+  h.loaded(h.image); h.flushTimers(); assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null);
+  assert.equal(h.image.classList.contains('ct-profile-photo-covered'), false);
+});
+
+test('a reversed profile photo drag toward an undecoded neighbor retains the center photo until preparation completes', async t => {
+  const h = await photoGestures(t, { ready: false, count: 3 });
+  await h.prepare(1); h.dialog.querySelector('[aria-label="Next photo"]').click(); await h.prepare(2);
+  h.pointerEvent('pointerdown', 300); h.pointerEvent('pointermove', 180);
+  const track = h.stage.querySelector('.ct-profile-photo-track'); assert.ok(track);
+  h.pointerEvent('pointermove', 420); h.flushFrames();
+  assert.equal(track.children[0].querySelector('img'), null);
+  assert.equal(track.style.transform, 'translate3d(calc(-100% + 0px),0,0)');
+  assert.equal(track.children[1].querySelector('img').src, h.image.src);
+  h.pointerEvent('pointerup', 420); assert.equal(h.api.state.viewer.index, 1);
+  assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null); assert.equal(h.image.classList.contains('ct-profile-photo-covered'), false);
+  await h.prepare(0); assert.equal(h.api.state.viewer.index, 0); assert.equal(h.image.src, 'https://images.example/gesture-0.jpg');
+});
