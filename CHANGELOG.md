@@ -1,8 +1,12 @@
 # Changelog
 
+## All distributions v6.23.1 — 2026-10-07
+
+Move the delivered-image link and dimensions above profile-photo navigation, preventing overlap with Next and Close on narrow screens. Keep native viewers, source URLs, photo gestures and zoom handling intact. Publication and final device evidence are recorded in VALIDATION.md.
+
 ## All distributions v6.23.0 — 2026-10-07
 
-Implementation completed; publication and physical-device acceptance are pending. Previous 6.22.0 device evidence remains separate.
+All six 6.23.0 editions are published with matching code and complete guides. iPhone Stay update, publisher selection/persistence and profile-photo swipes were verified; the delivered-image link overlap found on the device is repaired in 6.23.1.
 
 - Choose existing Japan-news publishers per topic in a compact Publishers disclosure. Retain at least one publisher, name failed sources, and suggest checking Stay site permission only in Safari. Use existing topic RSS feeds; arbitrary feed URLs and automatic article classification are not added.
 - Keep source preferences and cache identity consistent through rapid selection changes, late reads and cross-tab updates. Failed storage writes retain the previous selection and native World news remains available.

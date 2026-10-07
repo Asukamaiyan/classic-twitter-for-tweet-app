@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese Android
 // @namespace    https://tweet.app/
-// @version      6.23.0
+// @version      6.23.1
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -2886,7 +2886,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.23.0';
+    document.documentElement.dataset.ctActiveVersion = '6.23.1';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -3670,6 +3670,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-photo-pane{box-sizing:border-box;display:grid;place-items:center;flex:0 0 100%;min-width:0;min-height:0;height:100%;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right))}
       .ct-profile-viewer-nav{position:absolute;left:env(safe-area-inset-left);right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom);display:flex;align-items:center;justify-content:space-between;padding:8px;gap:8px}
       .ct-profile-viewer-nav button{min-width:44px;min-height:44px;border:1px solid #ffffff55;border-radius:4px;color:inherit;background:transparent;font:inherit;cursor:pointer}
+      .ct-profile-viewer>.ct-media-photo-quality{bottom:calc(68px + env(safe-area-inset-bottom))}
       @media(max-width:480px){.ct-profile-row{padding:12px;gap:10px}.ct-profile-photo img,.ct-profile-video{max-height:360px}}
       @media(prefers-reduced-motion:no-preference){.ct-profile-tab,.ct-profile-control{transition:color 120ms ease,background-color 120ms ease}}
     `;
@@ -9914,6 +9915,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.23.0 loaded'
+    '🐦 Classic Twitter JP v6.23.1 loaded'
   );
 })();

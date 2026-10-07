@@ -1,8 +1,8 @@
 # Classic Twitter for tweet.app
 
-**6.23.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.23.1** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 6.23.0は公開・実機検証待ちです。日本語・英語各3版の公開済み版は6.22.0です。
+**配布状況:** 日本語・英語各3版の6.23.1を公開準備中です。
 
 ## 導入・更新
 
@@ -53,7 +53,7 @@
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
 
-6.23.0はTweet 2.2.3に対応。日本ニュースの **「配信元」** から、国内はYahoo!／NHK、スポーツ・エンタメはYahoo!／日刊スポーツ、ITはYahoo!／ITmediaを選べます。ジャンルごとに最低1つを選択し、取得できない配信元は名前を表示します。ジャンル別RSSを使う方式で、任意のRSS追加や本文からの自動分類は未対応です。
+6.23.1はTweet 2.2.3に対応。日本ニュースの **「配信元」** から、国内はYahoo!／NHK、スポーツ・エンタメはYahoo!／日刊スポーツ、ITはYahoo!／ITmediaを選べます。ジャンルごとに最低1つを選択し、取得できない配信元は名前を表示します。ジャンル別RSSを使う方式で、任意のRSS追加や本文からの自動分類は未対応です。
 
 プロフィールの写真・動画／お気に入り欄でも、拡大写真が指に追従して左右に切り替わります。方向を反転しても未準備の写真で黒くならず、ピンチ・ズーム中は写真を切り替えません。写真の複数選択とタイムラインのスライドはTweet標準を使い、同じ処理を重ねません。標準の上限は5枚です。bioの改行、拡大写真の **「配信画像を開く」** と画像サイズ、動画の読み込んだ解像度も維持します。配信データ以上の高画質化や4K／HDR保持はできません。
 
@@ -77,7 +77,7 @@
 
 お気に入りはミュート一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。自動同期はなく、サイトデータを消すと失われます。
 
-画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。6.23.0の実機受け入れは未完了です。
+画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。6.23.1の実機受け入れは未完了です。
 
 **6.22.0での実機記録：** iPhone 17 Pro Max＋Stay 2.9.24で更新、Yahoo!・NHKのニュース、写真の中央配置・前後切替、左右スワイプ、約2倍のピンチ拡大を確認しました。日刊スポーツは追加許可待ち、ITmediaは実機未確認。縮小の直前にXCTestの内部エラーが発生し、ピンチ縮小は未確認です。Safari再起動で通常倍率へ復元済み。長時間操作、Android＋Tampermonkeyは未検証です。
 
@@ -115,7 +115,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.23.0 supports Tweet 2.2.3; publication and device acceptance are pending. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
+Version 6.23.1 supports Tweet 2.2.3 with all six editions prepared for publication; device checks are being recorded. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
 
 Optional browser alerts remain off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported.
 

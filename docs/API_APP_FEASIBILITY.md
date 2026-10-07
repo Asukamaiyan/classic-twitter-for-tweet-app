@@ -8,7 +8,7 @@
 
 public/media設定は引き続き画像10 MB・5枚/投稿・20枚/日、動画50 MB・30秒・5本/日。高解像度variant、HDR保持、投稿上限解除を確認したことにはしない。詳細を開いて標準の戻る操作をすると、観測したスクロール位置は3508.5→3508.5 CSS pxへ復元された。この操作に重複する読書位置ツールを加えない。ほかの経路・再読み込み・端末間の復元は別の確認事項。
 
-今回の実装は既存RSS配信元のジャンル別選択、失敗配信元の表示、プロフィールMedia/Favorites写真の滑らかな操作、公開プロフィールの見出し日本語化。任意RSS追加、サーバーのジャンル自動分類、Tweetbotのプロフィールメモやキーボード操作は追加していない。6.23.0の公開・実機受け入れ結果は検証後に別途記録する。
+今回の実装は既存RSS配信元のジャンル別選択、失敗配信元の表示、プロフィールMedia/Favorites写真の滑らかな操作、公開プロフィールの見出し日本語化。任意RSS追加、サーバーのジャンル自動分類、Tweetbotのプロフィールメモやキーボード操作は追加していない。6.23.0の公開照合と実機の配信元選択・写真スワイプを確認済み。実機で発見した画質リンクの重なりは6.23.1で修正し、最終結果をVALIDATION.mdに記録する。
 
 ## 直前 6.21.0 調査からの差分
 
@@ -22,8 +22,8 @@ public/media設定は引き続き画像10 MB・5枚/投稿・20枚/日、動画5
 
 | 機能 | 最新 native の確認 | userscript への判断 |
 |---|---|---|
-| 写真複数選択・連続 upload | `multiple:true`、`Array.from(files)`、File 配列を既存 uploader に渡し、5 枚上限内で順に upload。ファイルごとの失敗も集約 | 旧 `DataTransfer`/独自 queue/4 枚固定 helper は重複。native handler を使い、独自 upload helper は削除できる |
-| タイムライン複数写真 | native `GX` が scroll snap、Desktop 前後ボタン、Mobile ドット選択、枚数を表示 | 旧 grid 変換/独自 inline carousel は重複。native の画像配列と handler を保持 |
+| 写真複数選択・連続 upload | `multiple:true`、`Array.from(files)`、File 配列を既存 uploader に渡し、5 枚上限内で順に upload。ファイルごとの失敗も集約 | 旧 `DataTransfer`/独自 queue/4 枚固定 helper は重複。6.22.0で独自 upload helper を削除済み。native handler を使う |
+| タイムライン複数写真 | native `GX` が scroll snap、Desktop 前後ボタン、Mobile ドット選択、枚数を表示 | 旧 grid 変換/独自 inline carousel は重複。6.22.0で旧 helper を削除済み。native の画像配列と handler を保持 |
 | 写真全画面の前後切替 | native `Fg` が items 配列、前後ボタン、枚数、矢印/Home/End、40px 横 swipe | 独自前後ボタン/枚数/二重 navigation は削除対象。高画質リンク・中央配置・pinch/滑らかさは補完対象 |
 | 拡大中の swipe | native handler は touches[0] の横差のみを判定。複数指/ズーム状態/縦方向除外は client 内に見当たらない | pinch 中に画像切替が起きる可能性は残る。capture gesture guard などを実際の操作で検証する必要あり。公開 source だけでは症状再現とは呼ばない |
 | リプライ通知 | native reply notification/type は既にある。6.11 で独自 reply polling/inbox は削除済み | 再追加しない。既存の DOM type filter は native All/Mentions にない分類として保持可 |

@@ -1,6 +1,18 @@
+# 6.23.1 検証記録
+
+2026-10-07。6.23.0実機確認でプロフィール写真の「配信画像を開く」と寸法が前後・閉じるボタンに重なることを発見。プロフィールviewer専用CSSで、44pxボタン＋上下paddingの上へ8px空けて配置しました。共有のnative viewer、画像URL・倍率・gestureは変更していません。
+
+- `npm run check` 全678件、6生成版の構文検査が成功。関連98件も成功。
+- Chromiumの日英×320/390/1280px（6ケース）で、画質情報とnavの間隔8px、画面内配置、全buttonの44px以上、下書き保持を確認。現行moduleと番号付きSVGに画質リンクを表示した制御fixtureであり、実配信画像の通信とは別です。
+- 公開・実機更新・最終GitHub結果は確認後に追記します。
+
+証跡はリポジトリ外`outputs/release-6.23.1/`の`full-check.txt`、`browser-profile-audit.json`。ニュースと認証済みAPIの調査は下記6.23.0記録を引き継ぎます。
+
+---
+
 # 6.23.0 検証記録
 
-2026-10-07。認証済みTweet 2.2.3 / build 1791314488を通常の画面操作とDevToolsのNetwork/Runtimeで確認しました。新規公開・実機更新の結果は確認後に追記します。
+2026-10-07。認証済みTweet 2.2.3 / build 1791314488を通常の画面操作とDevToolsのNetwork/Runtimeで確認しました。公開と実機の記録を下記に分けて記載します。
 
 - 凍結したソースで `npm run check` が全678件成功。6配布版の生成・構文検査、ニュースの選択/保存/遅延応答・写真の反転/準備待ち・日本語化の保護範囲を含みます。独立レビューでも写真関連162件が成功し、反転時の未準備paneを再現して修正後を確認しました。
 - Chromiumで6版×390/1280pxのニュース操作を確認。既存17項目と配信元選択14項目、合計372項目が成功。既存2配信元、最少1つ、ジャンルごとの保持、選択元だけの取得、World復元、失敗元名、SafariだけのStay案内、44px選択領域、本文・下書き・native handler保全を確認。RSSは同日取得済みの実XML、管理アプリ通信は模擬です。実Safari/Stayの通信とは区別します。
@@ -9,9 +21,13 @@
 - native投稿詳細からBackでfeedのscrollYが3508.5→3508.5に戻りました。この確認済み動作に重複する位置保存機能は追加していません。再読み込み・全route・全managerを保証する確認ではありません。観測区間のconsole error/warningとRuntime例外は0であり、全起動過程/長時間の無エラー保証とは区別します。
 - 現行media設定は画像10MB/5枚/日20枚、動画50MB/30秒/日5本。送信・4K/HDR保持・制限解除は試していません。外部appの認証受理・公式API契約も未確認です。
 
-参照した公式資料は[Tweetbotのtimeline操作](https://tapbots.com/support/tweetbot6/tips/timeline)、[その他の操作](https://tapbots.com/support/tweetbot6/tips/misc)、[Ivoryのフィルター表示説明](https://tapbots.com/support/ivory/general/timeline_missing_posts)。選択状態の明示と写真操作の一貫性を取り入れました。Tweetbotは終了済み、IvoryはMastodon用で、TweetのAPI仕様とは扱いません。
+- 実Tweetの公開プロフィールへ生成Safari版を一時注入し、native見出しFeed→プロフィール、40件の投稿本文、元のtextarea値とプロフィール名の保持を確認。追加ツールのtextareaと翻訳対象のstatic見出しをuser dataから区別して照合しました。再読み込みで注入コード・専用UI・version属性の除去を確認。Stayのdocument-start実行とは別のChromium検証です。
+- 独立配布監査で6.22の固定commitに対し、名前・namespace・URL・grant・connect・6配布IDを維持しmetadata差分はversionだけと確認。全6コードがsource展開と完全一致、既存28保存呼出し署名/キーは不変。新規保存キーはニュースの`ct-news-sources-v1`のみ。全6案内の必要なもの・初回4手順・更新・リンクも保持しています。
+- GitHub [PR #23](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/23)の実装commit `e083121` のpush/PR CI2件が成功。Greasy Forkの全6版へ6.23.0を公開し、送信前にコード全文のSHA256と案内の一致を確認して既存限定公開/HTML設定を保持。通常6コード＋6案内（12GET）を匿名取得し、全HTTP200・全文一致を確認しました。GFが正当に付与した更新URLメタデータと改行/末尾空白だけを正規化しています。最終commit/マージ後CIは別途記録します。
 
-証跡はリポジトリ外`outputs/release-6.23.0/`の`full-check.txt`、`authenticated-api-audit.json`、`browser-news-audit.json`、`browser-profile-audit.json`、`news-mobile.jpg`。過去の実機結果は以下の6.22.0記録と区別します。
+参照した公式資料は[Tweetbotのtimeline操作](https://tapbots.com/support/tweetbot6/tips/timeline)、[その他の操作](https://tapbots.com/support/tweetbot6/tips/misc)、[Ivoryのフィルター表示説明](https://tapbots.com/support/ivory/general/timeline_missing_posts)。選択状態の明示と短い操作導線を設計の参考にしました。プロフィール写真のスワイプは本スクリプトの改善です。Tweetbotは終了済み、IvoryはMastodon用で、TweetのAPI仕様とは扱いません。
+
+証跡はリポジトリ外`outputs/release-6.23.0/`の`full-check.txt`、`authenticated-api-audit.json`、`browser-news-audit.json`、`browser-profile-audit.json`、`news-mobile.jpg`、`browser-media-audit.json`、`metadata-audit.json`、`public-code-checks.json`、`release.jpg`。過去の実機結果は以下の6.22.0記録と区別します。
 
 ---
 
