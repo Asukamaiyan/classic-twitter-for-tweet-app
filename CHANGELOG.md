@@ -2,7 +2,7 @@
 
 ## All distributions v6.24.0 — 2026-10-09
 
-Compatibility update for the inspected Tweet 2.3.0 web client. Publication and validation are recorded separately in VALIDATION.md.
+All six 6.24.0 editions are published on Greasy Fork with matching generated code and complete installation/update guides. This compatibility update targets the inspected Tweet 2.3.0 web client. Automated and controlled-browser validation passed; physical Safari/Stay and Android acceptance was not performed for this release. Detailed evidence is recorded in VALIDATION.md.
 
 - Restore per-avatar profile links and notification filters for native overlay-button rows. Prevent native heart flashes during React replacements and retain reversible classic styling.
 - Localize native GIF/video upload controls, progress, errors, blocking menus, confirmations and settings without changing post text, names, drafts or handlers.
