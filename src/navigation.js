@@ -8,6 +8,7 @@
   };
   const ctAvatarWrapperSelector = 'div.relative.inline-flex.shrink-0.isolate';
   const ctNativeFollowSelector = 'span[role="button"][aria-label]';
+  const ctNativeNotificationRowSelector = 'main button.items-start,main div.relative.w-full.flex.items-start.gap-3';
 
   function ctNavigationJapanese() { return CT_LOCALE === 'ja'; }
   function ctNavigationHandle(value) {
@@ -52,11 +53,28 @@
     const url = avatar.tagName === 'IMG' ? ctAvatarURL(avatar.getAttribute('src')) : '';
     return name && name.length <= 512 && url !== null ? `${name}\n${url}` : null;
   }
+  function ctIsNativeNotificationRow(row) {
+    if (!row?.matches(ctNativeNotificationRowSelector) || row.closest('article,[data-ct-local-ui],[data-ct-owned]')) return false;
+    if (row.tagName === 'BUTTON') return row.matches('button.border-b') ||
+      (row.matches('button.w-full.flex.gap-3') && row.parentElement?.matches('div.border-b'));
+    // Tweet 2.3 separates the event's full-row button from its avatars and
+    // menu. Only the verified overlay/content row qualifies; the expanded
+    // native follower list and ordinary profile controls remain untouched.
+    if (!row.classList.contains('border-b') && !row.parentElement?.matches('div.border-b')) return false;
+    const button = row.firstElementChild;
+    const content = [...row.children].find(child => child.matches('div.flex-1.min-w-0.pointer-events-none'));
+    if (!content || !button?.matches('button[type="button"].absolute.inset-0.w-full.h-full[aria-labelledby]') ||
+        button.children.length || button.textContent.trim()) return false;
+    const labels = (button.getAttribute('aria-labelledby') || '').trim().split(/\s+/);
+    return labels.length > 0 && labels.length <= 2 && labels.every(id => {
+      if (!id || id.length > 256) return false;
+      const label = row.ownerDocument.getElementById(id);
+      return label?.tagName === 'P' && content.contains(label) &&
+        label.closest(ctNativeNotificationRowSelector) === row;
+    });
+  }
   function ctNativeNotificationRows() {
-    return [...document.querySelectorAll('main button.items-start')].filter(row =>
-      !row.closest('article,[data-ct-local-ui],[data-ct-owned]') &&
-      (row.matches('button.border-b') ||
-        (row.matches('button.w-full.flex.gap-3') && row.parentElement?.matches('div.border-b'))));
+    return [...document.querySelectorAll(ctNativeNotificationRowSelector)].filter(ctIsNativeNotificationRow);
   }
   function ctNotificationAvatarWrappers() {
     if (!/^\/notifications\/?$/.test(location.pathname)) return [];
@@ -87,7 +105,12 @@
   }
   function ctRenderNotificationAvatars() {
     const japanese = ctNavigationJapanese();
-    for (const wrapper of ctNotificationAvatarWrappers()) {
+    const wrappers = ctNotificationAvatarWrappers();
+    const active = new Set(wrappers);
+    for (const link of document.querySelectorAll('a.ct-notification-profile-link[data-ct-local-ui="notification-profile"]')) {
+      if (!active.has(link.parentElement)) link.remove();
+    }
+    for (const wrapper of wrappers) {
       let link = wrapper.querySelector(':scope > a.ct-notification-profile-link');
       if (!link) {
         link = document.createElement('a');
@@ -191,8 +214,15 @@
     const link = event.target?.closest?.('a.ct-notification-profile-link');
     if (!link || !/^\/notifications\/?$/.test(location.pathname)) return;
     const wrapper = link.parentElement;
-    const row = wrapper?.closest('main button.items-start');
-    if (!wrapper?.matches(ctAvatarWrapperSelector) || !ctNativeNotificationRows().includes(row)) return;
+    const row = wrapper?.closest(ctNativeNotificationRowSelector);
+    if (!wrapper?.matches(ctAvatarWrapperSelector)) return;
+    if (!ctIsNativeNotificationRow(row)) {
+      // A reused native row can invalidate its shape before the next scan.
+      // Release our anchor and its stale destination without intercepting the
+      // new native row's handlers or inventing a profile for the changed UI.
+      link.removeAttribute('href'); link.remove(); event.preventDefault();
+      return;
+    }
     // A React update may arrive between the last scan and this click. Never
     // navigate using the previous avatar's URL while the next scan is queued.
     const handle = ctNotificationAvatarHandle(wrapper);

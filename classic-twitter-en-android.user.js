@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Android
 // @namespace    https://tweet.app/
-// @version      6.23.1
+// @version      6.24.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -2405,9 +2405,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const selected = `${button}:is([aria-pressed="true"],:not([aria-pressed]).text-pink-500,:not([aria-pressed]):not(.text-tl-app-text-muted):not(.text-pink-500).ct-is-liked)`;
     const notificationRows = [
       `${enabled} #root-container main button.w-full.flex.items-start.border-b`,
-      `${enabled} #root-container main div.border-b > button.w-full.flex.items-start.gap-3`
+      `${enabled} #root-container main div.border-b > button.w-full.flex.items-start.gap-3`,
+      // Tweet 2.3 places a dedicated full-row button beside the notification
+      // icon and avatars. Match that verified shape directly so a React icon
+      // replacement stays a star before the scheduled DOM reconciliation.
+      `${enabled} #root-container main div.border-b > div.relative.w-full.flex.items-start.gap-3:has(> button[type="button"].absolute.inset-0.w-full.h-full[aria-labelledby]:first-child):has(> div.flex-1.min-w-0.pointer-events-none)`,
+      `${enabled} #root-container main div.relative.w-full.flex.items-start.gap-3.border-b:has(> button[type="button"].absolute.inset-0.w-full.h-full[aria-labelledby]:first-child):has(> div.flex-1.min-w-0.pointer-events-none)`
     ];
     const notificationIcons = notificationRows.map(row => `${row} > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]`);
+    // Emit each notification selector in its own rule: a browser without
+    // :has must not discard the existing button-row rules with the new ones.
     // React may replace both className and the icon before the next scan.
     // Stable native test IDs hide the heart immediately; the CSS vector fills
     // the brief gap until our motion-capable star is restored.
@@ -2438,12 +2445,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
       ${selected} > .ct-star svg { fill:currentColor!important; }
       ${selected} + :is(span.text-xs.tabular-nums,button[data-testid="tweet-like-action-count"]) { color:#ffac33!important; }
-      ${notificationIcons.join(',')} {
+      ${notificationIcons.map(icon => `${icon} {
         background:#ffac33!important;
         -webkit-mask:${mask(true)} center/contain no-repeat;
         mask:${mask(true)} center/contain no-repeat;
       }
-      ${notificationIcons.map(icon => `${icon} *`).join(',')} { visibility:hidden!important; }
+      ${icon} * { visibility:hidden!important; }`).join('\n')}
       @supports selector(:has(*)) {
         ${button}:has(> span.ct-star)::before { display:none!important; }
       }
@@ -2886,7 +2893,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.23.1';
+    document.documentElement.dataset.ctActiveVersion = '6.24.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -3432,12 +3439,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctProfileUID() {
     return typeof ctNetworkState !== 'undefined' ? ctProfileId(ctNetworkState.authUID) : null;
   }
+  function ctProfilePostEdited(post) {
+    return post?.isEdited === true || (typeof post?.editedAt === 'string' && !!post.editedAt.trim());
+  }
   function ctProfileMediaAssets(post) {
     const media = [];
     for (const asset of Array.isArray(post?.media_assets) ? post.media_assets.slice(0, 16) : []) {
       const url = ctProfileURL(asset?.public_url);
       if (url && ['image', 'video'].includes(asset?.media_type)) media.push({
-        type: asset.media_type, url, poster: ctProfileURL(asset.thumbnail_url)
+        type: asset.media_type, url, poster: ctProfileURL(asset.thumbnail_url),
+        ...(asset.media_type === 'video' && asset.is_gif === true ? { isGIF: true } : {})
       });
     }
     const image = ctProfileURL(post?.image);
@@ -3457,10 +3468,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       text: typeof item.text === 'string' ? item.text.slice(0, 10000) : '',
       avatar: ctProfileURL(item.avatar), savedAt: Number.isFinite(Number(item.savedAt)) && Number(item.savedAt) >= 0 ? Number(item.savedAt) : 0,
       createdAt: typeof item.createdAt === 'string' && (ctTimestampParse(item.createdAt) || Number.isFinite(Date.parse(item.createdAt))) ? item.createdAt : '',
+      ...(item.isEdited === true ? { isEdited: true } : {}),
       href: `${location.origin}/post/${encodeURIComponent(item.id)}`,
       media: Array.isArray(item.media) ? item.media.slice(0, 16).filter(asset =>
         ['image', 'video'].includes(asset?.type) && ctProfileURL(asset.url)).map(asset => ({
-          type: asset.type, url: ctProfileURL(asset.url), poster: ctProfileURL(asset.poster)
+          type: asset.type, url: ctProfileURL(asset.url), poster: ctProfileURL(asset.poster),
+          ...(asset.type === 'video' && asset.isGIF === true ? { isGIF: true } : {})
         })) : []
       });
     }
@@ -3515,7 +3528,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     for (const post of posts.slice(0, 1000)) {
       const username = ctProfileHandle(post?.authorUsername);
       if (post?.hasLiked !== true || !ctProfileId(post.id) || !username ||
-          (expectedHandle && username !== expectedHandle) || post.isDeleted || post.status === 'MUTED' ||
+          (expectedHandle && username !== expectedHandle) || post.isDeleted || ['MUTED', 'BLOCKED'].includes(post.status) ||
           post.isRepost || post.originalPostId || post.repostedBy || removed?.has(post.id) || typeof post.text !== 'string') continue;
       // The native client prefers created_at. A missing or invalid alias must
       // not hide a valid creation time or replace a known time with savedAt.
@@ -3524,7 +3537,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : username,
         avatar: ctProfileURL(post.authorAvatar), text: post.text.slice(0, 10000),
         createdAt,
-        savedAt: known.get(post.id)?.savedAt ?? Date.now(), media: ctProfileMediaAssets(post) });
+        savedAt: known.get(post.id)?.savedAt ?? Date.now(), media: ctProfileMediaAssets(post),
+        ...(ctProfilePostEdited(post) ? { isEdited: true } : {}) });
     }
     if (!recovered.size || expectedUid !== ctProfileUID()) return 0;
     // Reading an old cache must not undo a newer native Unlike. Existing saved
@@ -3566,6 +3580,20 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return !!article && timeline.contains(article) &&
       [...article.querySelectorAll('button[data-testid="tweet-like-action"]')].some(button => button.closest('article') === article);
   }
+  function ctProfileNativeBlockPanel(timeline, user) {
+    if (!timeline || timeline.children.length !== 2 ||
+        !timeline.firstElementChild.matches('p') || !timeline.lastElementChild.matches('p.text-tl-app-text-muted')) return false;
+    const title = timeline.firstElementChild.textContent.trim();
+    const body = timeline.lastElementChild.textContent.trim();
+    const blockedBy = /^(?:@([A-Za-z0-9_.-]+) has blocked you, so you can't follow them or see their (?:posts|Tweets)\.|@([A-Za-z0-9_.-]+)さんにブロックされているため、フォローやツイートの表示ができません。)$/.exec(body);
+    const blockedTitle = /^(?:You blocked @|ブロック済み: @)([A-Za-z0-9_.-]+)$/.exec(title);
+    return timeline.matches('div.flex.flex-col.items-start.justify-center.py-12.px-8') &&
+      /^(?:You're blocked|ブロックされています)$/.test(title) &&
+      ctProfileHandle(blockedBy?.[1] || blockedBy?.[2]) === user ||
+      timeline.matches('div.flex.flex-col.items-center.justify-center.py-20.px-4.text-center') &&
+      ctProfileHandle(blockedTitle?.[1]) === user &&
+      /^(?:You are not seeing their (?:posts|Tweets) or replies\.|相手のツイートや返信は表示されません。)$/.test(body);
+  }
   function ctProfileContext() {
     if (!/^\/(?:profile\/?|user\/[^/]+\/?)$/.test(location.pathname)) return null;
     const main = document.querySelector('main');
@@ -3598,6 +3626,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       // hiding the timeline must retain their original nodes and draft values.
       // Unknown forms, inputs and editor structures still fail open.
       if (!timeline?.matches('div') || timeline.matches('[role],[data-ct-owned],[data-ct-local-ui]') ||
+          ctProfileNativeBlockPanel(timeline, user) ||
           [...timeline.querySelectorAll('input,textarea,form,[role="form"]')].some(el => !ctProfileNativeReplyEditor(el, timeline))) continue;
       return { path: location.pathname, user, main, tablist, timeline, nativeTabs };
     }
@@ -3648,7 +3677,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-row-main{min-width:0;flex:1}
       .ct-profile-meta{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;font-size:14px;line-height:20px}
       .ct-profile-name{font-weight:700;color:inherit;text-decoration:none}
-      .ct-profile-handle,.ct-profile-time{font-size:12px;color:var(--color-tl-app-text-muted,#657786);text-decoration:none}
+      .ct-profile-handle,.ct-profile-time,.ct-profile-edited{font-size:12px;color:var(--color-tl-app-text-muted,#657786);text-decoration:none}
       .ct-profile-time{white-space:nowrap}
       .ct-profile-text{font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 10px}
       .ct-profile-gallery{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;border-radius:4px;scrollbar-width:thin}
@@ -3975,8 +4004,24 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const reportMute = report && /^(?:Report @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+を報告)$/.test(report.getAttribute('aria-label') || '') &&
         report.querySelector('h3.text-sm.font-bold.text-tl-app-text') && button.matches('button.w-full.rounded-full.border[aria-busy]') &&
         /^(?:Mute @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+をミュート)$/.test(button.textContent.trim());
-      if (!menuMute && !settingsUnmute && !reportMute) return;
-      // A native mute action changes visibility. Discard only short-lived
+      const menu = button.parentElement;
+      const blockText = button.querySelector(':scope > span.min-w-0.truncate')?.textContent.trim() || button.textContent.trim();
+      const blockTrigger = menu?.parentElement?.querySelector(':scope > button[aria-label]');
+      const menuBlock = button.querySelector(':scope > svg.lucide-ban') && button.matches('button[type="button"].w-full.flex.items-center') &&
+        /^(?:(?:Block|Unblock) @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+(?:をブロック|のブロックを解除))$/.test(blockText) &&
+        menu?.matches('div.absolute.right-0.top-full.bg-tl-app-card.border.rounded-xl') &&
+        /^(?:Profile options|Post options|Reply options|More options|プロフィールのメニュー|ツイートのメニュー|返信のメニュー|メニューを開く)$/.test(blockTrigger?.getAttribute('aria-label') || '');
+      const settingsUnblock = /^\/settings\/?$/.test(location.pathname) &&
+        /^(?:Unblock @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+のブロックを解除)$/.test(label) &&
+        /^(?:Unblock|ブロックを解除)$/.test(button.textContent.trim()) && button.closest('main section');
+      const confirmation = button.closest('[role="dialog"][aria-modal="true"][aria-labelledby="app-confirm-title"].bg-tl-app-card.border');
+      const confirmBlock = confirmation?.querySelector(':scope > h3#app-confirm-title') &&
+        /^(?:(?:Block|Unblock) @[A-Za-z0-9_.-]+\?|@[A-Za-z0-9_.-]+(?:をブロック|のブロックを解除)しますか？)$/.test(
+          confirmation.querySelector(':scope > h3#app-confirm-title').textContent.trim()) &&
+        button.parentElement?.matches('div.mt-5') && button.matches('button.bg-red-500') &&
+        /^(?:Block|Unblock|ブロック|ブロックを解除)$/.test(button.textContent.trim());
+      if (!menuMute && !settingsUnmute && !reportMute && !menuBlock && !settingsUnblock && !confirmBlock) return;
+      // Native visibility actions invalidate only short-lived
       // read caches; never alter the user's saved Favorites.
       ctProfileState.muteCache.clear();
       ctProfileState.mediaCache.clear();
@@ -4155,6 +4200,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
       time.title = `${ctTimestampExactText(item.createdAt)} (${item.createdAt})`; meta.append(time);
     }
+    if (item.isEdited === true) {
+      const edited = document.createElement('span'); edited.className = 'ct-profile-edited';
+      edited.textContent = ctProfileText('編集済み', 'Edited'); meta.append(edited);
+    }
     main.append(meta);
     if (item.text) { const text = document.createElement('p'); text.className = 'ct-profile-text'; text.textContent = item.text; main.append(text); }
     const images = (item.media || []).filter(asset => asset.type === 'image');
@@ -4177,7 +4226,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     for (const asset of (item.media || []).filter(asset => asset.type === 'video')) {
       const video = document.createElement('video'); video.className = 'ct-profile-video'; video.src = asset.url;
       if (asset.poster) video.poster = asset.poster; video.controls = true; video.playsInline = true; video.preload = 'none';
-      video.setAttribute('aria-label', ctProfileText('投稿の動画', 'Post video')); main.append(video);
+      if (asset.isGIF === true) { video.loop = true; video.muted = true; }
+      video.setAttribute('aria-label', asset.isGIF === true ? ctProfileText('投稿のアニメーションGIF', 'Post animated GIF') :
+        ctProfileText('投稿の動画', 'Post video')); main.append(video);
     }
     const link = document.createElement('a'); link.className = 'ct-profile-post-link'; link.href = item.href;
     link.textContent = ctProfileText('元のツイートを開く', 'Open original Tweet'); main.append(link); row.append(main); return row;
@@ -4215,9 +4266,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const cached = uid && ctProfileState.muteCache.get(uid);
       const recent = cached && Date.now() - cached.at < 30000;
       ctProfileState.favoriteMutes = { uid, path: ctProfileState.path, user: ctProfileState.user,
-        handles: new Set(), cursors: new Set(), cursor: null, pages: 0, busy: false, done: false, error: '' };
+        handles: new Set(), cursors: new Set(), cursor: null, pages: 0, mutedDone: false,
+        blockCursors: new Set(), blockCursor: null, blockPages: 0, blockedDone: false,
+        busy: false, done: false, error: '' };
       if (recent) {
         ctProfileState.favoriteMutes.handles = new Set(cached.handles);
+        ctProfileState.favoriteMutes.mutedDone = true; ctProfileState.favoriteMutes.blockedDone = true;
         ctProfileState.favoriteMutes.done = true;
       } else if (cached) ctProfileState.muteCache.delete(uid);
     }
@@ -4241,7 +4295,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const sequence = ctProfileState.sequence;
     if (!state.uid || !ctProfileFavoriteMuteCurrent(state, sequence)) { renderFavoritesPanel(); return; }
     const active = () => !document.hidden && (typeof ctPageActive === 'undefined' || ctPageActive);
-    const paused = () => ctProfileText('このタブを表示してから、ミュート一覧の確認を再開してください。', 'Show this tab, then continue checking muted accounts.');
+    const paused = () => ctProfileText('このタブを表示してから、ミュート・ブロック一覧の確認を再開してください。', 'Show this tab, then continue checking muted and blocked accounts.');
     if (!active()) { state.error = paused(); renderFavoritesPanel(); return; }
     state.busy = true; state.error = ''; renderFavoritesPanel();
     try {
@@ -4251,7 +4305,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const headers = { Authorization: `Bearer ${auth.token}` };
       // Tweet's native muted-accounts consumer uses opaque nextCursor values,
       // with no limit override. Check at most ten pages per explicit action.
-      for (let page = 0; page < 10 && !state.done; page++) {
+      for (let page = 0; page < 10 && !state.mutedDone; page++) {
         if (!ctProfileFavoriteMuteCurrent(state, sequence)) return;
         if (!active()) { state.error = paused(); return; }
         const cursor = state.cursor;
@@ -4268,14 +4322,39 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         }
         for (const user of json.users) state.handles.add(ctProfileHandle(user.username));
         if (cursor) state.cursors.add(cursor);
-        state.cursor = next; state.pages++; state.done = !next;
+        state.cursor = next; state.pages++; state.mutedDone = !next;
       }
+      // v2.3.0's native blocked-account consumer reads blocks/userId/username
+      // and opaque nextCursor with limit=200. Stop after ten pages per action;
+      // a partial or failed visibility check must not reveal local snapshots.
+      for (let page = 0; page < 10 && state.mutedDone && !state.blockedDone; page++) {
+        if (!ctProfileFavoriteMuteCurrent(state, sequence)) return;
+        if (!active()) { state.error = paused(); return; }
+        const cursor = state.blockCursor;
+        const query = new URLSearchParams({ limit: '200' }); if (cursor) query.set('cursor', cursor);
+        const json = await requestJSON(API_ORIGIN + '/api/blocks?' + query, headers);
+        const current = await getAuth();
+        if (!ctProfileFavoriteMuteCurrent(state, sequence) || current?.uid !== state.uid) return;
+        if (!active()) { state.error = paused(); return; }
+        if (!json || json.success === false || json.error || !Array.isArray(json.blocks) || json.blocks.length > 1000 ||
+            json.blocks.some(user => !ctProfileId(user?.userId) || !ctProfileHandle(user?.username))) throw new Error('blocked-response');
+        const next = json.nextCursor === '' ? null : json.nextCursor ?? null;
+        if (next !== null && (typeof next !== 'string' || !next || next.length > 2000 || next === cursor || state.blockCursors.has(next))) {
+          throw new Error('blocked-cursor');
+        }
+        for (const user of json.blocks) state.handles.add(ctProfileHandle(user.username));
+        if (cursor) state.blockCursors.add(cursor);
+        state.blockCursor = next; state.blockPages++; state.blockedDone = !next;
+      }
+      state.done = state.mutedDone && state.blockedDone;
       if (state.done && ctProfileFavoriteMuteCurrent(state, sequence) && active()) {
         ctProfileState.muteCache.set(state.uid, { at: Date.now(), handles: [...state.handles] });
         while (ctProfileState.muteCache.size > 4) ctProfileState.muteCache.delete(ctProfileState.muteCache.keys().next().value);
       }
     } catch {
-      if (ctProfileFavoriteMuteCurrent(state, sequence)) state.error = ctProfileText(
+      if (ctProfileFavoriteMuteCurrent(state, sequence)) state.error = state.mutedDone ? ctProfileText(
+        'ブロック一覧を確認できませんでした。保存した投稿を表示する前に、再試行してください。',
+        'Blocked accounts could not be checked. Try again before showing saved posts.') : ctProfileText(
         'ミュート一覧を確認できませんでした。保存した投稿を表示する前に、再試行してください。',
         'Muted accounts could not be checked. Try again before showing saved posts.');
     } finally {
@@ -4364,13 +4443,15 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (data.items.length > CT_FAVORITE_BACKUP_ROWS) throw new Error('size');
     const safeURL = value => typeof value === 'string' && (value === '' || ctProfileURL(value) === value);
     for (const item of data.items) {
-      if (!keys(item, ['id', 'username', 'name', 'text', 'avatar', 'savedAt', 'createdAt', 'media']) ||
+      if (!keys(item, ['id', 'username', 'name', 'text', 'avatar', 'savedAt', 'createdAt', 'media', 'isEdited']) ||
           !ctProfileId(item.id) || typeof item.username !== 'string' || (item.username && !ctProfileHandle(item.username)) ||
           typeof item.name !== 'string' || item.name.length > 200 || typeof item.text !== 'string' || item.text.length > 10000 ||
           !safeURL(item.avatar) || typeof item.savedAt !== 'number' || !Number.isFinite(item.savedAt) || item.savedAt < 0 ||
           typeof item.createdAt !== 'string' || (item.createdAt && !ctTimestampParse(item.createdAt) && !Number.isFinite(Date.parse(item.createdAt))) ||
+          (item.isEdited !== undefined && typeof item.isEdited !== 'boolean') ||
           !Array.isArray(item.media) || item.media.length > 16 || item.media.some(asset =>
-            !keys(asset, ['type', 'url', 'poster']) || !['image', 'video'].includes(asset.type) ||
+            !keys(asset, ['type', 'url', 'poster', 'isGIF']) || !['image', 'video'].includes(asset.type) ||
+            (asset.isGIF !== undefined && (typeof asset.isGIF !== 'boolean' || (asset.isGIF && asset.type !== 'video'))) ||
             !asset.url || !safeURL(asset.url) || !safeURL(asset.poster))) throw new Error('format');
     }
     return ctProfileFavoriteItems(data.items);
@@ -4501,7 +4582,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const storageError = ctProfileFavoriteStorageError(uid);
     const history = ctProfileFavoriteHistorySummary(uid);
     const signature = JSON.stringify(['favorites', uid, items, legacy.length, storageError,
-      muted.busy, muted.done, muted.error, muted.pages, [...muted.handles], view.limit, view.message, view.error, view.busy, view.backupRevision, history]);
+      muted.busy, muted.done, muted.error, muted.pages, muted.blockPages, [...muted.handles], view.limit, view.message, view.error, view.busy, view.backupRevision, history]);
     if (signature === ctProfileState.rendered) return;
     ctProfileState.rendered = signature;
     const rows = ctProfileExistingRows(panel);
@@ -4542,15 +4623,15 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!muted.done) {
       const hidden = tools.querySelector('#ct-favorite-hidden-status'); if (hidden.textContent) hidden.textContent = '';
       const count = tools.querySelector('#ct-favorite-count');
-      const summary = ctProfileText(`このアカウントに保存済み${items.length}件 · 表示前にミュート一覧の確認が必要です`, `${items.length} saved for this account · Muted accounts must be checked before display`);
+      const summary = ctProfileText(`このアカウントに保存済み${items.length}件 · 表示前にミュート・ブロック一覧の確認が必要です`, `${items.length} saved for this account · Muted and blocked accounts must be checked before display`);
       const phase = muted.busy ? ctProfileText('確認中', 'Checking') : ctProfileText('未確認', 'Not checked');
       ctProfileToolbarSummary(count, ctProfileText(`保存${items.length}件 · ${phase}`, `${items.length} saved · ${phase}`), summary);
       const range = tools.querySelector('#ct-favorite-range'); const rangeText = muted.busy ?
-        ctProfileText('保存した投稿の日付範囲：ミュート一覧を確認中', 'Saved Tweet date range: checking muted accounts') :
-        ctProfileText('保存した投稿の日付範囲：ミュート一覧が未確認', 'Saved Tweet date range: muted accounts not checked');
+        ctProfileText('保存した投稿の日付範囲：ミュート・ブロック一覧を確認中', 'Saved Tweet date range: checking muted and blocked accounts') :
+        ctProfileText('保存した投稿の日付範囲：ミュート・ブロック一覧が未確認', 'Saved Tweet date range: muted and blocked accounts not checked');
       if (range.textContent !== rangeText) range.textContent = rangeText;
-      const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート一覧を確認中…', 'Checking muted accounts…') :
-        muted.error || ctProfileText('ミュート一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted accounts have been checked.'));
+      const waiting = ctProfileStatus(muted.busy ? ctProfileText('ミュート・ブロック一覧を確認中…', 'Checking muted and blocked accounts…') :
+        muted.error || ctProfileText('ミュート・ブロック一覧の確認が終わるまで、保存した投稿を表示しません。', 'Saved posts stay hidden until muted and blocked accounts have been checked.'));
       waiting.setAttribute('role', 'status');
       if (!muted.busy) waiting.append(ctProfileControl(
         muted.error ? ctProfileText('再試行', 'Try again') : ctProfileText('続きを確認', 'Continue checking'), () => ctProfileLoadFavoriteMutes()));
@@ -4559,8 +4640,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const unmuted = items.filter(item => item.username && !muted.handles.has(item.username));
       const hidden = tools.querySelector('#ct-favorite-hidden-status');
       const hiddenText = unmuted.length < items.length ? ctProfileText(
-        `ミュートした作者や作者を確認できない投稿${items.length - unmuted.length}件を非表示にしています。保存データは保持しています。`,
-        `${items.length - unmuted.length} saved posts from muted or unidentified authors are hidden. Saved data is retained.`) : '';
+        `ミュート・ブロックした作者や作者を確認できない投稿${items.length - unmuted.length}件を非表示にしています。保存データは保持しています。`,
+        `${items.length - unmuted.length} saved posts from muted, blocked or unidentified authors are hidden. Saved data is retained.`) : '';
       if (hidden.textContent !== hiddenText) hidden.textContent = hiddenText;
       const matching = unmuted.sort((a, b) => b.savedAt - a.savedAt);
       const visible = matching.slice(0, view.limit);
@@ -4606,7 +4687,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return ctProfileState.media;
   }
   function ctProfilePostItem(post, user) {
-    if (!ctProfileId(post?.id) || ctProfileHandle(post.authorUsername) !== user || post.isDeleted || post.status === 'MUTED' ||
+    if (!ctProfileId(post?.id) || ctProfileHandle(post.authorUsername) !== user || post.isDeleted || ['MUTED', 'BLOCKED'].includes(post.status) ||
         post.isRepost || post.originalPostId || post.repostedBy) return null;
     const media = ctProfileMediaAssets(post);
     if (!media.length) return null;
@@ -4614,7 +4695,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       name: typeof post.authorName === 'string' ? post.authorName.slice(0, 200) : user,
       avatar: ctProfileURL(post.authorAvatar), text: typeof post.text === 'string' ? post.text.slice(0, 10000) : '',
       createdAt: ctTimestampPostValue(post),
-      href: '/post/' + encodeURIComponent(post.id), media };
+      href: '/post/' + encodeURIComponent(post.id), media,
+      ...(ctProfilePostEdited(post) ? { isEdited: true } : {}) };
   }
   async function ctProfileLoadMedia(refresh = false) {
     if (ctProfileState.active !== 'media' || document.hidden || (typeof ctPageActive !== 'undefined' && !ctPageActive)) return;
@@ -4824,7 +4906,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return [...new Set(nodes)].filter(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-user-content],.tl-user-text,[data-ct-owned],[data-ct-local-ui]'))
       .slice(0, 16).map(el => ({type: el.tagName === 'VIDEO' ? 'video' : 'image',
-        url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : ''})).filter(asset => asset.url);
+        url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : '',
+        ...(el.tagName === 'VIDEO' && /^(Animated GIF|GIFアニメーション|アニメーションGIF)$/.test(el.getAttribute('aria-label') || '')
+          ? {isGIF:true} : {})})).filter(asset => asset.url);
   }
 
   function ctFavoriteCandidate(article) {
@@ -4919,7 +5003,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (current?.uid !== uid || !Array.isArray(posts)) return null;
     const matches = posts.filter(post => typeof post.id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(post.id) &&
       !post.isDeleted && !post.originalPostId && !post.isRepost &&
-      post.status !== 'MUTED' &&
+      !['MUTED','BLOCKED'].includes(post.status) &&
       post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&
       (candidate.createdAt ? ctTimestampPostDate(post)?.getTime() === ctTimestampParse(candidate.createdAt)?.getTime() :
         ctFavoriteRelativeTimeMatches(candidate.relativeText, ctTimestampPostValue(post), candidate.observedAt)) &&
@@ -4929,7 +5013,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return { ...candidate, id: unique[0].id, text: unique[0].text, createdAt: ctTimestampPostValue(unique[0]),
       href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
       avatar: ctProfileURL(unique[0].authorAvatar) || candidate.avatar,
-      media: ctProfileMediaAssets(unique[0]) };
+      media: ctProfileMediaAssets(unique[0]), ...(ctProfilePostEdited(unique[0]) ? {isEdited:true} : {}) };
   }
 
   async function ctRestoreVisibleFavorites() {
@@ -4957,9 +5041,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
             {Authorization:`Bearer ${auth.token}`});
           const post = json?.post;
           if (!json || json.success === false || json.error || post?.id !== snapshot.id || post.hasLiked !== true ||
-              post.isDeleted || post.status === 'MUTED' || post.isRepost || post.originalPostId ||
+              post.isDeleted || ['MUTED','BLOCKED'].includes(post.status) || post.isRepost || post.originalPostId ||
               post.authorUsername?.toLowerCase() !== snapshot.username.toLowerCase() || typeof post.text !== 'string') snapshot = null;
-          else snapshot = {...snapshot,text:post.text,createdAt:ctTimestampPostValue(post),
+          else snapshot = {...snapshot,text:post.text,createdAt:ctTimestampPostValue(post),isEdited:ctProfilePostEdited(post),
             media:ctProfileMediaAssets(post),avatar:ctProfileURL(post.authorAvatar) || snapshot.avatar};
         } else snapshot = null;
         const current = await getAuth();
@@ -5305,13 +5389,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctFavoriteHistoryPost(post) {
     return post && typeof post === 'object' && !Array.isArray(post) && ctProfileId(post.id) &&
       ctProfileHandle(post.authorUsername) && typeof post.text === 'string' && post.text.length <= 10000 &&
-      post.hasLiked === true && !post.isDeleted && post.status !== 'MUTED';
+      post.hasLiked === true && !post.isDeleted && !['MUTED','BLOCKED'].includes(post.status);
   }
   function ctFavoriteHistoryPage(json, source) {
     if (!json || json.success !== true || json.error || !Array.isArray(json.posts) || json.posts.length > 20 ||
         !Object.prototype.hasOwnProperty.call(json, 'nextCursor') || !ctFavoriteHistoryCursor(json.nextCursor) ||
         json.posts.some(post => !post || typeof post !== 'object' || Array.isArray(post) || !ctProfileId(post.id) ||
-          typeof post.hasLiked !== 'boolean' || (post.hasLiked === true && !post.isDeleted && post.status !== 'MUTED' &&
+          typeof post.hasLiked !== 'boolean' || (post.hasLiked === true && !post.isDeleted && !['MUTED','BLOCKED'].includes(post.status) &&
             (!ctProfileHandle(post.authorUsername) || typeof post.text !== 'string' || post.text.length > 10000)))) throw new Error('response');
     if (json.nextCursor !== null && (json.nextCursor === source.cursor || source.seen.includes(json.nextCursor))) throw new Error('cursor');
     return json.posts;
@@ -5463,6 +5547,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   };
   const ctAvatarWrapperSelector = 'div.relative.inline-flex.shrink-0.isolate';
   const ctNativeFollowSelector = 'span[role="button"][aria-label]';
+  const ctNativeNotificationRowSelector = 'main button.items-start,main div.relative.w-full.flex.items-start.gap-3';
 
   function ctNavigationJapanese() { return CT_LOCALE === 'ja'; }
   function ctNavigationHandle(value) {
@@ -5507,11 +5592,28 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const url = avatar.tagName === 'IMG' ? ctAvatarURL(avatar.getAttribute('src')) : '';
     return name && name.length <= 512 && url !== null ? `${name}\n${url}` : null;
   }
+  function ctIsNativeNotificationRow(row) {
+    if (!row?.matches(ctNativeNotificationRowSelector) || row.closest('article,[data-ct-local-ui],[data-ct-owned]')) return false;
+    if (row.tagName === 'BUTTON') return row.matches('button.border-b') ||
+      (row.matches('button.w-full.flex.gap-3') && row.parentElement?.matches('div.border-b'));
+    // Tweet 2.3 separates the event's full-row button from its avatars and
+    // menu. Only the verified overlay/content row qualifies; the expanded
+    // native follower list and ordinary profile controls remain untouched.
+    if (!row.classList.contains('border-b') && !row.parentElement?.matches('div.border-b')) return false;
+    const button = row.firstElementChild;
+    const content = [...row.children].find(child => child.matches('div.flex-1.min-w-0.pointer-events-none'));
+    if (!content || !button?.matches('button[type="button"].absolute.inset-0.w-full.h-full[aria-labelledby]') ||
+        button.children.length || button.textContent.trim()) return false;
+    const labels = (button.getAttribute('aria-labelledby') || '').trim().split(/\s+/);
+    return labels.length > 0 && labels.length <= 2 && labels.every(id => {
+      if (!id || id.length > 256) return false;
+      const label = row.ownerDocument.getElementById(id);
+      return label?.tagName === 'P' && content.contains(label) &&
+        label.closest(ctNativeNotificationRowSelector) === row;
+    });
+  }
   function ctNativeNotificationRows() {
-    return [...document.querySelectorAll('main button.items-start')].filter(row =>
-      !row.closest('article,[data-ct-local-ui],[data-ct-owned]') &&
-      (row.matches('button.border-b') ||
-        (row.matches('button.w-full.flex.gap-3') && row.parentElement?.matches('div.border-b'))));
+    return [...document.querySelectorAll(ctNativeNotificationRowSelector)].filter(ctIsNativeNotificationRow);
   }
   function ctNotificationAvatarWrappers() {
     if (!/^\/notifications\/?$/.test(location.pathname)) return [];
@@ -5542,7 +5644,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctRenderNotificationAvatars() {
     const japanese = ctNavigationJapanese();
-    for (const wrapper of ctNotificationAvatarWrappers()) {
+    const wrappers = ctNotificationAvatarWrappers();
+    const active = new Set(wrappers);
+    for (const link of document.querySelectorAll('a.ct-notification-profile-link[data-ct-local-ui="notification-profile"]')) {
+      if (!active.has(link.parentElement)) link.remove();
+    }
+    for (const wrapper of wrappers) {
       let link = wrapper.querySelector(':scope > a.ct-notification-profile-link');
       if (!link) {
         link = document.createElement('a');
@@ -5646,8 +5753,15 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const link = event.target?.closest?.('a.ct-notification-profile-link');
     if (!link || !/^\/notifications\/?$/.test(location.pathname)) return;
     const wrapper = link.parentElement;
-    const row = wrapper?.closest('main button.items-start');
-    if (!wrapper?.matches(ctAvatarWrapperSelector) || !ctNativeNotificationRows().includes(row)) return;
+    const row = wrapper?.closest(ctNativeNotificationRowSelector);
+    if (!wrapper?.matches(ctAvatarWrapperSelector)) return;
+    if (!ctIsNativeNotificationRow(row)) {
+      // A reused native row can invalidate its shape before the next scan.
+      // Release our anchor and its stale destination without intercepting the
+      // new native row's handlers or inventing a profile for the changed UI.
+      link.removeAttribute('href'); link.remove(); event.preventDefault();
+      return;
+    }
     // A React update may arrive between the last scan and this click. Never
     // navigate using the previous avatar's URL while the next scan is queued.
     const handle = ctNotificationAvatarHandle(wrapper);
@@ -7632,6 +7746,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   const EN = new Map([
     ['Feed', 'Home'],
+    ['Blocked accounts', 'Blocked accounts'],
+    ["They won't be able to follow you, or reply to, quote, repost or like your posts, and neither of you will see the other's posts or get notifications from each other. Any follows between you are removed, and unblocking won't restore them.", "They won't be able to follow you, or reply to, quote, Retweet or favorite your Tweets, and neither of you will see the other's Tweets or get notifications from each other. Any follows between you are removed, and unblocking won't restore them."],
+    ['When you block someone, they cannot view your posts or follow you, and you will not see their posts or notifications.', 'When you block someone, they cannot view your Tweets or follow you, and you will not see their Tweets or notifications.'],
+    ['You are not seeing their posts or replies.', 'You are not seeing their Tweets or replies.'],
     ['Nothing to see here yet. Likes, reposts, replies, quotes, mentions, and follows will show up here.', 'Nothing to see here yet. Favorites, Retweets, replies, quotes, mentions, and follows will show up here.'],
     ['quoted your post', 'quoted your Tweet'],
     ['quoted your tweet', 'quoted your Tweet'],
@@ -8039,6 +8157,24 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return dialog;
   }
 
+  function nativeLocalizationBlockDialog(el) {
+    const dialog = el?.closest('[role="dialog"][aria-modal="true"][aria-labelledby="app-confirm-title"].bg-tl-app-card.border');
+    const title = dialog?.querySelector(':scope > h3#app-confirm-title');
+    return title && /^(?:Block|Unblock) @[A-Za-z0-9_.-]+\?$/.test(clean(title.textContent)) &&
+      dialog.querySelector(':scope > p.mt-2.leading-relaxed.text-tl-app-text-muted') &&
+      dialog.querySelectorAll(':scope > div.mt-5 > button').length === 2 ? dialog : null;
+  }
+
+  function nativeLocalizationBlockProfile(el) {
+    if (!el?.matches('p') || !/^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) || !el.closest('main')) return null;
+    const panel = el.parentElement;
+    const title = panel?.firstElementChild;
+    if (!title?.matches('p') || panel.children.length !== 2 || !panel.lastElementChild.matches('p.text-tl-app-text-muted')) return null;
+    if (panel.matches('div.flex.flex-col.items-start.justify-center.py-12.px-8') && clean(title.textContent) === "You're blocked") return panel;
+    return panel.matches('div.flex.flex-col.items-center.justify-center.py-20.px-4.text-center') &&
+      /^You blocked @[A-Za-z0-9_.-]+$/.test(clean(title.textContent)) ? panel : null;
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
@@ -8057,6 +8193,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   function localizationNotificationRow(el) {
     if (!location.pathname.startsWith('/notifications')) return null;
+    const modern = el?.closest('main div.relative.w-full.flex.items-start.gap-3');
+    if (modern && ctIsNativeNotificationRow(modern)) return modern;
     const row = el?.closest('button,[role="button"]');
     if (!row?.closest('main') || isOwnedLocalizationElement(row)) return null;
     // Current tweet.app notification rows are border-separated buttons. Do not
@@ -8091,6 +8229,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (isProtectedLocalizationElement(el)) return false;
     if (localizationNotificationAction(node)) return true;
     if (localizationNotificationRow(el)) return false;
+    if (nativeLocalizationBlockDialog(el)) return true;
+    const blockedProfile = nativeLocalizationBlockProfile(el);
+    if (blockedProfile) return el !== blockedProfile.firstElementChild || node === el.firstChild;
     if (isNativeLocalizationPollUI(el)) return true;
     if (nativeLocalizationAccountMenu(el)) return node === el.firstChild &&
       /^(?:Report|Mute unavailable|(?:Mute|Unmute) @[A-Za-z0-9_.-]+)$/.test(clean(node.nodeValue));
@@ -8181,7 +8322,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!text || text.length > 500) return;
     // Dynamic replacements belong to their specific UI contexts. In particular,
     // never parse actor names or dates from arbitrary text that resembles a UI.
-    const out = EN.get(text);
+    const blocked = nativeLocalizationBlockProfile(node.parentElement) &&
+      text.match(/^(@[A-Za-z0-9_.-]+) has blocked you, so you can't follow them or see their posts\.$/);
+    const out = blocked ? `${blocked[1]} has blocked you, so you can't follow them or see their Tweets.` : EN.get(text);
     if (out && out !== text) replaceLocalizationText(node, out);
   }
 
@@ -8503,5 +8646,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.23.1 loaded');
+  console.log('🐦 Classic Twitter EN v6.24.0 loaded');
 })();

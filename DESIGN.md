@@ -158,3 +158,12 @@ Actually viewed references were the official [Tweetbot timeline tips](https://ta
 ## 6.23.1 Profile-photo footer spacing
 
 The delivered-image link and dimensions sit 8px above the 60px profile-photo navigation row, including the bottom safe area. This selector applies only to the profile viewer. Native controls, image fit and gesture geometry remain unchanged.
+
+
+## 6.24.0 Tweet 2.3.0 compatibility
+
+The verified notification row now contains an empty full-row button followed by separate icon, avatar and pointer-events-none content siblings. Require that exact structure and its local aria-labelledby paragraph before adding individual avatar links. Preserve the native event/menu/follow handlers; discard stale links after route, row or avatar changes. Classic heart masking includes this structure and each CSS rule is independent so unsupported :has does not discard older row rules. Classic OFF restores native wording and hearts.
+
+Use native GIF upload, native reply notifications, polls and account blocking. Translate only structurally confirmed native UI, including the current explicit image MIME list, upload progress/errors, GIF controls and block dialogs/settings. User content and editable text remain protected. Owned Media/Favorites rows retain optional GIF/edit metadata: loop and mute GIF-derived MP4 without starting playback, and show localized Edited beside the unchanged creation time. Old records and backups remain valid.
+
+Block/mute visibility checks precede saved-row display and native mutations invalidate those checks. Preserve stored history; unavailable visibility checks use a retryable status rather than exposing saved rows. Blocked native profile panels retain their own content instead of being mistaken for a timeline. No notification, upload, poll or block write API is added. Current first-party Tweet UI/bundle is the compatibility reference; no new visual reference or brand material is substituted.

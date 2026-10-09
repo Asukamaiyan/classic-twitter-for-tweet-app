@@ -216,9 +216,16 @@
     const selected = `${button}:is([aria-pressed="true"],:not([aria-pressed]).text-pink-500,:not([aria-pressed]):not(.text-tl-app-text-muted):not(.text-pink-500).ct-is-liked)`;
     const notificationRows = [
       `${enabled} #root-container main button.w-full.flex.items-start.border-b`,
-      `${enabled} #root-container main div.border-b > button.w-full.flex.items-start.gap-3`
+      `${enabled} #root-container main div.border-b > button.w-full.flex.items-start.gap-3`,
+      // Tweet 2.3 places a dedicated full-row button beside the notification
+      // icon and avatars. Match that verified shape directly so a React icon
+      // replacement stays a star before the scheduled DOM reconciliation.
+      `${enabled} #root-container main div.border-b > div.relative.w-full.flex.items-start.gap-3:has(> button[type="button"].absolute.inset-0.w-full.h-full[aria-labelledby]:first-child):has(> div.flex-1.min-w-0.pointer-events-none)`,
+      `${enabled} #root-container main div.relative.w-full.flex.items-start.gap-3.border-b:has(> button[type="button"].absolute.inset-0.w-full.h-full[aria-labelledby]:first-child):has(> div.flex-1.min-w-0.pointer-events-none)`
     ];
     const notificationIcons = notificationRows.map(row => `${row} > div[class~="mt-0.5"].shrink-0 > svg.lucide-heart.text-rose-500[width="28"][height="28"]`);
+    // Emit each notification selector in its own rule: a browser without
+    // :has must not discard the existing button-row rules with the new ones.
     // React may replace both className and the icon before the next scan.
     // Stable native test IDs hide the heart immediately; the CSS vector fills
     // the brief gap until our motion-capable star is restored.
@@ -249,12 +256,12 @@
       }
       ${selected} > .ct-star svg { fill:currentColor!important; }
       ${selected} + :is(span.text-xs.tabular-nums,button[data-testid="tweet-like-action-count"]) { color:#ffac33!important; }
-      ${notificationIcons.join(',')} {
+      ${notificationIcons.map(icon => `${icon} {
         background:#ffac33!important;
         -webkit-mask:${mask(true)} center/contain no-repeat;
         mask:${mask(true)} center/contain no-repeat;
       }
-      ${notificationIcons.map(icon => `${icon} *`).join(',')} { visibility:hidden!important; }
+      ${icon} * { visibility:hidden!important; }`).join('\n')}
       @supports selector(:has(*)) {
         ${button}:has(> span.ct-star)::before { display:none!important; }
       }
@@ -697,7 +704,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.23.1';
+    document.documentElement.dataset.ctActiveVersion = '6.24.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);

@@ -1,5 +1,18 @@
 # Tweet.app API / userscript enhancement research
 
+## 2026-10-09: Tweet 2.3.0 compatibility refresh
+
+Read the current signed-in UI and the public asset referenced by [the application HTML](https://app.tweet.app/). The UI shows 2.3.0 / build 1791512375. The first-party [index-DwZGTvzZ.js](https://app.tweet.app/assets/index-DwZGTvzZ.js) is 1,716,154 bytes, SHA-256 `a9cb81e99b523222f7b84d23fda9a89b625095e59bf73771bbfdfdbc03ebfd7c`. The following API shapes are public client-code observations; they do not establish a supported third-party contract or authenticated acceptance.
+
+- Native notification rows use a separate full-row button and avatar/content siblings. Keep standard reply notifications, polls, follow-back controls and native event actions. Only per-avatar navigation/filter compatibility needs repair.
+- Native image/GIF upload accepts JPEG, PNG, WebP and GIF, with a separate video input. GIF-derived video carries `media_assets[].is_gif`; keep this metadata in local collections without replacing the native GIF player or upload.
+- Native account blocking reads `GET /api/blocks?limit=200&cursor=...`: `blocks` rows include `userId`, `username`, `displayName`, `avatarUrl`, `blockedAt`, with `nextCursor`. The client accepts an HTTP-success body without requiring `success:true`. Native block/unblock uses `POST` / `DELETE /api/users/{userId}/block`; the userscript does not send either mutation. Saved-row visibility can use the confirmed read route and invalidate after native actions. Treat `status:BLOCKED` as inaccessible and keep blocked profile panels intact.
+- Anonymous [media config](https://api.tweet.app/api/media/config) remains images 10 MB / 5 per post / 20 per day; GIF 15 MB; video 50 MB / 30 seconds / 5 per day. Server limits, transcoding and retained 4K/HDR are outside the local presentation update.
+
+No account response bodies, tokens, authorization values or post content are included in this research record. Historical findings below retain their original dates; older missing-feature statements do not describe the current 2.3.0 client.
+
+---
+
 Verified 2026-09-26 (JST). Read-only research; no signed-in session, API requests, account actions, or private data access.
 
 ## Evidence boundary

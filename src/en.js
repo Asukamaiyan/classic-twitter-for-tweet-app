@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.23.1
+// @version      6.24.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -79,6 +79,10 @@
 
   const EN = new Map([
     ['Feed', 'Home'],
+    ['Blocked accounts', 'Blocked accounts'],
+    ["They won't be able to follow you, or reply to, quote, repost or like your posts, and neither of you will see the other's posts or get notifications from each other. Any follows between you are removed, and unblocking won't restore them.", "They won't be able to follow you, or reply to, quote, Retweet or favorite your Tweets, and neither of you will see the other's Tweets or get notifications from each other. Any follows between you are removed, and unblocking won't restore them."],
+    ['When you block someone, they cannot view your posts or follow you, and you will not see their posts or notifications.', 'When you block someone, they cannot view your Tweets or follow you, and you will not see their Tweets or notifications.'],
+    ['You are not seeing their posts or replies.', 'You are not seeing their Tweets or replies.'],
     ['Nothing to see here yet. Likes, reposts, replies, quotes, mentions, and follows will show up here.', 'Nothing to see here yet. Favorites, Retweets, replies, quotes, mentions, and follows will show up here.'],
     ['quoted your post', 'quoted your Tweet'],
     ['quoted your tweet', 'quoted your Tweet'],
@@ -486,6 +490,24 @@
     return dialog;
   }
 
+  function nativeLocalizationBlockDialog(el) {
+    const dialog = el?.closest('[role="dialog"][aria-modal="true"][aria-labelledby="app-confirm-title"].bg-tl-app-card.border');
+    const title = dialog?.querySelector(':scope > h3#app-confirm-title');
+    return title && /^(?:Block|Unblock) @[A-Za-z0-9_.-]+\?$/.test(clean(title.textContent)) &&
+      dialog.querySelector(':scope > p.mt-2.leading-relaxed.text-tl-app-text-muted') &&
+      dialog.querySelectorAll(':scope > div.mt-5 > button').length === 2 ? dialog : null;
+  }
+
+  function nativeLocalizationBlockProfile(el) {
+    if (!el?.matches('p') || !/^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) || !el.closest('main')) return null;
+    const panel = el.parentElement;
+    const title = panel?.firstElementChild;
+    if (!title?.matches('p') || panel.children.length !== 2 || !panel.lastElementChild.matches('p.text-tl-app-text-muted')) return null;
+    if (panel.matches('div.flex.flex-col.items-start.justify-center.py-12.px-8') && clean(title.textContent) === "You're blocked") return panel;
+    return panel.matches('div.flex.flex-col.items-center.justify-center.py-20.px-4.text-center') &&
+      /^You blocked @[A-Za-z0-9_.-]+$/.test(clean(title.textContent)) ? panel : null;
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
@@ -504,6 +526,8 @@
 
   function localizationNotificationRow(el) {
     if (!location.pathname.startsWith('/notifications')) return null;
+    const modern = el?.closest('main div.relative.w-full.flex.items-start.gap-3');
+    if (modern && ctIsNativeNotificationRow(modern)) return modern;
     const row = el?.closest('button,[role="button"]');
     if (!row?.closest('main') || isOwnedLocalizationElement(row)) return null;
     // Current tweet.app notification rows are border-separated buttons. Do not
@@ -538,6 +562,9 @@
     if (isProtectedLocalizationElement(el)) return false;
     if (localizationNotificationAction(node)) return true;
     if (localizationNotificationRow(el)) return false;
+    if (nativeLocalizationBlockDialog(el)) return true;
+    const blockedProfile = nativeLocalizationBlockProfile(el);
+    if (blockedProfile) return el !== blockedProfile.firstElementChild || node === el.firstChild;
     if (isNativeLocalizationPollUI(el)) return true;
     if (nativeLocalizationAccountMenu(el)) return node === el.firstChild &&
       /^(?:Report|Mute unavailable|(?:Mute|Unmute) @[A-Za-z0-9_.-]+)$/.test(clean(node.nodeValue));
@@ -628,7 +655,9 @@
     if (!text || text.length > 500) return;
     // Dynamic replacements belong to their specific UI contexts. In particular,
     // never parse actor names or dates from arbitrary text that resembles a UI.
-    const out = EN.get(text);
+    const blocked = nativeLocalizationBlockProfile(node.parentElement) &&
+      text.match(/^(@[A-Za-z0-9_.-]+) has blocked you, so you can't follow them or see their posts\.$/);
+    const out = blocked ? `${blocked[1]} has blocked you, so you can't follow them or see their Tweets.` : EN.get(text);
     if (out && out !== text) replaceLocalizationText(node, out);
   }
 
@@ -950,5 +979,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.23.1 loaded');
+  console.log('🐦 Classic Twitter EN v6.24.0 loaded');
 })();

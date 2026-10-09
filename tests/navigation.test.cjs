@@ -42,6 +42,117 @@ function harness(t, content, notifications = [], locale = 'ja') {
   };
 }
 
+function currentNotificationRow(content, { mention = false } = {}) {
+  // Tweet 2.3's Ale/Tle public render: the event button is a sibling of the
+  // avatar, with aria-labelledby pointing into the non-interactive body.
+  const actors = [].concat(content);
+  return `<div id="current-row" class="relative w-full flex items-start gap-3 px-4 py-3.5 ${mention ? 'border-b border-tl-app-border' : ''}">
+    <button id="event-overlay" type="button" aria-labelledby="current-label${mention ? ' current-type' : ''}" class="absolute inset-0 w-full h-full cursor-pointer"></button>
+    ${mention ? `<div class="relative z-10 shrink-0">${content}</div>` : '<div class="mt-0.5 shrink-0 pointer-events-none"><svg></svg></div>'}
+    <div class="flex-1 min-w-0 pointer-events-none">${mention ? '' : `<div class="flex items-center gap-1 flex-wrap mb-1.5">${actors.map(actor => `<span class="relative z-10 inline-flex pointer-events-auto">${actor}</span>`).join('')}</div>`}
+      <p id="current-label">Notification by Alice and Bob</p>${mention ? '<p id="current-type">mentioned you</p>' : ''}<p>Native preview</p>
+    </div><div class="relative z-10"><button id="event-menu">More</button></div>
+  </div>`;
+}
+
+function mountCurrentNotification(f, content, options) {
+  const row = f.document.getElementById('row');
+  row.outerHTML = `<div id="event-boundary" class="border-b border-tl-app-border">${currentNotificationRow(content, options)}</div>`;
+  f.document.getElementById('event-overlay').addEventListener('click', () => f.state.rowClicks++);
+  return f.document.getElementById('current-row');
+}
+
+test('2.3 sibling event overlays retain native actions while every grouped avatar opens its own profile', async t => {
+  const f = harness(t, '', [actor('carol', 'Carol', 'https://cdn.example/Carol.jpg')]);
+  const row = mountCurrentNotification(f, [avatar('Alice', { handle: 'alice' }), avatar('Bob', { handle: 'bob' }), avatar('Carol')]);
+  const expanded = f.document.createElement('div');
+  expanded.id = 'expanded-followers';
+  expanded.className = 'pl-12 pr-4 py-1 divide-y';
+  expanded.innerHTML = '<button id="follower-profile" aria-label="View @dan\'s profile">Dan</button><button id="follow-back">Follow back</button>';
+  f.document.getElementById('event-boundary').append(expanded);
+  const expandedBefore = expanded.outerHTML;
+  const overlay = f.document.getElementById('event-overlay');
+  const menu = f.document.getElementById('event-menu');
+  let menuClicks = 0;
+  menu.addEventListener('click', () => menuClicks++);
+  await f.patch();
+  assert.deepEqual(f.links().map(link => link.getAttribute('href')), ['/user/alice', '/user/bob', '/user/carol']);
+  assert.equal(expanded.outerHTML, expandedBefore, 'the expanded native follower list retains its native controls');
+  for (const [index, extra] of [{}, { ctrlKey: true }, { button: 1 }].entries()) {
+    const event = f.event(f.links()[index], index === 2 ? 'auxclick' : 'click', extra);
+    assert.equal(event.defaultPrevented, false);
+    assert.equal(f.state.rowClicks, 0);
+  }
+  assert.equal(row.firstElementChild, overlay);
+  overlay.click(); menu.click();
+  assert.equal(f.state.rowClicks, 1, 'the original full-row event action still works');
+  assert.equal(menuClicks, 1, 'the original event menu still works');
+  assert.equal(f.document.querySelectorAll('.ct-avatar-follow-hidden').length, 2);
+});
+
+test('2.3 mention rows resolve their single avatar without altering native labelled content or event controls', async t => {
+  const f = harness(t, '', [actor('alice', 'Alice', 'https://cdn.example/Alice.jpg')]);
+  const row = mountCurrentNotification(f, avatar('Alice'), { mention: true });
+  const label = f.document.getElementById('current-label');
+  const type = f.document.getElementById('current-type');
+  const labelNode = label.firstChild, typeNode = type.firstChild;
+  await f.patch();
+  assert.equal(f.links().length, 1);
+  assert.equal(f.links()[0].getAttribute('href'), '/user/alice');
+  assert.equal(f.event(f.links()[0], 'keydown', { key: 'Enter' }).defaultPrevented, false);
+  assert.equal(f.state.rowClicks, 0);
+  assert.equal(row.firstElementChild.getAttribute('aria-labelledby'), 'current-label current-type');
+  assert.equal(label.firstChild, labelNode);
+  assert.equal(type.firstChild, typeNode);
+  row.firstElementChild.click();
+  assert.equal(f.state.rowClicks, 1);
+});
+
+test('unverified sibling overlays and foreign labels do not gain notification navigation', async t => {
+  const variants = [
+    row => row.firstElementChild.removeAttribute('type'),
+    row => row.firstElementChild.classList.remove('inset-0'),
+    row => row.firstElementChild.setAttribute('aria-labelledby', 'not-in-this-row'),
+    row => row.querySelector('.pointer-events-none.flex-1').classList.remove('pointer-events-none'),
+    row => row.parentElement.classList.remove('border-b')
+  ];
+  for (const change of variants) {
+    const f = harness(t, '', [actor('alice', 'Alice', 'https://cdn.example/Alice.jpg')]);
+    const row = mountCurrentNotification(f, avatar('Alice'));
+    const foreign = f.document.createElement('p'); foreign.id = 'not-in-this-row'; foreign.textContent = 'Other UI';
+    f.document.querySelector('main').append(foreign);
+    change(row);
+    const before = row.outerHTML;
+    await f.patch();
+    assert.equal(f.links().length, 0);
+    assert.equal(f.state.requests.length, 0);
+    assert.equal(row.outerHTML, before);
+  }
+});
+
+test('recycled 2.3 avatars refresh before context menus and release links when the row or route changes', async t => {
+  const f = harness(t, '');
+  const row = mountCurrentNotification(f, avatar('Alice', { handle: 'alice' }));
+  await f.patch();
+  const image = row.querySelector('img');
+  const follow = row.querySelector('span[role="button"]');
+  const link = f.links()[0];
+  image.alt = 'Bob avatar'; image.src = 'https://cdn.example/Bob.jpg'; follow.setAttribute('aria-label', 'Follow @bob');
+  assert.equal(f.event(link, 'contextmenu').defaultPrevented, false);
+  assert.equal(link.getAttribute('href'), '/user/bob');
+  row.firstElementChild.removeAttribute('aria-labelledby');
+  assert.equal(f.event(link).defaultPrevented, true, 'a click before the scheduled scan cannot follow an invalidated row\'s stale URL');
+  assert.equal(link.isConnected, false);
+  await f.patch();
+  assert.equal(f.links().length, 0, 'invalidated native rows release script-owned links');
+  row.firstElementChild.setAttribute('aria-labelledby', 'current-label');
+  await f.patch();
+  assert.equal(f.links()[0].getAttribute('href'), '/user/bob');
+  f.window.history.pushState({}, '', '/feed');
+  await f.patch();
+  assert.equal(f.links().length, 0, 'same-document routing cannot leave a stale notification anchor');
+});
+
 test('2.1 wrapper keeps grouped avatar navigation independent without covering native Follow back rows', async t => {
   const f=harness(t,avatar('alice',{handle:'alice'})+avatar('bob',{handle:'bob'}));
   const row=f.document.getElementById('row');

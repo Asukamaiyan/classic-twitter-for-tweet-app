@@ -112,13 +112,13 @@
   function ctFavoriteHistoryPost(post) {
     return post && typeof post === 'object' && !Array.isArray(post) && ctProfileId(post.id) &&
       ctProfileHandle(post.authorUsername) && typeof post.text === 'string' && post.text.length <= 10000 &&
-      post.hasLiked === true && !post.isDeleted && post.status !== 'MUTED';
+      post.hasLiked === true && !post.isDeleted && !['MUTED','BLOCKED'].includes(post.status);
   }
   function ctFavoriteHistoryPage(json, source) {
     if (!json || json.success !== true || json.error || !Array.isArray(json.posts) || json.posts.length > 20 ||
         !Object.prototype.hasOwnProperty.call(json, 'nextCursor') || !ctFavoriteHistoryCursor(json.nextCursor) ||
         json.posts.some(post => !post || typeof post !== 'object' || Array.isArray(post) || !ctProfileId(post.id) ||
-          typeof post.hasLiked !== 'boolean' || (post.hasLiked === true && !post.isDeleted && post.status !== 'MUTED' &&
+          typeof post.hasLiked !== 'boolean' || (post.hasLiked === true && !post.isDeleted && !['MUTED','BLOCKED'].includes(post.status) &&
             (!ctProfileHandle(post.authorUsername) || typeof post.text !== 'string' || post.text.length > 10000)))) throw new Error('response');
     if (json.nextCursor !== null && (json.nextCursor === source.cursor || source.seen.includes(json.nextCursor))) throw new Error('cursor');
     return json.posts;
