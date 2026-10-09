@@ -1,5 +1,15 @@
 # Changelog
 
+## All distributions v6.24.0 — 2026-10-09
+
+Compatibility update for the inspected Tweet 2.3.0 web client. Publication and validation are recorded separately in VALIDATION.md.
+
+- Restore per-avatar profile links and notification filters for native overlay-button rows. Prevent native heart flashes during React replacements and retain reversible classic styling.
+- Localize native GIF/video upload controls, progress, errors, blocking menus, confirmations and settings without changing post text, names, drafts or handlers.
+- Retain GIF and Edited metadata in Media/Favorites and backups; keep the original creation time and native GIF player.
+- Hide saved posts from blocked accounts without deleting local history; invalidate visibility checks after native block/unblock. Skip BLOCKED response stubs during Favorite recovery.
+- Update all six editions and concise browser/manager installation and update guides. Grants, connection permissions, edition identities and existing storage keys are retained.
+
 ## All distributions v6.23.1 — 2026-10-07
 
 All six editions are published with matching code and complete guides. Move the delivered-image link and dimensions above profile-photo navigation, preventing overlap with Next and Close on narrow screens. Keep native viewers, source URLs, photo gestures and zoom handling intact. Stay was updated to 6.23.1; final footer/Close device acceptance remains pending because XCTest rejects the visible web tabs before tapping. Publication, device evidence and temporary-app cleanup are recorded in VALIDATION.md.

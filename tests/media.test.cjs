@@ -332,6 +332,18 @@ function postedVideoMarkup(extra = '') {
     <video src="https://media.tweet.app/test.mp4" class="w-full max-h-[31.875rem] object-contain" controls playsinline loop muted></video>
     </div>${extra}</article></main>`;
 }
+test('native animated GIF players keep their existing playback and controls without a second fullscreen button', t => {
+  const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f);
+  const video = player.video; video.controls = false; video.setAttribute('aria-label', 'Animated GIF');
+  const before = video.parentElement.outerHTML, pause = video.pause;
+  let nativeTaps = 0; video.addEventListener('click', () => nativeTaps++);
+  f.enhance(); f.enhance(); video.click();
+  assert.equal(video.parentElement.outerHTML, before);
+  assert.equal(video.pause, pause); assert.equal(nativeTaps, 1);
+  assert.equal(f.qa.ctMediaVideos.size, 0);
+  assert.equal(f.document.querySelector('.ct-media-video-fullscreen'), null);
+  assert.equal(player.calls.request, 0); assert.equal(player.calls.play, 0); assert.equal(player.calls.pause, 0);
+});
 test('fullscreen uses the original playing video without changing playback, source, sound or its parent', async t => {
   const f = harness(t, postedVideoMarkup()); const player = nativeVideo(f);
   const video = player.video, shell = video.parentElement, time = video.currentTime, source = video.src;

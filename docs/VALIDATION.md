@@ -1,3 +1,19 @@
+# 6.24.0 検証記録
+
+2026-10-09。現行Tweet 2.3.0 / build 1791512375のUIと、HTMLが参照する公開bundleを照合しました。最新bundleと匿名media configの日時・SHA256はリポジトリ外 `outputs/release-6.24.0/research/fetch-manifest.json`、契約の範囲はAPI_RESEARCH.mdに記録しています。
+
+- 凍結したソースの `npm run check` は714件成功、失敗・スキップ0。6生成版の構文検査も成功。初回はruntimeテストの切り出しハーネスに新日本語化ヘルパーが不足し2件失敗しました。実装を隠す変更はせず依存関数を読み込み直し、関連69件と全714件の再実行で成功しました。最初の失敗ログも保持しています。
+- Chromiumの制御ページで6生成版×390/1280px、12ケース126項目が成功。新旧通知の個別プロフィールリンク、元の行・メニュー・フォローバックのhandler、GIF再生/停止と同じvideo node、Reactのアイコン置換、Classic OFF/ONのハート・いいね/星への復元、日本語化・本文・名前・下書き保持、横overflowなしを確認。外部通信やsocial writeはありません。Stay/Firefoxの実行環境そのものではありません。
+- 新通知の2名と旧通知の2人目は実ブラウザのクリックで各 `/user/qaactor1` / `/user/qaactor2` の別destinationへ移動しました。Reduced Motionでは選択の星表示が維持され、対象button内の実行中animationは0でした。一時的なviewport・media overrideは解除済み。
+- 最新blockingのpublic contractに合わせ、保存欄はミュート/ブロック一覧の完全な確認後に表示。失敗・途中・アカウント/route/背景切替を保護し、保存データを削除しません。ネイティブblock/unblockのactionを変更せずcacheのみ無効化します。BLOCKED stubをお気に入り復元に使いません。JA/ENの拒否panel、10ページ続行、古いbackup、GIF/edit metadataを含む回帰を確認しました。
+- 独立の読み取りレビューで日本語化後のactor-menuラベル、ENのposts/Tweets表示、GIF識別、通知構造の相互作用に重大な問題なし。6.23.1基準で全6配布の名前・namespace・URL・grant・connectは同一、metadata差分は版番号のみ。新規依存・新規保存キー・投稿write APIは追加していません。
+- 6.24.0のGitHub反映とGreasy Forkの公開は準備中。公開後にコード/案内の一致を別途確認します。
+- 今回はユーザーの指定に従い物理端末を操作していません。6.23.1までのiPhone/Stay記録は下記の履歴に残し、今回のSafari/Stay・Android/Firefox実機の受け入れ証拠には使いません。4K/HDR保持・制限解除・サーバー翻訳無制限・閉じたページへのPush通知は検証/実装していません。
+
+証跡: リポジトリ外 `outputs/release-6.24.0/` の `full-check-final.txt`、`browser-compat-audit.json`、`browser-links-motion.json`、`metadata-audit.json`、関連focused test logs。
+
+---
+
 # 6.23.1 検証記録
 
 2026-10-07。6.23.0実機確認でプロフィール写真の「配信画像を開く」と寸法が前後・閉じるボタンに重なることを発見。プロフィールviewer専用CSSで、44pxボタン＋上下paddingの上へ8px空けて配置しました。共有のnative viewer、画像URL・倍率・gestureは変更していません。

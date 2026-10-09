@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.23.1
+// @version      6.24.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -94,10 +94,30 @@
   const JP = new Map([
     ['Follow back', 'フォローバック'],
     ['Profile options', 'プロフィールのメニュー'],
+    ['More options', 'メニューを開く'],
     ['Mute', 'ミュート'],
     ['Mute unavailable', 'ミュートを利用できません'],
     ['Muted', 'ミュート済み'],
     ['Muting...', 'ミュート中…'],
+    ['Block', 'ブロック'],
+    ['Unblock', 'ブロックを解除'],
+    ['Blocked accounts', 'ブロックしているアカウント'],
+    ['View and unblock the accounts you have blocked.', 'ブロックしているアカウントを確認・解除できます。'],
+    ['When you block someone, they cannot view your posts or follow you, and you will not see their posts or notifications.', 'ブロックした相手はあなたのツイートの表示やフォローができなくなります。相手のツイートや通知も表示されません。'],
+    ["Couldn't load your blocked accounts.", 'ブロックしているアカウントを読み込めませんでした。'],
+    ['Retry loading blocked accounts', 'ブロックしているアカウントを再読み込み'],
+    ['Loading blocked accounts...', 'ブロックしているアカウントを読み込み中…'],
+    ["You aren't blocking anyone", 'ブロックしているアカウントはありません'],
+    ["When you block someone, they'll show up here.", 'ブロックしたアカウントがここに表示されます。'],
+    ["They won't be able to follow you, or reply to, quote, repost or like your posts, and neither of you will see the other's posts or get notifications from each other. Any follows between you are removed, and unblocking won't restore them.", '相手はあなたのフォロー、ツイートへの返信、引用、リツイート、お気に入りができなくなります。お互いのツイートや通知も表示されません。相互のフォロー関係は解除され、ブロックを解除しても元には戻りません。'],
+    ["Your block is removed. Follows that were removed when you blocked them won't come back.", 'ブロックを解除します。ブロック時に解除されたフォロー関係は元には戻りません。'],
+    ["Couldn't block that account. Try again.", 'このアカウントをブロックできませんでした。もう一度お試しください。'],
+    ["Couldn't unblock that account. Try again.", 'このアカウントのブロックを解除できませんでした。もう一度お試しください。'],
+    ["You're blocked", 'ブロックされています'],
+    ['You are not seeing their posts or replies.', '相手のツイートや返信は表示されません。'],
+    ['Working…', '処理中…'],
+    ['Confirm', '確認'],
+    ['Retry', '再試行'],
     ['Poll', '投票'],
     ['Add poll', '投票を追加'],
     ['Remove poll', '投票を削除'],
@@ -315,6 +335,13 @@
     ['Compose New', 'ツイートを作成'],
     ['Compose New Tweet', 'ツイートを作成'],
     ['Processing...', '処理中…'],
+    ['Add photo or GIF', '写真・GIFを追加'],
+    ['Add video', '動画を追加'],
+    ['Add Photo', '写真を追加'],
+    ['Add Video', '動画を追加'],
+    ['Remove Image', '写真を削除'],
+    ['Remove Video', '動画を削除'],
+    ['Remove GIF', 'GIFを削除'],
     ['Discard changes?', '変更を破棄しますか？'],
     ['Your edits will be lost.', '編集した内容は保存されません。'],
     ['Discard', '破棄する'],
@@ -523,7 +550,8 @@
       ['通知はまだありません。お気に入り、リツイート、フォローの通知がここに表示されます。', '通知はまだありません。いいね、リツイート、フォローの通知がここに表示されます。'],
       ['通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。', '通知はまだありません。いいね、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。'],
       ['あなたのツイートをお気に入りに登録しました', 'あなたのツイートにいいねしました'],
-      ['あなたの返信をお気に入りに登録しました', 'あなたの返信にいいねしました']
+      ['あなたの返信をお気に入りに登録しました', 'あなたの返信にいいねしました'],
+      ['相手はあなたのフォロー、ツイートへの返信、引用、リツイート、お気に入りができなくなります。お互いのツイートや通知も表示されません。相互のフォロー関係は解除され、ブロックを解除しても元には戻りません。', '相手はあなたのフォロー、ツイートへの返信、引用、リツイート、いいねができなくなります。お互いのツイートや通知も表示されません。相互のフォロー関係は解除され、ブロックを解除しても元には戻りません。']
     ]);
     if (native.has(text)) return native.get(text);
     const action = text.match(/^((?:さん)?が?)(あなたの(?:ツイート|返信)をお気に入りに登録しました)$/);
@@ -556,7 +584,8 @@
 
   function ctLocalizationNativeRecordException(record) {
     const el = record.attribute ? record.node : record.node.parentElement;
-    if (nativeLocalizationAccountMenu(el) || isNativeSettingsNavigation(el) || isNativeSettingsValue(el)) return true;
+    if (nativeLocalizationAccountMenu(el) || nativeLocalizationBlockMenu(el) || isNativeSettingsNavigation(el) || isNativeSettingsValue(el)) return true;
+    if (record.attribute === null && isNativeNotificationTimestamp(el) && record.node === el.lastChild) return true;
     const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')] ||
       (/^\/user\/[A-Za-z0-9_.-]+\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
     if (record.attribute || !routeTitle || clean(record.original) !== routeTitle ||
@@ -1108,8 +1137,18 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   function isNativeNotificationTimestamp(el) {
-    if (!el?.matches('span.text-tl-app-text-soft') || !localizationNotificationRow(el)) return false;
+    const row = el?.matches('span.text-tl-app-text-soft') && localizationNotificationRow(el);
+    if (!row) return false;
     const paragraph = el.parentElement;
+    // Mention/quote notifications put @handle, the separator and relative
+    // time in one truncated span. Only its final text node is UI metadata.
+    if (row.tagName === 'DIV' && paragraph?.matches('p.truncate')) {
+      const parts = [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE && clean(node.nodeValue));
+      return !!paragraph.querySelector(':scope > span.font-extrabold') &&
+        parts.length === 4 && clean(parts[0].nodeValue) === '@' &&
+        /^[A-Za-z0-9_.-]{1,80}$/.test(clean(parts[1].nodeValue)) && clean(parts[2].nodeValue) === '·' &&
+        parts[3] === el.lastChild && /^(?:Just now|\d+[smhd]|[A-Za-z]+\.? \d{1,2}|たった今|\d+(?:秒前|分前|時間前|日前)|\d{1,2}月\d{1,2}日)$/.test(clean(parts[3].nodeValue));
+    }
     return paragraph?.matches('p') && [...paragraph.childNodes].some(node =>
       node.nodeType === Node.TEXT_NODE ? !!localizationNotificationAction(node) :
         [...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && localizationNotificationAction(child))
@@ -1285,6 +1324,64 @@ if (/^just\s+now$/i.test(t)) {
     return dialog;
   }
 
+  // v2.3.0 supplies blocking itself. Translate only its native chrome and
+  // preserve account handles, user text, and the existing action handlers.
+  function nativeLocalizationBlockMenu(el) {
+    if (!el?.matches('span.min-w-0.truncate,button') ||
+        !/^(?:(?:Block|Unblock) @[A-Za-z0-9_.-]+|@[A-Za-z0-9_.-]+(?:をブロック|のブロックを解除))$/.test(clean(el.textContent))) return null;
+    const button = el.matches('button') ? el : el.parentElement;
+    const menu = button?.parentElement;
+    const trigger = menu?.parentElement?.querySelector(':scope > button[aria-label]');
+    if (!menu?.matches('div.absolute.right-0.top-full.bg-tl-app-card.border.rounded-xl') || !trigger) return null;
+    if (el.matches('button')) return button.matches('button.w-full.flex.items-center.text-left') &&
+      button.querySelector(':scope > svg.lucide-ban') && menu.parentElement.matches('div.relative.shrink-0') &&
+      /^(?:More options|メニューを開く)$/.test(trigger.getAttribute('aria-label') || '') &&
+      trigger.getAttribute('aria-haspopup') === 'true' ? el : null;
+    return button?.matches('button.text-red-500') && button.querySelector(':scope > svg') &&
+      /^(?:Profile options|Post options|Reply options|プロフィールのメニュー|ツイートのメニュー|返信のメニュー)$/.test(trigger.getAttribute('aria-label') || '') ? el : null;
+  }
+
+  function nativeLocalizationBlockDialog(el) {
+    const dialog = el?.closest('[role="dialog"][aria-modal="true"][aria-labelledby="app-confirm-title"].bg-tl-app-card.border');
+    const title = dialog?.querySelector(':scope > h3#app-confirm-title');
+    return title && /^(?:(?:Block|Unblock) @[A-Za-z0-9_.-]+\?|@[A-Za-z0-9_.-]+(?:をブロック|のブロックを解除)しますか？)$/.test(clean(title.textContent)) &&
+      dialog.querySelector(':scope > p.mt-2.leading-relaxed.text-tl-app-text-muted') &&
+      dialog.querySelectorAll(':scope > div.mt-5 > button').length === 2 ? dialog : null;
+  }
+
+  function nativeLocalizationBlockProfile(el) {
+    if (!el?.matches('p') || !/^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) || !el.closest('main')) return null;
+    const panel = el.parentElement;
+    const title = panel?.firstElementChild;
+    if (!title?.matches('p') || panel.children.length !== 2 || !panel.lastElementChild.matches('p.text-tl-app-text-muted')) return null;
+    if (panel.matches('div.flex.flex-col.items-start.justify-center.py-12.px-8') &&
+        /^(?:You're blocked|ブロックされています)$/.test(clean(title.textContent))) return panel;
+    return panel.matches('div.flex.flex-col.items-center.justify-center.py-20.px-4.text-center') &&
+      /^(?:You blocked @|ブロック済み: @)[A-Za-z0-9_.-]+$/.test(clean(title.textContent)) ? panel : null;
+  }
+
+  function nativeBlockJapaneseText(el, text) {
+    const menu = nativeLocalizationBlockMenu(el);
+    const dialog = nativeLocalizationBlockDialog(el);
+    const profile = nativeLocalizationBlockProfile(el);
+    let match;
+    if (menu && (match = text.match(/^(Block|Unblock) (@[A-Za-z0-9_.-]+)$/))) return match[1] === 'Block' ? `${match[2]}をブロック` : `${match[2]}のブロックを解除`;
+    if (dialog && el.matches('h3') && (match = text.match(/^(Block|Unblock) (@[A-Za-z0-9_.-]+)\?$/))) return match[1] === 'Block' ? `${match[2]}をブロックしますか？` : `${match[2]}のブロックを解除しますか？`;
+    if (profile && el === profile.firstElementChild && text === 'You blocked @') return 'ブロック済み: @';
+    if (profile && (match = text.match(/^(@[A-Za-z0-9_.-]+) has blocked you, so you can't follow them or see their posts\.$/))) return `${match[1]}さんにブロックされているため、フォローやツイートの表示ができません。`;
+    if (el?.closest('[role="status"],[role="alert"]') &&
+        (match = text.match(/^Couldn't (block|unblock) (@[A-Za-z0-9_.-]+)\. Try again\.$/))) return match[1] === 'block' ? `${match[2]}をブロックできませんでした。もう一度お試しください。` : `${match[2]}のブロックを解除できませんでした。もう一度お試しください。`;
+    return null;
+  }
+
+  function isNativeBlockedAccountError(el) {
+    if (!el?.matches('div.text-red-500.border') || !el.classList.contains('bg-red-500/10') ||
+        !el.classList.contains('border-red-500/20') || !/^\/settings\/?$/.test(location.pathname) || !el.closest('main section')) return false;
+    const panel = el.closest('div.flex.flex-col.gap-5');
+    const title = panel?.querySelector(':scope > div > h4.font-extrabold');
+    return !!title && /^(?:Blocked accounts|ブロックしているアカウント)$/.test(clean(title.textContent));
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
@@ -1304,11 +1401,13 @@ if (/^just\s+now$/i.test(t)) {
         }
         return !heading.closest('article');
       }) && !el.closest('article');
-    return !!el.closest('.truncate') && !nativeLocalizationAccountMenu(el) && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle;
+    return !!el.closest('.truncate') && !nativeLocalizationAccountMenu(el) && !nativeLocalizationBlockMenu(el) && !isNativeNotificationTimestamp(el) && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle;
   }
 
   function localizationNotificationRow(el) {
     if (!location.pathname.startsWith('/notifications')) return null;
+    const modern = el?.closest('main div.relative.w-full.flex.items-start.gap-3');
+    if (modern && ctIsNativeNotificationRow(modern)) return modern;
     const row = el?.closest('button,[role="button"]');
     if (!row?.closest('main') || isOwnedLocalizationElement(row)) return null;
     // Current tweet.app notification rows are border-separated buttons. Do not
@@ -1338,31 +1437,76 @@ if (/^just\s+now$/i.test(t)) {
     return { row, paragraph, element: el };
   }
 
-  function nativeMediaUploadJapaneseText(el, text) {
-    if (!el?.matches('span') || el.closest('[data-ct-local-ui],[data-user-content],blockquote,[aria-label^="Quoted post"]')) return null;
-    const error = el.parentElement;
-    const upload = error?.parentElement;
-    if (!error?.matches('div.p-3.border.text-red-500.flex.items-center.gap-2') ||
-        !error.classList.contains('bg-red-500/10') || !error.classList.contains('border-red-500/15') ||
-        error.children.length !== 2 || !error.firstElementChild.matches('svg.lucide-circle-alert') ||
-        !upload?.matches('div.w-full.mt-3.space-y-3') ||
-        !upload.querySelector('input[type="file"][accept="image/*"][multiple]') ||
+  function nativeLocalizationMediaUpload(el) {
+    if (!el || el.closest('[data-ct-local-ui],[id^="ct-"],[data-user-content],blockquote,[aria-label^="Quoted post"]')) return null;
+    const upload = el.closest('div.w-full.space-y-3');
+    if (!upload || !(upload.classList.contains('mt-3') || upload.classList.contains('mt-2')) ||
+        !upload.querySelector('input[type="file"][accept="image/*"][multiple],input[type="file"][accept="image/jpeg,image/png,image/webp,image/gif"][multiple]') ||
         !upload.querySelector('input[type="file"][accept="video/mp4,video/quicktime"]') ||
         !(upload.parentElement?.querySelector('textarea#public-tweet-input,textarea#public-modal-tweet-input') ||
           upload.closest('form[role="form"]')?.querySelector('textarea'))) return null;
+    return upload;
+  }
+
+  function nativeMediaUploadJapaneseText(el, text) {
+    const upload = nativeLocalizationMediaUpload(el);
+    if (!upload) return null;
+    const error = el?.parentElement;
+    // Uploading and transcoding each use separate React text nodes for the
+    // label and progress. Change their label only; retain the native counter.
+    const progress = el.matches('div.text-white.font-mono.font-bold,div.font-sans') &&
+      el.parentElement?.matches('div.absolute.inset-0.flex.flex-col.items-center.justify-center');
+    if (progress) return new Map([
+      ['Optimizing…', '最適化中…'], ['Uploading…', 'アップロード中…'], ['Processing…', '処理中…'],
+      ['Preparing GIF loop…', 'GIFのループ再生を準備中…'],
+      ['Transcoding to H.264. This can take a moment.', '動画をH.264に変換中です。しばらくお待ちください。']
+    ]).get(clean(text)) || null;
+    if (el.matches('span') && el.parentElement?.matches('div.absolute.bottom-2.left-2') &&
+        el.parentElement.querySelector(':scope > svg') && clean(text) === 'Ready') return '準備完了';
+    if (!error?.matches('div.p-3.border.text-red-500.flex.items-center.gap-2') ||
+        !error.classList.contains('bg-red-500/10') || !error.classList.contains('border-red-500/15') ||
+        error.children.length !== 2 || !error.firstElementChild.matches('svg.lucide-circle-alert') ||
+        !el.matches('span') || error.parentElement !== upload) return null;
     let match;
     if ((match = text.match(/^Maximum of (\d{1,2}) images allowed per post\.$/))) return `写真は1ツイートに${match[1]}枚まで追加できます。`;
     if ((match = text.match(/^Images must be (\d{1,3}) MB or smaller\.$/))) return `写真は1枚${match[1]}MB以下にしてください。`;
+    if ((match = text.match(/^GIFs must be (\d{1,3}) MB or smaller\.$/))) return `GIFは${match[1]}MB以下にしてください。`;
+    if ((match = text.match(/^Videos must be (\d{1,3}) MB or smaller\.$/))) return `動画は${match[1]}MB以下にしてください。`;
+    if ((match = text.match(/^Videos must be (\d{1,4}) seconds or shorter\.$/))) return `動画は${match[1]}秒以内にしてください。`;
+    const staticError = new Map([
+      ['GIFs cannot be combined with other media assets.', 'GIFと他の写真・動画は同時に投稿できません。'],
+      ['Videos cannot be combined with other media assets.', '動画と他の写真・動画は同時に投稿できません。'],
+      ['Cannot mix images and videos in the same post.', '写真と動画は同時に投稿できません。'],
+      ['Unsupported file type. Please select an image, GIF, or video.', '対応していないファイル形式です。写真、GIF、動画を選択してください。']
+    ]).get(text);
+    if (staticError) return staticError;
     // The native suffix contains user file names. Keep it byte-for-byte intact.
     if ((match = text.match(/^(\d{1,3}) (?:image was|images were) not added\.(?: ([\s\S]*))?$/))) return `${match[1]}枚の写真を追加できませんでした。${match[2] == null ? '' : ' ' + match[2]}`;
     return null;
+  }
+
+  function nativeLocalizationGIFMedia(el) {
+    const root = el?.matches('video,button') ? el.parentElement : null;
+    if (!root?.matches('div.relative') || root.closest('[data-ct-local-ui],[id^="ct-"],[data-user-content],blockquote,[aria-label^="Quoted post"]')) return null;
+    const video = root.querySelector(':scope > video[loop][playsinline]');
+    const button = root.querySelector(':scope > button.absolute.bottom-2.right-2');
+    const badge = root.querySelector(':scope > span.pointer-events-none[aria-hidden="true"]');
+    return video && (video.muted || video.defaultMuted) &&
+      /^(?:Animated GIF|GIFアニメーション)$/.test(video.getAttribute('aria-label') || '') &&
+      button && /^(?:Play GIF|Pause GIF|GIFを再生|GIFを一時停止)$/.test(button.getAttribute('aria-label') || '') &&
+      button.querySelector(':scope > svg[aria-hidden="true"]') && clean(badge?.textContent) === 'GIF' ? root : null;
   }
 
   function isLocalizationUI(node) {
     const el = node?.parentElement;
     if (isProtectedLocalizationElement(el)) return false;
     if (nativeMediaUploadJapaneseText(el, node.nodeValue)) return true;
-    if (localizationNotificationAction(node) || isNativeNotificationTimestamp(el)) return true;
+    if (nativeLocalizationBlockMenu(el) || nativeLocalizationBlockDialog(el)) return true;
+    const blockedProfile = nativeLocalizationBlockProfile(el);
+    if (blockedProfile) return el !== blockedProfile.firstElementChild || node === el.firstChild;
+    if (isNativeBlockedAccountError(el)) return true;
+    if (isNativeNotificationTimestamp(el)) return !el.closest('.truncate') || node === el.lastChild;
+    if (localizationNotificationAction(node)) return true;
     if (localizationNotificationRow(el)) return false;
     if (isNativeParentPostTimestamp(el)) return true;
     if (nativeLocalizationParentPostPreview(el) && el.matches('p.italic.leading-5.text-tl-app-text-muted') &&
@@ -1503,7 +1647,7 @@ if (/^just\s+now$/i.test(t)) {
   function patchUIAttributes(root = document) {
     const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
     const controls = [];
-    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,[role="dialog"][aria-modal="true"][aria-label="Media viewer"],div[aria-label="Choose image"]';
+    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],div[aria-label="Choose image"]';
     if (host instanceof Element && host.matches(selector)) controls.push(host);
     host?.querySelectorAll?.(selector).forEach(el => controls.push(el));
     // Tweet 2.2.3 owns these photo controls. Match their actual structure so an
@@ -1541,6 +1685,12 @@ if (/^just\s+now$/i.test(t)) {
           el.parentElement.querySelector('textarea#public-modal-tweet-input')) el.setAttribute('aria-label', '閉じる');
       for (const attr of ['aria-label', 'title']) {
         const value = el.getAttribute(attr);
+        const gif = nativeLocalizationGIFMedia(el) && new Map([
+          ['Animated GIF', 'GIFアニメーション'], ['Play GIF', 'GIFを再生'], ['Pause GIF', 'GIFを一時停止']
+        ]).get(value);
+        const unblock = el.matches('button') && value?.match(/^(Unblock|Unblocking) (@[A-Za-z0-9_.-]+)$/) &&
+          (el.classList.contains('bg-red-500') || /^\/settings\/?$/.test(location.pathname) && el.closest('main section'));
+        const unblockLabel = unblock && value.match(/^(Unblock|Unblocking) (@[A-Za-z0-9_.-]+)$/);
         const action = el.matches('[data-testid="tweet-open-comment-action"],[data-testid="tweet-comment-action"]') &&
           value?.match(/^Comment, (\d+) comments?$/);
         const repost = el.matches('[data-testid="tweet-repost-action"]') &&
@@ -1551,7 +1701,7 @@ if (/^just\s+now$/i.test(t)) {
         const image = photo && value?.match(/^(Open|Show) image ([1-5]) of ([2-5])$/);
         const imageLabel = image && Number(image[2]) === photo.index && Number(image[3]) === photo.count &&
           (image[1] === 'Open' ? photo.open : photo.show) ? `${image[3]}枚中${image[2]}枚目の画像を${image[1] === 'Open' ? '開く' : '表示'}` : null;
-        const out = imageLabel || (value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
+        const out = gif || (unblockLabel ? unblockLabel[1] === 'Unblocking' ? `${unblockLabel[2]}のブロックを解除中…` : `${unblockLabel[2]}のブロックを解除` : null) || imageLabel || (value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
           choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
           likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value));
@@ -1571,7 +1721,7 @@ if (/^just\s+now$/i.test(t)) {
     const sourceLanguage = isNativeTranslationMetadata(el) && node === el.firstChild && text.match(/^Translated from (.{1,80})$/);
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
-    let out = nativeMediaUploadJapaneseText(el, node.nodeValue) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+    let out = nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
       (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
@@ -2362,6 +2512,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.23.1 loaded'
+    '🐦 Classic Twitter JP v6.24.0 loaded'
   );
 })();

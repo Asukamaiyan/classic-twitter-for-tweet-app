@@ -65,7 +65,9 @@
     return [...new Set(nodes)].filter(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-user-content],.tl-user-text,[data-ct-owned],[data-ct-local-ui]'))
       .slice(0, 16).map(el => ({type: el.tagName === 'VIDEO' ? 'video' : 'image',
-        url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : ''})).filter(asset => asset.url);
+        url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : '',
+        ...(el.tagName === 'VIDEO' && /^(Animated GIF|GIFアニメーション|アニメーションGIF)$/.test(el.getAttribute('aria-label') || '')
+          ? {isGIF:true} : {})})).filter(asset => asset.url);
   }
 
   function ctFavoriteCandidate(article) {
@@ -160,7 +162,7 @@
     if (current?.uid !== uid || !Array.isArray(posts)) return null;
     const matches = posts.filter(post => typeof post.id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(post.id) &&
       !post.isDeleted && !post.originalPostId && !post.isRepost &&
-      post.status !== 'MUTED' &&
+      !['MUTED','BLOCKED'].includes(post.status) &&
       post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&
       (candidate.createdAt ? ctTimestampPostDate(post)?.getTime() === ctTimestampParse(candidate.createdAt)?.getTime() :
         ctFavoriteRelativeTimeMatches(candidate.relativeText, ctTimestampPostValue(post), candidate.observedAt)) &&
@@ -170,7 +172,7 @@
     return { ...candidate, id: unique[0].id, text: unique[0].text, createdAt: ctTimestampPostValue(unique[0]),
       href: location.origin + '/post/' + encodeURIComponent(unique[0].id),
       avatar: ctProfileURL(unique[0].authorAvatar) || candidate.avatar,
-      media: ctProfileMediaAssets(unique[0]) };
+      media: ctProfileMediaAssets(unique[0]), ...(ctProfilePostEdited(unique[0]) ? {isEdited:true} : {}) };
   }
 
   async function ctRestoreVisibleFavorites() {
@@ -198,9 +200,9 @@
             {Authorization:`Bearer ${auth.token}`});
           const post = json?.post;
           if (!json || json.success === false || json.error || post?.id !== snapshot.id || post.hasLiked !== true ||
-              post.isDeleted || post.status === 'MUTED' || post.isRepost || post.originalPostId ||
+              post.isDeleted || ['MUTED','BLOCKED'].includes(post.status) || post.isRepost || post.originalPostId ||
               post.authorUsername?.toLowerCase() !== snapshot.username.toLowerCase() || typeof post.text !== 'string') snapshot = null;
-          else snapshot = {...snapshot,text:post.text,createdAt:ctTimestampPostValue(post),
+          else snapshot = {...snapshot,text:post.text,createdAt:ctTimestampPostValue(post),isEdited:ctProfilePostEdited(post),
             media:ctProfileMediaAssets(post),avatar:ctProfileURL(post.authorAvatar) || snapshot.avatar};
         } else snapshot = null;
         const current = await getAuth();

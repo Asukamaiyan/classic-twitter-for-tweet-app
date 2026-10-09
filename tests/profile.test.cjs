@@ -22,6 +22,7 @@ function harness(t, options = {}) {
   const { window } = dom; t.after(() => window.close());
   let auth = { uid: 'uid-viewer', token: 'token-viewer' }; let accountUser = 'viewer'; let pages = [{ posts: [], nextCursor: null }]; let userReplies = [];
   let mutedPages = [{ success: true, users: [], nextCursor: null }];
+  let blockedPages = [{ blocks: [], nextCursor: null }];
   const historyStatuses = new Map([['uid-viewer', options.history || null]]);
   let override = null; const calls = [];
   window.ctNetworkState = { authUID: auth.uid };
@@ -35,6 +36,10 @@ function harness(t, options = {}) {
       assert.equal(endpoint.searchParams.has('limit'), false);
       return mutedPages[Number(endpoint.searchParams.get('cursor') || 0)] ?? null;
     }
+    if (endpoint.pathname === '/api/blocks') {
+      assert.equal(endpoint.searchParams.get('limit'), '200');
+      return blockedPages[Number(endpoint.searchParams.get('cursor') || 0)] ?? null;
+    }
     if (endpoint.pathname.startsWith('/api/user-profile/')) return { profile: { username: accountUser } };
     if (endpoint.pathname.endsWith('/replies')) return { replies: userReplies };
     assert.match(endpoint.pathname, /^\/api\/users\/[A-Za-z0-9_.-]+\/posts$/);
@@ -46,7 +51,8 @@ function harness(t, options = {}) {
     save:ctProfileSaveFavorite, remove:ctProfileRemoveFavorite, remember:ctProfileRememberLikedPosts, load:ctProfileLoadFavorites, import:ctProfileImportFavorites, assets:ctProfileMediaAssets,
     context:ctProfileContext, viewerClose:ctProfileCloseViewer, backup:ctProfileFavoriteBackup, backupParts:ctProfileFavoriteBackupParts, importBackup:ctProfileImportFavoriteBackup, setActive:value=>{ctPageActive=value;}};`);
   return { window, document: window.document, api: window.profile, calls,
-    pages: value => { pages = value; }, replies: value => { userReplies = value; }, muted: value => { mutedPages = value; }, override: value => { override = value; },
+    pages: value => { pages = value; }, replies: value => { userReplies = value; }, muted: value => { mutedPages = value; },
+    blocked: value => { blockedPages = value; }, override: value => { override = value; },
     history: value => { historyStatuses.set(window.ctNetworkState.authUID, value); window.dispatchEvent(new window.Event('ct-favorite-history-change')); },
     setAuth: (value, user = 'other') => { auth = value; accountUser = user; window.ctNetworkState.authUID = auth?.uid || null; },
     route: (route, user) => { window.history.replaceState({}, '', route); window.document.querySelector('main').innerHTML = `<div class="animate-fadeIn">${client(user)}</div>`; },
@@ -127,6 +133,74 @@ test('Media uses bounded read-only cursor pages, all original image assets, vide
   await h.api.media(); assert.ok(h.calls.includes('/api/users/viewer/posts?limit=24&cursor=1'));
   assert.equal(h.document.querySelectorAll('[data-ct-profile-post]').length, 3);
   const count = h.calls.length; await h.api.media(); assert.equal(h.calls.length, count);
+});
+
+test('native GIF-as-video metadata reaches Media with silent looping and explicit playback', async t => {
+  const h = harness(t, { locale: 'ja' }); await h.ready();
+  const media = [{ media_type: 'video', public_url: 'https://media.example/animated.mp4',
+    thumbnail_url: 'https://images.example/animated.jpg', is_gif: true }];
+  h.pages([{ posts: [post('animated', media, { editedAt: '2026-10-09T08:00:00Z' }),
+    post('still-edited', undefined, { isEdited: true }), post('movie', [
+      { media_type: 'video', public_url: 'https://media.example/plain.mp4', is_gif: 'true' }
+    ])], nextCursor: null }]);
+  await h.select('media');
+  const row = h.document.querySelector('[data-ct-profile-post=animated]');
+  const video = row.querySelector('video');
+  assert.equal(video.src, media[0].public_url); assert.equal(video.poster, media[0].thumbnail_url);
+  assert.equal(video.loop, true); assert.equal(video.muted, true); assert.equal(video.controls, true);
+  assert.equal(video.autoplay, false); assert.equal(video.preload, 'none'); assert.equal(video.playsInline, true);
+  assert.equal(video.getAttribute('aria-label'), '投稿のアニメーションGIF');
+  assert.equal(row.querySelector('.ct-profile-edited').textContent, '編集済み');
+  assert.equal(row.querySelector('time').dateTime, '2026-09-30T00:00:00Z');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=still-edited] .ct-profile-edited').textContent, '編集済み');
+  const ordinary = h.document.querySelector('[data-ct-profile-post=movie] video');
+  assert.equal(ordinary.loop, false); assert.equal(ordinary.muted, false);
+  assert.equal(h.api.state.media.items.find(item => item.id === 'animated').media[0].isGIF, true);
+  assert.equal(h.api.state.media.items.find(item => item.id === 'movie').media[0].isGIF, undefined);
+});
+
+test('Favorite GIF and edit metadata survive storage and backup while older records retain their dates', async t => {
+  const h = harness(t); await h.ready();
+  h.api.save(item('old', { createdAt: '2020-01-02T03:04:00Z', savedAt: 23,
+    media: [{ type: 'video', url: 'https://media.example/old.mp4', poster: '' }] }));
+  h.api.remember([post('gif', [{ media_type: 'video', public_url: 'https://media.example/gif.mp4', is_gif: true }],
+    { hasLiked: true, editedAt: '2026-10-09T08:00:00Z' })], 'uid-viewer');
+  const stored = JSON.parse(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'));
+  assert.equal(stored.find(item => item.id === 'gif').media[0].isGIF, true);
+  assert.equal(stored.find(item => item.id === 'gif').isEdited, true);
+  const old = stored.find(item => item.id === 'old');
+  assert.equal(old.isEdited, undefined); assert.equal(old.media[0].isGIF, undefined); assert.equal(old.savedAt, 23);
+  assert.equal(old.createdAt, '2020-01-02T03:04:00Z');
+  const backup = JSON.parse(h.api.backup());
+  const restored = { ...backup.items.find(item => item.id === 'gif'), id: 'restored-gif' };
+  backup.items = [restored, { ...backup.items.find(item => item.id === 'old'), id: 'restored-old' }];
+  assert.equal(h.api.importBackup(JSON.stringify(backup)), 2);
+  await h.select('favorites');
+  const row = h.document.querySelector('[data-ct-profile-post=restored-gif]');
+  assert.equal(row.querySelector('video').loop, true); assert.equal(row.querySelector('video').muted, true);
+  assert.equal(row.querySelector('video').autoplay, false); assert.equal(row.querySelector('.ct-profile-edited').textContent, 'Edited');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=restored-old] .ct-profile-edited'), null);
+  assert.equal(h.document.querySelector('[data-ct-profile-post=restored-old] time').dateTime, '2020-01-02T03:04:00Z');
+});
+
+test('new optional archive flags reject malformed values atomically and do not turn edit dates into creation dates', async t => {
+  const h = harness(t); await h.ready();
+  h.api.remember([post('flag', [], { hasLiked: true, isEdited: true, createdAt: '', editedAt: '2026-10-09T08:00:00Z' }),
+    post('unconfirmed', [], { hasLiked: true, isEdited: 'true', editedAt: ' ' })], 'uid-viewer');
+  const valid = JSON.parse(h.api.backup()); const before = h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer');
+  const base = valid.items[0];
+  for (const changes of [
+    { isEdited: 'true' },
+    { media: [{ type: 'video', url: 'https://media.example/gif.mp4', poster: '', isGIF: 'true' }] },
+    { media: [{ type: 'image', url: 'https://images.example/photo.jpg', poster: '', isGIF: true }] }
+  ]) {
+    assert.throws(() => h.api.importBackup(JSON.stringify({ ...valid, items: [{ ...base, ...changes }] })), /format/);
+    assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), before);
+  }
+  await h.select('favorites');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=flag] time'), null);
+  assert.equal(h.document.querySelector('[data-ct-profile-post=flag] .ct-profile-edited').textContent, 'Edited');
+  assert.equal(h.document.querySelector('[data-ct-profile-post=unconfirmed] .ct-profile-edited'), null);
 });
 
 test('bad URLs, deleted/reposted/foreign posts are rejected and user text is never interpreted as HTML', async t => {
@@ -495,6 +569,137 @@ const mutedUser = username => ({ userId: 'uid-' + username.toLowerCase(), userna
 function favoriteRows(h) { return [...h.document.querySelectorAll('#ct-favorites-panel [data-ct-profile-post]')].map(row => row.dataset.ctProfilePost); }
 function favoriteControl(h, label) { return [...h.document.querySelectorAll('#ct-favorites-panel button')].find(button => button.textContent === label); }
 
+test('Favorites wait for all native block pages and hide blocked authors without deleting snapshots', async t => {
+  const h = harness(t); await h.ready();
+  h.api.save(item('alice', { username: 'alice', createdAt: '2020-01-01T00:00:00Z' }));
+  h.api.save(item('bob', { username: 'bob' })); h.api.save(item('allowed', { username: 'carol' }));
+  const before = h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'); let release;
+  h.blocked([{ blocks: [mutedUser('ALICE')], nextCursor: '1' }, { blocks: [mutedUser('bob')], nextCursor: '' }]);
+  h.override(endpoint => endpoint.pathname === '/api/blocks' && !endpoint.searchParams.has('cursor') ?
+    new Promise(resolve => { release = resolve; }) : undefined);
+  await h.select('favorites');
+  assert.deepEqual(favoriteRows(h), []); assert.equal(h.api.state.favoriteMutes.mutedDone, true);
+  assert.equal(h.api.state.favoriteMutes.blockedDone, false);
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /checking muted and blocked accounts/);
+  release({ blocks: [mutedUser('ALICE')], nextCursor: '1' }); await tick();
+  assert.deepEqual(favoriteRows(h), ['allowed']); assert.equal(h.api.state.favoriteMutes.blockPages, 2);
+  assert.equal(h.api.state.favoriteMutes.done, true);
+  assert.ok(h.calls.includes('/api/blocks?limit=200&cursor=1'));
+  assert.match(h.document.getElementById('ct-favorite-hidden-status').textContent, /blocked.*hidden.*retained/);
+  assert.doesNotMatch(h.document.getElementById('ct-favorite-range').textContent, /2020/);
+  assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), before); assert.equal(h.api.load().length, 3);
+});
+
+test('invalid block responses and repeated cursors keep snapshots hidden and preserve the failed page for retry', async t => {
+  for (const response of [null, { success: false, blocks: [] }, { blocks: {} },
+    { blocks: [{ username: 'alice' }] }, { blocks: [mutedUser('invalid user')] },
+    { blocks: [], nextCursor: 3 }]) {
+    const h = harness(t); await h.ready(); h.api.save(item('saved')); h.blocked([response]); await h.select('favorites');
+    assert.deepEqual(favoriteRows(h), []); assert.equal(h.api.state.favoriteMutes.done, false);
+    assert.equal(h.api.state.favoriteMutes.mutedDone, true); assert.equal(h.api.state.muteCache.size, 0);
+    assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Blocked accounts could not be checked/);
+    assert.equal(h.api.load().length, 1);
+  }
+  const h = harness(t); await h.ready(); h.api.save(item('blocked')); h.api.save(item('allowed', { username: 'bob' }));
+  h.blocked([{ blocks: [mutedUser('alice')], nextCursor: '1' }, { blocks: [], nextCursor: '1' }]);
+  await h.select('favorites'); assert.equal(h.api.state.favoriteMutes.blockCursor, '1'); assert.deepEqual(favoriteRows(h), []);
+  const before = h.calls.length;
+  h.blocked([{ blocks: [mutedUser('alice')], nextCursor: '1' }, { blocks: [], nextCursor: null }]);
+  favoriteControl(h, 'Try again').click(); await tick();
+  assert.deepEqual(h.calls.slice(before), ['/api/blocks?limit=200&cursor=1']); assert.deepEqual(favoriteRows(h), ['allowed']);
+});
+
+test('block pagination is bounded and requires explicit continuation before Favorites appear', async t => {
+  const h = harness(t); await h.ready(); h.api.save(item('last-page-blocked')); h.api.save(item('allowed', { username: 'bob' }));
+  h.blocked(Array.from({ length: 11 }, (_, index) => ({ blocks: index === 10 ? [mutedUser('alice')] : [],
+    nextCursor: index === 10 ? null : String(index + 1) })));
+  await h.select('favorites');
+  assert.equal(h.calls.filter(url => url.startsWith('/api/blocks?')).length, 10);
+  assert.equal(h.api.state.favoriteMutes.done, false); assert.deepEqual(favoriteRows(h), []);
+  const before = h.calls.length; h.api.patch(); h.api.render(); await tick(); assert.equal(h.calls.length, before);
+  favoriteControl(h, 'Continue checking').click(); await tick();
+  assert.equal(h.calls.filter(url => url.startsWith('/api/blocks?')).length, 11);
+  assert.deepEqual(favoriteRows(h), ['allowed']); assert.equal(h.api.load().length, 2);
+});
+
+test('late block pages cannot populate another route or account or finish a background visibility check', async t => {
+  for (const change of ['account', 'route', 'background']) {
+    const h = harness(t); await h.ready(); h.api.save(item('old')); let release;
+    h.override(endpoint => endpoint.pathname === '/api/blocks' ? new Promise(resolve => { release = resolve; }) : undefined);
+    await h.select('favorites');
+    if (change === 'account') { h.setAuth({ uid: 'uid-other', token: 'token-other' }, 'other'); h.route('/profile', 'other'); await h.ready(); }
+    else if (change === 'route') { h.route('/user/bob', 'bob'); await h.ready(); }
+    else Object.defineProperty(h.document, 'hidden', { configurable: true, value: true });
+    release({ blocks: [], nextCursor: null }); await tick();
+    assert.deepEqual(favoriteRows(h), []); assert.equal(h.api.state.muteCache.size, 0);
+    if (change === 'background') {
+      assert.equal(h.api.state.favoriteMutes.done, false); assert.match(h.api.state.favoriteMutes.error, /Show this tab/);
+      Object.defineProperty(h.document, 'hidden', { configurable: true, value: false }); h.override(null);
+      await h.api.mutes(); assert.deepEqual(favoriteRows(h), ['old']);
+    }
+    if (change !== 'background') assert.equal(h.document.getElementById('native-timeline').hasAttribute('data-ct-profile-timeline-hidden'), false);
+  }
+});
+
+test('native blocked profile panels in both languages and classic modes stay visible and remove cached extension tabs', async t => {
+  for (const locale of ['ja', 'en']) for (const classic of [false, true]) for (const direction of ['viewer', 'target']) {
+    const h = harness(t, { route: '/user/alice', user: 'alice', locale }); await h.ready();
+    h.pages([{ posts: [post('cached-photo', undefined, { authorUsername: 'alice' })], nextCursor: null }]);
+    await h.select('media'); assert.ok(h.document.querySelector('[data-ct-profile-post=cached-photo]'));
+    const timeline = h.document.getElementById('native-timeline');
+    timeline.className = direction === 'viewer' ? 'flex flex-col items-center justify-center py-20 px-4 text-center' :
+      'flex flex-col items-start justify-center py-12 px-8';
+    h.document.documentElement.classList.toggle('ct-classic-enabled', classic);
+    const title = direction === 'viewer' ? locale === 'ja' ? 'ブロック済み: @Alice' : 'You blocked @Alice' :
+      locale === 'ja' ? 'ブロックされています' : "You're blocked";
+    const noun = classic ? 'Tweets' : 'posts';
+    const body = direction === 'viewer' ? locale === 'ja' ? '相手のツイートや返信は表示されません。' : `You are not seeing their ${noun} or replies.` :
+      locale === 'ja' ? '@Aliceさんにブロックされているため、フォローやツイートの表示ができません。' :
+        `@Alice has blocked you, so you can't follow them or see their ${noun}.`;
+    timeline.innerHTML = `<p>${title}</p><p class="text-tl-app-text-muted">${body}</p>`;
+    const before = h.calls.length; h.api.patch();
+    assert.equal(h.document.getElementById('ct-media-tab'), null); assert.equal(h.document.getElementById('ct-media-panel'), null);
+    assert.equal(timeline.hasAttribute('data-ct-profile-timeline-hidden'), false);
+    assert.equal(timeline.textContent, title + body); assert.equal(h.calls.length, before);
+  }
+});
+
+test('native block and unblock controls invalidate read caches while preserving stored Favorites and handlers', async t => {
+  const h = harness(t); await h.ready(); h.pages([{ posts: [post('cached')], nextCursor: null }]); await h.select('media');
+  h.api.save(item('saved')); await h.select('favorites');
+  const stored = h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer');
+  const plain = h.document.createElement('button'); plain.textContent = 'Block @alice'; h.document.body.append(plain); plain.click();
+  assert.equal(h.api.state.muteCache.size, 1);
+  for (const label of ['Block @alice', 'Unblock @alice', '@aliceをブロック', '@aliceのブロックを解除']) {
+    const holder = h.document.createElement('div'); holder.className = 'relative shrink-0';
+    const trigger = label.startsWith('@') ? 'メニューを開く' : 'More options';
+    holder.innerHTML = `<button aria-label="${trigger}"></button><div class="absolute right-0 top-full bg-tl-app-card border rounded-xl"><button type="button" class="w-full flex items-center"><svg class="lucide-ban"></svg>${label}</button></div>`;
+    h.document.body.append(holder); let nativeCalls = 0;
+    const button = holder.querySelector('.absolute > button'); button.addEventListener('click', () => nativeCalls++); button.click();
+    assert.equal(nativeCalls, 1); assert.equal(h.api.state.muteCache.size, 0); assert.equal(h.api.state.mediaCache.size, 0);
+    assert.deepEqual(favoriteRows(h), []); assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), stored);
+    holder.remove(); await h.api.mutes(); assert.equal(h.api.state.muteCache.size, 1);
+  }
+  const confirmation = h.document.createElement('div'); confirmation.className = 'bg-tl-app-card border';
+  confirmation.setAttribute('role', 'dialog'); confirmation.setAttribute('aria-modal', 'true'); confirmation.setAttribute('aria-labelledby', 'app-confirm-title');
+  confirmation.innerHTML = '<h3 id="app-confirm-title">Block @alice?</h3><p class="mt-2 text-tl-app-text-muted leading-relaxed">Block explanation</p><div class="mt-5"><button>Cancel</button><button class="bg-red-500">Block</button></div>';
+  h.document.body.append(confirmation); confirmation.querySelector('button').click(); assert.equal(h.api.state.muteCache.size, 1);
+  confirmation.querySelector('button.bg-red-500').click(); assert.equal(h.api.state.muteCache.size, 0);
+  await h.api.mutes(); assert.equal(h.api.state.muteCache.size, 1);
+  h.window.history.replaceState({}, '', '/settings');
+  const section = h.document.createElement('section'); section.innerHTML = '<button aria-label="Unblock @alice">Unblock</button>';
+  h.document.querySelector('main').append(section); section.querySelector('button').click(); assert.equal(h.api.state.muteCache.size, 0);
+  assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'), stored);
+});
+
+test('native BLOCKED post stubs are excluded from added Media and Favorite recovery', async t => {
+  const h = harness(t); await h.ready();
+  h.pages([{ posts: [post('blocked-stub', undefined, { status: 'BLOCKED', hasLiked: true }), post('allowed')], nextCursor: null }]);
+  await h.select('media'); assert.equal(h.document.querySelector('[data-ct-profile-post=blocked-stub]'), null);
+  assert.equal(h.api.remember([post('blocked-stub', undefined, { status: 'BLOCKED', hasLiked: true })], 'uid-viewer'), 0);
+  assert.equal(h.api.load().length, 0);
+});
+
 test('Favorites wait for native mute checking without showing snapshots and retain hidden saved data', async t => {
   const h = harness(t); await h.ready();
   h.api.save(item('muted', { username: 'ALICE' })); h.api.save(item('visible', { username: 'bob' })); h.api.save(item('unknown', { username: '' }));
@@ -502,7 +707,7 @@ test('Favorites wait for native mute checking without showing snapshots and reta
   h.override(endpoint => endpoint.pathname === '/api/users/muted' ? new Promise(resolve => { release = resolve; }) : undefined);
   h.document.getElementById('ct-favorites-tab').click();
   assert.deepEqual(favoriteRows(h), []); await tick();
-  assert.deepEqual(favoriteRows(h), []); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Checking muted accounts/);
+  assert.deepEqual(favoriteRows(h), []); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /Checking muted and blocked accounts/);
   h.api.render(); h.api.patch(); assert.equal(h.calls.filter(url => url.startsWith('/api/users/muted')).length, 1);
   release({ success: true, users: [mutedUser('Alice')], nextCursor: null }); await tick();
   assert.deepEqual(favoriteRows(h), ['visible']); assert.match(h.document.getElementById('ct-favorites-panel').textContent, /2 saved posts.*hidden.*retained/);
@@ -518,7 +723,7 @@ test('a failed partial mute check keeps all snapshots hidden until an explicit r
   const before = h.calls.length; h.api.patch(); h.api.render(); await tick(); assert.equal(h.calls.length, before);
   h.muted([{ success: true, users: [mutedUser('alice')], nextCursor: '1' }, { success: true, users: [], nextCursor: null }]);
   favoriteControl(h, 'Try again').click(); await tick();
-  assert.deepEqual(h.calls.slice(before), ['/api/users/muted?cursor=1']); assert.deepEqual(favoriteRows(h), ['visible']);
+  assert.deepEqual(h.calls.slice(before), ['/api/users/muted?cursor=1', '/api/blocks?limit=200']); assert.deepEqual(favoriteRows(h), ['visible']);
   assert.equal(h.api.state.favoriteMutes.done, true); assert.equal(h.api.load().length, 2);
 });
 
@@ -1095,7 +1300,7 @@ test('empty and failed profile loads retain readable status and an explicit retr
   const error = panel.querySelector(':scope > .ct-profile-status[role=status]');
   assert.match(error.textContent, /Muted accounts could not be checked/); assert.equal(error.closest('details'), null);
   assert.equal(panel.querySelector('details').open, false); assert.equal(h.document.getElementById('ct-favorite-count').textContent, '1 saved · Not checked');
-  assert.match(h.document.getElementById('ct-favorite-range').textContent, /muted accounts not checked/);
+  assert.match(h.document.getElementById('ct-favorite-range').textContent, /muted and blocked accounts not checked/);
   const retry = favoriteControl(h, 'Try again'); assert.ok(error.contains(retry));
   assert.equal(h.window.getComputedStyle(retry).minHeight, '44px');
   h.override(null); retry.click(); await tick(); assert.deepEqual(favoriteRows(h), ['saved']);

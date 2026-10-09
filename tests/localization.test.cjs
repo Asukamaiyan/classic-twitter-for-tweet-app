@@ -19,16 +19,22 @@ function fixture(language, html, route = '/feed') {
   const dom = new JSDOM(`<!doctype html><body>${html}</body>`, {
     url: `https://app.tweet.app${route}`, runScripts: 'outside-only'
   });
-  const source = fs.readFileSync(path.join(__dirname, `../classic-twitter-${language}.user.js`), 'utf8');
+  // Test editable locale sources directly, including their shared date parser,
+  // so regressions cannot be hidden by a stale generated userscript.
+  const localeSource = fs.readFileSync(path.join(__dirname, `../src/${language}.js`), 'utf8');
+  const source = localeSource.replace('/* @include timestamps */',
+    fs.readFileSync(path.join(__dirname, '../src/timestamps.js'), 'utf8')).replace('/* @include navigation */',
+    fs.readFileSync(path.join(__dirname, '../src/navigation.js'), 'utf8'));
   const map = language === 'ja' ? 'JP' : 'EN';
   const start = source.indexOf(`  const ${map} = new Map([`);
   const end = source.indexOf('\n  ]);', start) + '\n  ]);'.length;
   const common = [
-    'ctTimestampParse',
+    'ctTimestampParse', 'ctIsNativeNotificationRow',
     'localizationScopeNodes', 'isOwnedLocalizationElement', 'isNativeSettingsNavigation',
     'isNativeLocalizationTimestamp', 'isProtectedLocalizationElement',
     'nativeLocalizationPoll', 'isNativeLocalizationPollUI',
     'nativeLocalizationAccountMenu', 'nativeLocalizationAccountDialog',
+    'nativeLocalizationBlockDialog', 'nativeLocalizationBlockProfile',
     'localizationNotificationRow', 'localizationNotificationAction', 'isLocalizationUI',
     'ctLocalizationClassicEnabled', 'ctLocalizationState', 'ctLocalizationNativeRecordException', 'ctLocalizationRecordAllowed',
     'ctLocalizationRead', 'ctLocalizationWrite', 'ctLocalizationForget', 'ctRememberLocalization',
@@ -39,7 +45,9 @@ function fixture(language, html, route = '/feed') {
     'ctLocalizationRegularText', 'ctLocalizationClassicText',
     'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
     'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber', 'nativeTimestampJapaneseText',
-    'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata', 'nativeMediaUploadJapaneseText',
+    'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
+    'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia',
+    'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
     'notificationTextNodes', 'patchNotificationGrammar', 'patchNotificationConnectors',
     'patchNotificationParticles', 'patchNotificationFollowGrammar', 'patchReplyingTo',
@@ -49,6 +57,7 @@ function fixture(language, html, route = '/feed') {
   dom.window.eval(`
     const clean = value => String(value ?? '').replace(/\\s+/g, ' ').trim();
     const ctFavoritePresentationEnabled = () => window.qaClassic !== false;
+    ${source.match(/^  const ctNativeNotificationRowSelector = .*;$/m)?.[0] || ''}
     ${source.slice(start, end)}
     ${names.map(name => functionSource(source, name)).join('\n')}
     window.qa = { ${names.join(', ')} };
@@ -1049,4 +1058,243 @@ test('ja: native upload errors explain limits and retain the exact filename suff
   node.nodeValue = 'Maximum of 5 images allowed per post.'; f.run(node.parentElement);
   assert.equal(node.nodeValue,'Maximum of 5 images allowed per post.');
   assert.equal(f.document.querySelector('textarea').value,'draft'); f.dom.window.close();
+});
+
+function nativeUpload230({ compact = false, error = '', extra = '' } = {}) {
+  return `<form role="form"><textarea id="public-tweet-input">GIFs must be 15 MB or smaller.</textarea>
+    <div class="w-full space-y-3 ${compact ? 'mt-2' : 'mt-3'}">
+    <div class="p-3 bg-red-500/10 border border-red-500/15 text-red-500 rounded-xl flex items-center gap-2"><svg class="lucide-circle-alert"></svg><span id="latest-error">${error}</span></div>${extra}
+    <div class="flex items-center"><button type="button" id="add-gif" aria-label="Add photo or GIF"><svg></svg><span>Add Photo</span></button>
+    <button type="button" id="add-video" aria-label="Add video"><svg></svg><span>Add Video</span></button>
+    <input id="latest-images" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif">
+    <input id="latest-video" type="file" accept="video/mp4,video/quicktime"></div></div></form>`;
+}
+
+for (const compact of [false, true]) test(`ja: Tweet 2.3.0 ${compact ? 'compact reply' : 'composer'} GIF upload limits use native inputs and preserve filenames`, () => {
+  const f = fixture('ja', `<main>${nativeUpload230({ compact, error: 'GIFs must be 15 MB or smaller.' })}</main>
+    <article><p class="whitespace-pre-wrap" id="gif-body">GIFs must be 15 MB or smaller.</p></article>`);
+  const imageInput = f.document.getElementById('latest-images');
+  const videoInput = f.document.getElementById('latest-video');
+  const error = f.document.getElementById('latest-error');
+  const node = error.firstChild;
+  const add = f.document.getElementById('add-gif');
+  let adds = 0; add.addEventListener('click', () => adds++);
+  f.run();
+  assert.equal(node.nodeValue, 'GIFは15MB以下にしてください。');
+  assert.equal(add.getAttribute('aria-label'), '写真・GIFを追加');
+  assert.equal(add.textContent, '写真を追加');
+  assert.equal(f.document.getElementById('add-video').getAttribute('aria-label'), '動画を追加');
+  for (const [native, japanese] of [
+    ['GIFs cannot be combined with other media assets.', 'GIFと他の写真・動画は同時に投稿できません。'],
+    ['Videos cannot be combined with other media assets.', '動画と他の写真・動画は同時に投稿できません。'],
+    ['Cannot mix images and videos in the same post.', '写真と動画は同時に投稿できません。'],
+    ['Videos must be 50 MB or smaller.', '動画は50MB以下にしてください。'],
+    ['Videos must be 30 seconds or shorter.', '動画は30秒以内にしてください。'],
+    ['Unsupported file type. Please select an image, GIF, or video.', '対応していないファイル形式です。写真、GIF、動画を選択してください。']
+  ]) {
+    node.nodeValue = native; f.run(error); assert.equal(node.nodeValue, japanese);
+  }
+  node.nodeValue = '1 image was not added. My  GIFs must be 15 MB or smaller..gif: GIFs cannot be combined with other media assets.';
+  f.run(error);
+  assert.equal(node.nodeValue, '1枚の写真を追加できませんでした。 My  GIFs must be 15 MB or smaller..gif: GIFs cannot be combined with other media assets.');
+  assert.equal(error.firstChild, node);
+  assert.equal(f.document.getElementById('latest-images'), imageInput);
+  assert.equal(imageInput.accept, 'image/jpeg,image/png,image/webp,image/gif');
+  assert.equal(imageInput.multiple, true);
+  assert.equal(f.document.getElementById('latest-video'), videoInput);
+  assert.equal(videoInput.accept, 'video/mp4,video/quicktime');
+  assert.equal(f.document.getElementById('public-tweet-input').value, 'GIFs must be 15 MB or smaller.');
+  assert.equal(f.text('gif-body'), 'GIFs must be 15 MB or smaller.');
+  add.click(); assert.equal(adds, 1);
+  imageInput.removeAttribute('multiple');
+  node.nodeValue = 'GIFs must be 15 MB or smaller.'; f.run(error);
+  assert.equal(node.nodeValue, 'GIFs must be 15 MB or smaller.', 'lookalike uploader without native multiple input is protected');
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.3.0 GIF staging progress keeps React counters and native removal handler', () => {
+  const extra = `<div class="relative aspect-video"><div class="absolute inset-0 flex flex-col items-center justify-center">
+    <svg class="animate-pulse"></svg><div id="upload-progress" class="text-white font-mono font-bold">Uploading… <!-- -->42<!-- -->%</div></div>
+    <div class="absolute inset-0 flex flex-col items-center justify-center"><svg class="animate-spin"></svg>
+    <div class="text-white font-mono font-bold" id="processing">Processing…</div><div class="font-sans" id="gif-prepare">Preparing GIF loop…</div></div>
+    <button type="button" id="gif-remove" title="Remove GIF"><svg></svg></button><div class="absolute bottom-2 left-2"><svg></svg><span id="ready">Ready</span></div></div>`;
+  const f = fixture('ja', nativeUpload230({ extra }));
+  const progress = f.document.getElementById('upload-progress');
+  const label = progress.firstChild; const count = progress.childNodes[2];
+  const remove = f.document.getElementById('gif-remove');
+  let removals = 0; remove.addEventListener('click', () => removals++);
+  f.run();
+  assert.equal(label.nodeValue, 'アップロード中… ');
+  assert.equal(progress.childNodes[2], count); assert.equal(count.nodeValue, '42');
+  count.nodeValue = '73'; f.run(progress); assert.equal(progress.textContent, 'アップロード中… 73%');
+  assert.equal(f.text('processing'), '処理中…');
+  assert.equal(f.text('gif-prepare'), 'GIFのループ再生を準備中…');
+  assert.equal(f.text('ready'), '準備完了');
+  assert.equal(remove.title, 'GIFを削除'); remove.click(); assert.equal(removals, 1);
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) test(`${language}: Tweet 2.3.0 native GIF labels preserve media, play state and handlers`, () => {
+  const f = fixture(language, `<article><div class="relative"><video id="gif-video" src="fixture.mp4" loop muted playsinline preload="auto" aria-label="Animated GIF"></video>
+    <button id="gif-toggle" class="absolute bottom-2 right-2" aria-label="Pause GIF"><svg aria-hidden="true"></svg></button>
+    <span class="pointer-events-none" aria-hidden="true">GIF</span></div><p class="whitespace-pre-wrap" id="gif-caption">Pause GIF</p></article>
+    <div class="relative"><video id="plain-video" loop muted playsinline aria-label="Animated GIF"></video><button aria-label="Play GIF"></button></div>`);
+  const video = f.document.getElementById('gif-video');
+  const toggle = f.document.getElementById('gif-toggle');
+  let clicks = 0; toggle.addEventListener('click', () => clicks++);
+  f.run(); f.run();
+  assert.equal(video.getAttribute('aria-label'), language === 'ja' ? 'GIFアニメーション' : 'Animated GIF');
+  assert.equal(toggle.getAttribute('aria-label'), language === 'ja' ? 'GIFを一時停止' : 'Pause GIF');
+  assert.equal(video.getAttribute('src'), 'fixture.mp4'); assert.equal(video.loop, true);
+  assert.equal(video.defaultMuted, true); assert.equal(video.preload, 'auto');
+  assert.equal(f.text('gif-caption'), 'Pause GIF');
+  assert.equal(f.document.getElementById('plain-video').getAttribute('aria-label'), 'Animated GIF');
+  toggle.setAttribute('aria-label', 'Play GIF'); f.run(toggle);
+  assert.equal(toggle.getAttribute('aria-label'), language === 'ja' ? 'GIFを再生' : 'Play GIF');
+  toggle.click(); assert.equal(clicks, 1);
+  f.dom.window.close();
+});
+
+const nativeBlockBody230 = "They won't be able to follow you, or reply to, quote, repost or like your posts, and neither of you will see the other's posts or get notifications from each other. Any follows between you are removed, and unblocking won't restore them.";
+
+for (const language of ['ja', 'en']) test(`${language}: Tweet 2.3.0 native block menu and confirmation keep handles, handlers and classic OFF restoration`, () => {
+  const f = fixture(language, `<main><div class="relative"><button aria-label="Profile options" aria-haspopup="menu"><svg></svg></button>
+    <div class="absolute right-0 top-full bg-tl-app-card border rounded-xl" role="menu"><button class="text-red-500" role="menuitem" id="block-menu"><svg></svg><span class="min-w-0 truncate" id="block-label">Block @Like</span></button></div></div>
+    <article><div class="relative"><button aria-label="Post options"><svg></svg></button><div class="absolute right-0 top-full bg-tl-app-card border rounded-xl"><button class="text-red-500"><svg></svg><span class="min-w-0 truncate" id="unblock-label">Unblock @Reply</span></button></div></div>
+    <p class="whitespace-pre-wrap" id="block-tweet">${nativeBlockBody230}</p></article>
+    <div class="bg-tl-app-card border" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title"><h3 id="app-confirm-title">Block @Like?</h3>
+    <p class="mt-2 leading-relaxed text-tl-app-text-muted" id="block-body">${nativeBlockBody230}</p><div class="mt-5"><button>Cancel</button><button id="block-confirm">Block</button></div></div>
+    <button class="truncate" id="block-name">Block @Like</button></main>`, '/user/Like');
+  const title = f.document.getElementById('app-confirm-title'); const titleNode = title.firstChild;
+  const body = f.document.getElementById('block-body'); const bodyNode = body.firstChild;
+  const label = f.document.getElementById('block-label'); const labelNode = label.firstChild;
+  let menuClicks = 0; let confirms = 0;
+  f.document.getElementById('block-menu').addEventListener('click', () => menuClicks++);
+  f.document.getElementById('block-confirm').addEventListener('click', () => confirms++);
+  f.run(); f.run();
+  assert.equal(title.textContent, language === 'ja' ? '@Likeをブロックしますか？' : 'Block @Like?');
+  assert.equal(label.textContent, language === 'ja' ? '@Likeをブロック' : 'Block @Like');
+  assert.equal(f.text('unblock-label'), language === 'ja' ? '@Replyのブロックを解除' : 'Unblock @Reply');
+  assert.match(body.textContent, language === 'ja' ? /リツイート、お気に入り/ : /Retweet or favorite your Tweets/);
+  assert.equal(f.text('block-tweet'), nativeBlockBody230);
+  assert.equal(f.text('block-name'), 'Block @Like');
+  f.dom.window.qaClassic = false; f.qa.ctSyncLocalizationAppearance(); f.run();
+  assert.match(body.textContent, language === 'ja' ? /リツイート、いいね/ : /repost or like your posts/);
+  f.dom.window.qaClassic = true; f.qa.ctSyncLocalizationAppearance(); f.run();
+  assert.match(body.textContent, language === 'ja' ? /リツイート、お気に入り/ : /Retweet or favorite your Tweets/);
+  assert.equal(title.firstChild, titleNode); assert.equal(body.firstChild, bodyNode); assert.equal(label.firstChild, labelNode);
+  f.document.getElementById('block-menu').click(); f.document.getElementById('block-confirm').click();
+  assert.equal(menuClicks, 1); assert.equal(confirms, 1);
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) test(`${language}: Tweet 2.3.0 blocked-profile states retain split usernames and exclude arbitrary profile text`, () => {
+  const f = fixture(language, `<main><div class="flex flex-col items-center justify-center py-20 px-4 text-center">
+    <p class="font-bold" id="blocked-by-me">You blocked @<!-- -->Like</p><p class="text-tl-app-text-muted" id="blocked-info">You are not seeing their posts or replies.</p></div>
+    <div class="flex flex-col items-start justify-center py-12 px-8"><p id="blocked-by-target">You're blocked</p>
+    <p class="text-tl-app-text-muted" id="blocked-target-info">@Reply has blocked you, so you can't follow them or see their posts.</p></div>
+    <p id="ordinary-profile-copy">@Reply has blocked you, so you can't follow them or see their posts.</p>
+    <p class="whitespace-pre-wrap" id="blocked-bio">You're blocked</p></main>`, '/user/Like');
+  const title = f.document.getElementById('blocked-by-me'); const username = title.lastChild;
+  f.run(); f.run();
+  assert.equal(title.textContent, language === 'ja' ? 'ブロック済み: @Like' : 'You blocked @Like');
+  assert.equal(title.lastChild, username); assert.equal(username.nodeValue, 'Like');
+  assert.equal(f.text('blocked-info'), language === 'ja' ? '相手のツイートや返信は表示されません。' : 'You are not seeing their Tweets or replies.');
+  assert.equal(f.text('blocked-by-target'), language === 'ja' ? 'ブロックされています' : "You're blocked");
+  assert.equal(f.text('blocked-target-info'), language === 'ja' ? '@Replyさんにブロックされているため、フォローやツイートの表示ができません。' : "@Reply has blocked you, so you can't follow them or see their Tweets.");
+  assert.equal(f.text('ordinary-profile-copy'), "@Reply has blocked you, so you can't follow them or see their posts.");
+  assert.equal(f.text('blocked-bio'), "You're blocked");
+  f.dom.window.qaClassic = false; f.qa.ctSyncLocalizationAppearance(); f.run();
+  assert.equal(f.text('blocked-info'), language === 'ja' ? '相手のツイートや返信は表示されません。' : 'You are not seeing their posts or replies.');
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.3.0 blocked-account settings localize errors and actions while keeping user cards intact', () => {
+  const f = fixture('ja', `<main><section><div class="flex flex-col gap-5"><div><h4 class="font-extrabold" id="blocked-heading">Blocked accounts</h4>
+    <p class="leading-relaxed" id="blocked-description">When you block someone, they cannot view your posts or follow you, and you will not see their posts or notifications.</p></div>
+    <div><div class="text-red-500 bg-red-500/10 border border-red-500/20" id="blocked-load-error">Couldn't load your blocked accounts.</div><button aria-label="Retry loading blocked accounts" id="block-retry">Retry</button></div>
+    <div><button class="truncate" id="blocked-card-name" aria-label="View @Block's profile">Block</button><span class="truncate">@Block</span>
+    <button id="settings-unblock" aria-label="Unblock @Block">Unblock</button></div>
+    <div class="text-center"><h3 id="blocked-empty">You aren't blocking anyone</h3><p class="text-tl-app-text-muted" id="blocked-empty-description">When you block someone, they'll show up here.</p></div></div>
+    <div class="text-red-500 bg-red-500/10 border border-red-500/20" id="unrelated-error">Couldn't load your blocked accounts.</div></section></main>`, '/settings');
+  const unblock = f.document.getElementById('settings-unblock');
+  let unblocks = 0; unblock.addEventListener('click', () => unblocks++);
+  f.run();
+  assert.equal(f.text('blocked-heading'), 'ブロックしているアカウント');
+  assert.match(f.text('blocked-description'), /相手のツイートや通知も表示されません/);
+  assert.equal(f.text('blocked-load-error'), 'ブロックしているアカウントを読み込めませんでした。');
+  assert.equal(f.text('block-retry'), '再試行');
+  assert.equal(f.document.getElementById('block-retry').getAttribute('aria-label'), 'ブロックしているアカウントを再読み込み');
+  assert.equal(unblock.textContent, 'ブロックを解除'); assert.equal(unblock.getAttribute('aria-label'), '@Blockのブロックを解除');
+  unblock.disabled = true; unblock.setAttribute('aria-label', 'Unblocking @Block'); f.run(unblock);
+  assert.equal(unblock.getAttribute('aria-label'), '@Blockのブロックを解除中…'); assert.equal(unblock.disabled, true);
+  unblock.disabled = false; unblock.click(); assert.equal(unblocks, 1);
+  assert.equal(f.text('blocked-card-name'), 'Block');
+  assert.equal(f.document.getElementById('blocked-card-name').getAttribute('aria-label'), "View @Block's profile");
+  assert.equal(f.text('blocked-empty'), 'ブロックしているアカウントはありません');
+  assert.equal(f.text('blocked-empty-description'), 'ブロックしたアカウントがここに表示されます。');
+  assert.equal(f.text('unrelated-error'), "Couldn't load your blocked accounts.");
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) test(`${language}: Tweet 2.3.0 overlay notification rows localize only actions and keep independent avatar and menu handlers`, () => {
+  const f = fixture(language, `<main><div class="border-b border-tl-app-border"><div class="relative w-full flex items-start gap-3" id="new-notification">
+    <button type="button" class="absolute inset-0 w-full h-full" aria-labelledby="new-notification-action" id="new-notification-open"></button>
+    <div class="mt-0.5 shrink-0 pointer-events-none"><svg width="28" height="28"></svg></div>
+    <div class="flex-1 min-w-0 pointer-events-none"><div><button id="new-actor-avatar" aria-label="Like avatar"><img alt="Like avatar"></button></div>
+    <p id="new-notification-action"><span class="font-extrabold" id="new-notification-actor">Like</span> <span class="text-tl-app-text-muted" id="new-reply-action">replied to your post</span></p>
+    <p class="line-clamp-2" id="new-reply-preview">replied to your post</p></div><div class="relative shrink-0"><button aria-label="More options" aria-haspopup="true"><svg></svg></button>
+    <div class="absolute right-0 top-full bg-tl-app-card border rounded-xl"><button type="button" class="w-full flex items-center text-left" id="notification-block"><svg class="lucide-ban"></svg>Block @Like</button></div></div></div></div>
+    <div class="border-b"><div class="relative w-full flex items-start gap-3"><button type="button" class="absolute inset-0 w-full h-full" aria-labelledby="outside-label"></button>
+    <div class="flex-1 min-w-0 pointer-events-none"><p><span class="font-extrabold">Home</span> <span id="fake-new-action">replied to your post</span></p></div></div></div>
+    <p id="outside-label">An unrelated label</p></main>`, '/notifications');
+  const open = f.document.getElementById('new-notification-open');
+  const avatar = f.document.getElementById('new-actor-avatar');
+  const block = f.document.getElementById('notification-block');
+  const action = f.document.getElementById('new-reply-action'); const node = action.firstChild;
+  let opens = 0; let avatars = 0; let blocks = 0;
+  open.addEventListener('click', () => opens++); avatar.addEventListener('click', () => avatars++); block.addEventListener('click', () => blocks++);
+  f.run(); f.run();
+  assert.equal(action.textContent, language === 'ja' ? 'さんがあなたのツイートに返信しました' : 'replied to your Tweet');
+  assert.equal(f.text('new-notification-actor'), 'Like'); assert.equal(f.text('new-reply-preview'), 'replied to your post');
+  assert.equal(f.text('fake-new-action'), 'replied to your post');
+  assert.equal(block.textContent, language === 'ja' ? '@Likeをブロック' : 'Block @Like');
+  assert.equal(open.getAttribute('aria-labelledby'), 'new-notification-action');
+  assert.equal(action.firstChild, node);
+  open.click(); avatar.click(); block.click(); assert.equal(opens, 1); assert.equal(avatars, 1); assert.equal(blocks, 1);
+  node.nodeValue = 'liked your post'; f.run(action);
+  assert.equal(action.textContent, language === 'ja' ? 'さんがあなたのツイートをお気に入りに登録しました' : 'favorited your Tweet');
+  assert.ok(f.document.querySelector('#new-notification .ct-notification-fav-icon'));
+  f.dom.window.qaClassic = false; f.qa.ctSyncLocalizationAppearance(); f.run();
+  assert.equal(action.textContent, language === 'ja' ? 'さんがあなたのツイートにいいねしました' : 'liked your post');
+  assert.equal(f.document.querySelector('#new-notification .ct-notification-fav-icon'), null);
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) test(`${language}: Tweet 2.3.0 mention metadata localizes the time without rewriting split handles or previews`, () => {
+  const f = fixture(language, `<main><div class="relative w-full flex items-start gap-3 border-b">
+    <button type="button" class="absolute inset-0 w-full h-full" aria-labelledby="mention-who mention-action"></button>
+    <div class="flex-1 min-w-0 pointer-events-none"><p class="truncate" id="mention-who"><span class="font-extrabold" id="mention-name">Like</span> <span class="text-tl-app-text-soft" id="mention-meta">@<!-- -->1h<!-- --> · <!-- -->2h</span></p>
+    <p id="mention-action">mentioned you</p><p class="line-clamp-3" id="mention-preview">mentioned you 2h</p></div></div></main>`, '/notifications');
+  const meta = f.document.getElementById('mention-meta'); const handle = meta.childNodes[2]; const time = meta.lastChild;
+  f.run(); f.run();
+  assert.equal(f.text('mention-name'), 'Like'); assert.equal(handle.nodeValue, '1h');
+  assert.equal(meta.textContent, language === 'ja' ? '@1h · 2時間前' : '@1h · 2h');
+  assert.equal(f.text('mention-action'), language === 'ja' ? 'あなたを@ツイートしました' : 'mentioned you');
+  assert.equal(f.text('mention-preview'), 'mentioned you 2h'); assert.equal(meta.lastChild, time);
+  time.nodeValue = '3m'; f.run(meta);
+  assert.equal(meta.textContent, language === 'ja' ? '@1h · 3分前' : '@1h · 3m');
+  f.dom.window.close();
+});
+
+test('en: Tweet 2.3.0 blocked-account settings restore native text when classic appearance is off', () => {
+  const native = 'When you block someone, they cannot view your posts or follow you, and you will not see their posts or notifications.';
+  const f = fixture('en', `<main><section><div><h4 class="font-extrabold">Blocked accounts</h4><p class="leading-relaxed" id="english-block-help">${native}</p></div>
+    <button class="truncate" id="english-block-name">Blocked accounts</button></section></main>`, '/settings');
+  const help = f.document.getElementById('english-block-help'); const textNode = help.firstChild;
+  f.run(); assert.match(help.textContent, /your Tweets/);
+  assert.equal(f.text('english-block-name'), 'Blocked accounts');
+  f.dom.window.qaClassic = false; f.qa.ctSyncLocalizationAppearance(); f.run();
+  assert.equal(help.textContent, native); assert.equal(help.firstChild, textNode);
+  f.dom.window.close();
 });

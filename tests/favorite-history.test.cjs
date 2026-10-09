@@ -145,6 +145,15 @@ test('optimistic or rolled-back Like never becomes a historical Favorite', async
   assert.equal(f.favorites.size, 0);
 });
 
+test('blocked timeline stubs and freshly blocked details are skipped without losing history progress',async t=>{
+  const f=harness(t);
+  f.respond=url=>url.pathname==='/api/posts/post-a'?detail(post('post-a',true,{status:'BLOCKED'})):
+    url.searchParams.get('scope')==='following'?page():page([{id:'blocked-stub',hasLiked:true,status:'BLOCKED'},post()]);
+  const status=await f.run();assert.equal(status.done,true);assert.equal(status.error,'');
+  assert.equal(status.recovered,0);assert.equal(f.favorites.size,0);
+  assert.equal(f.calls.some(call=>call.url.endsWith('/blocked-stub')),false);
+});
+
 test('repost wrappers normalize to fresh original IDs and never save a mismatched author or wrapper', async t => {
   const f = harness(t);
   f.respond = url => {

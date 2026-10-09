@@ -30,6 +30,7 @@ function harness(t) {
   w.removeFavorite = (id, uid) => f.removals.push({id,uid});
   w.renderFavoritesPanel = () => {};
   w.ctProfileMediaAssets = post => post.media_assets || [];
+  w.ctProfilePostEdited = post => post.isEdited === true || typeof post.editedAt === 'string' && !!post.editedAt.trim();
   w.ctProfileURL = value => /^https:\/\//.test(value || '') ? value : '';
   w.eval(`const API_ORIGIN='https://api.tweet.app'; const ctNetworkState={authUID:'account-a'}; const CT_LOCALE='ja'; ${timestampSource}
     let favoritesActive=false; ${mediaSource}
@@ -193,4 +194,33 @@ test('known detail Favorites include only the native legacy Post media image str
   f.article.insertAdjacentHTML('beforeend','<div class="mt-3 rounded-2xl overflow-hidden border"><img class="w-full object-cover cursor-pointer" alt="Post media" src="https://media.tweet.app/legacy.jpg"></div><img alt="Post media" src="https://media.tweet.app/body.jpg">');
   f.article.querySelector('[aria-label]').insertAdjacentHTML('beforeend','<div class="mt-3 rounded-2xl overflow-hidden border"><img class="w-full object-cover cursor-pointer" alt="Post media" src="https://media.tweet.app/quoted.jpg"></div>');
   assert.deepEqual([...f.candidate().media].map(asset=>asset.url),['https://media.tweet.app/legacy.jpg']);
+});
+
+test('captured native GIF video retains GIF metadata without changing regular or quoted video',t=>{
+  const f=harness(t);f.w.snapshotFavorite=()=>({id:'detail',text:'My post'});
+  f.article.insertAdjacentHTML('beforeend','<video aria-label="Animated GIF" src="https://media.tweet.app/gif.mp4"></video><video aria-label="GIFアニメーション" src="https://media.tweet.app/jp-gif.mp4"></video><video src="https://media.tweet.app/video.mp4"></video>');
+  f.article.querySelector('[aria-label]').insertAdjacentHTML('beforeend','<video aria-label="Animated GIF" src="https://media.tweet.app/quoted-gif.mp4"></video>');
+  const before=f.article.innerHTML,media=f.candidate().media;
+  assert.equal(media.length,3);assert.equal(media[0].isGIF,true);assert.equal(media[1].isGIF,true);
+  assert.equal(media[2].isGIF,undefined);assert.equal(f.article.innerHTML,before);
+});
+
+test('API-confirmed Favorites preserve edit metadata and GIF assets using the creation time',async t=>{
+  const f=harness(t),edited={...f.post(),isEdited:true,editedAt:'2026-10-09T10:00:00Z',media_assets:[{type:'video',url:'https://media.tweet.app/gif.mp4',isGIF:true}]};
+  f.response={posts:[edited],post:{...edited,hasLiked:true}};
+  const item=await f.w.qa.ctResolveFavorite(f.candidate(),'account-a');
+  assert.equal(item.isEdited,true);assert.equal(item.createdAt,date);assert.equal(item.media[0].isGIF,true);
+  const main=f.doc.createElement('main');f.article.before(main);main.append(f.article);f.button.setAttribute('aria-pressed','true');
+  const result=await f.w.qa.ctRestoreVisibleFavorites();assert.equal(result.saved,1);
+  assert.equal(f.saves[0].item.isEdited,true);assert.equal(f.saves[0].item.createdAt,date);assert.equal(f.saves[0].item.media[0].isGIF,true);
+  assert.equal(f.requests.some(url=>/like|favorite/.test(url)),false);
+});
+
+test('blocked native posts cannot resolve or restore a saved Favorite',async t=>{
+  const f=harness(t);f.response={posts:[{...f.post(),status:'BLOCKED'}]};
+  assert.equal(await f.w.qa.ctResolveFavorite(f.candidate(),'account-a'),null);
+  f.w.snapshotFavorite=()=>({id:'post-a',username:'alice',text:'My post'});
+  const main=f.doc.createElement('main');f.article.before(main);main.append(f.article);f.button.setAttribute('aria-pressed','true');
+  f.response={post:{...f.post(),hasLiked:true,status:'BLOCKED'}};
+  const result=await f.w.qa.ctRestoreVisibleFavorites();assert.equal(result.saved,0);assert.equal(f.saves.length,0);
 });

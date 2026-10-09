@@ -15,11 +15,19 @@ const script = fs.readFileSync(path.join(__dirname, '../classic-twitter-ja.user.
 const helperNames = new Set(['ctTranslationButtonText', 'ctTranslationControls', 'ctDeclaredLanguage', 'ctLikelyLanguage']);
 const helpers = [];
 const shippedFunctions = new Map();
+const shippedDeclarations = new Map();
 function visit(node) {
   if (!node || typeof node !== 'object') return;
   if (node.type === 'FunctionDeclaration') {
     shippedFunctions.set(node.id?.name, script.slice(node.start, node.end));
     if (helperNames.has(node.id?.name)) helpers.push(script.slice(node.start, node.end));
+  }
+  if (node.type === 'VariableDeclaration') {
+    for (const declaration of node.declarations) {
+      if (declaration.id?.type === 'Identifier' && declaration.id.name === 'ctNativeNotificationRowSelector') {
+        shippedDeclarations.set(declaration.id.name, script.slice(node.start, node.end));
+      }
+    }
   }
   for (const value of Object.values(node)) {
     if (Array.isArray(value)) value.forEach(visit);
@@ -38,8 +46,13 @@ const localizationNames = [
   'ctLocalizationClassicText', 'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
   'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber',
   'nativeTimestampJapaneseText', 'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
-  'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText', 'nativeMediaUploadJapaneseText'
+  'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText', 'nativeMediaUploadJapaneseText',
+  'nativeLocalizationMediaUpload', 'nativeLocalizationGIFMedia', 'nativeLocalizationBlockMenu',
+  'nativeLocalizationBlockDialog', 'nativeLocalizationBlockProfile', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError'
 ];
+assert.ok(shippedDeclarations.has('ctNativeNotificationRowSelector'), 'localization uses the shipped notification row selector');
+assert.ok(shippedFunctions.has('ctIsNativeNotificationRow'), 'localization uses the shipped notification row validator');
+const localizationNavigationSource = shippedDeclarations.get('ctNativeNotificationRowSelector') + '\n' + shippedFunctions.get('ctIsNativeNotificationRow');
 const jpMapStart = script.indexOf('  const JP = new Map([');
 const jpMapEnd = script.indexOf('\n  ]);', jpMapStart) + '\n  ]);'.length;
 const localizationSource = script.slice(jpMapStart, jpMapEnd) + localizationNames.map(name => {
@@ -117,6 +130,7 @@ function harness(t, html = '', options = {}) {
     ${browserNotifications}
     ${runtime}
     ${options.navigation ? navigation : ''}
+    ${options.localization && !options.navigation ? localizationNavigationSource : ''}
     ${options.localization ? localizationSource : ''}
     window.qa = { autoTranslationEnabled, patchAutoTranslation, ctOwnTranslationText,
       ctRememberTranslationChoice, patchFavoriteButtons, articleId, start, ctRunScan, ctScheduleScan,
@@ -527,6 +541,55 @@ test('v2.1.0 wrapped notification hearts remain vector stars before the observer
   assert.match(f.window.getComputedStyle(icon).getPropertyValue('mask'), /data:image\/svg\+xml/);
   assert.notEqual(f.window.getComputedStyle(f.document.getElementById('unrelated-heart')).visibility, 'hidden', 'a different button structure is not treated as a notification event');
 });
+
+for (const locale of ['ja', 'en']) {
+  test(`${locale}: 2.3 sibling-overlay notification hearts do not flash and classic OFF restores the live native icon`, async t => {
+    const currentRow = (id, border = false) => `<div id="${id}" class="relative w-full flex items-start gap-3 px-4 py-3.5 ${border ? 'border-b border-tl-app-border' : ''}">
+      <button id="${id}-event" type="button" aria-labelledby="${id}-label" class="absolute inset-0 w-full h-full cursor-pointer"></button>
+      <div class="mt-0.5 shrink-0 pointer-events-none"><svg class="lucide lucide-heart text-rose-500" width="28" height="28"><path id="${id}-heart"></path></svg></div>
+      <div class="flex-1 min-w-0 pointer-events-none"><p id="${id}-label">Alice liked your post</p></div><div class="relative z-10"><button id="${id}-menu">More</button></div>
+    </div>`;
+    const f = harness(t, `<div id="root-container"><main><div class="border-b">${currentRow('grouped')}</div>${currentRow('direct', true)}
+      <div class="border-b">${currentRow('unknown').replace('absolute inset-0', 'absolute top-0')}</div>
+      <button id="ordinary"><svg class="lucide-heart text-rose-500" width="28" height="28"><path id="ordinary-heart"></path></svg></button>
+      </main></div>`, { locale });
+    const grouped = f.document.getElementById('grouped');
+    const direct = f.document.getElementById('direct');
+    const event = f.document.getElementById('grouped-event');
+    const menu = f.document.getElementById('grouped-menu');
+    let eventClicks = 0, menuClicks = 0;
+    event.addEventListener('click', () => eventClicks++);
+    menu.addEventListener('click', () => menuClicks++);
+    const body = grouped.querySelector('p').firstChild;
+    f.qa.ctPrepareFavoritePresentation(); f.qa.start();
+    for (const row of [grouped, direct]) {
+      const iconContainer = row.children[1];
+      iconContainer.className = 'mt-0.5 shrink-0 pointer-events-none';
+      iconContainer.innerHTML = `<svg class="lucide lucide-heart text-rose-500" width="28" height="28"><path id="${row.id}-replacement"></path></svg>`;
+      const icon = iconContainer.firstElementChild;
+      assert.equal(f.window.getComputedStyle(icon.firstElementChild).visibility, 'hidden', 'React replacement is a star before any delayed scan');
+      assert.equal(f.window.getComputedStyle(icon).backgroundColor, 'rgb(255, 172, 51)');
+      assert.match(f.window.getComputedStyle(icon).getPropertyValue('mask'), /data:image\/svg\+xml/);
+    }
+    assert.notEqual(f.window.getComputedStyle(f.document.getElementById('unknown-heart')).visibility, 'hidden');
+    assert.notEqual(f.window.getComputedStyle(f.document.getElementById('ordinary-heart')).visibility, 'hidden');
+    f.settings.setClassicAppearance(false);
+    for (const row of [grouped, direct]) {
+      const icon = row.children[1].firstElementChild;
+      assert.notEqual(f.window.getComputedStyle(icon.firstElementChild).visibility, 'hidden');
+      assert.doesNotMatch(f.window.getComputedStyle(icon).getPropertyValue('mask'), /data:image\/svg\+xml/);
+    }
+    assert.equal(grouped.firstElementChild, event);
+    assert.equal(grouped.querySelector('p').firstChild, body);
+    event.click(); menu.click();
+    assert.equal(eventClicks, 1);
+    assert.equal(menuClicks, 1);
+    f.settings.setClassicAppearance(true);
+    assert.equal(f.window.getComputedStyle(f.document.getElementById('grouped-replacement')).visibility, 'hidden');
+    await f.flush();
+    assert.equal(f.document.querySelectorAll('#ct-favorite-presentation-style').length, 1);
+  });
+}
 
 test('classic appearance defaults on and persists independently of existing settings', t => {
   const f = harness(t, '', { values: {'autoTranslate.optInV2': true, 'existing-favorite-key': [{id:'saved'}]} });
