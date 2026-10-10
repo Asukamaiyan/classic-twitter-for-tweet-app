@@ -167,3 +167,14 @@ The verified notification row now contains an empty full-row button followed by 
 Use native GIF upload, native reply notifications, polls and account blocking. Translate only structurally confirmed native UI, including the current explicit image MIME list, upload progress/errors, GIF controls and block dialogs/settings. User content and editable text remain protected. Owned Media/Favorites rows retain optional GIF/edit metadata: loop and mute GIF-derived MP4 without starting playback, and show localized Edited beside the unchanged creation time. Old records and backups remain valid.
 
 Block/mute visibility checks precede saved-row display and native mutations invalidate those checks. Preserve stored history; unavailable visibility checks use a retryable status rather than exposing saved rows. Blocked native profile panels retain their own content instead of being mistaken for a timeline. No notification, upload, poll or block write API is added. Current first-party Tweet UI/bundle is the compatibility reference; no new visual reference or brand material is substituted.
+
+
+## 6.25.0 URL cards and Home link filter
+
+Only structurally verified original post bodies receive an owned URL card; names, bios, drafts, translations, notification rows and quote snippets remain untouched. Keep the original anchors and native event handlers. Use a compact bounded thumbnail and a text/domain fallback, with 44px Open/Copy/Share and manual Load/Retry controls. No iframe, HTML injection or animated preview image is used. Respect reduced motion.
+
+Fetch public HTTPS metadata and raster images directly via the existing anonymous GM request bridge, with concurrency, deadlines, byte/cache limits and cancellation. Do not send Tweet credentials or body text. Reject local/IP/nonstandard-port destinations, userinfo and credential-bearing queries; validate returned redirect and final URLs. Manager-internal redirect handling and DNS resolution are not guaranteed by host-label validation. `@connect *` is intentional for general URL cards and is disclosed in the install/update guides. Automatic OFF leaves manual loading available. Hidden pages, route/account changes, detached or reused rows cancel stale work and release owned nodes/blob URLs.
+
+The Home filter uses loaded, verified original link-bearing posts, leaves unknown layouts visible and shows coverage in an unboxed small line. OFF, route changes and destruction restore hidden native posts. No duplicate notification, poll, upload or reading-position function is added.
+
+Viewed references: [Open Graph protocol](https://ogp.me/) supplies metadata semantics; [Tampermonkey request documentation](https://www.tampermonkey.net/documentation.php#api:GM_xmlhttpRequest) supplies anonymous request/callback behavior. [Component Gallery Card](https://component.gallery/components/card/) informed the image/title/site hierarchy. Existing classic visual language is retained.

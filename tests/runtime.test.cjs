@@ -75,7 +75,7 @@ function harness(t, html = '', options = {}) {
   let nextID = 0;
   const timers = new Map();
   const intervals = new Map();
-  const stats = { scans: 0, refreshes: 0, installs: 0, roots: [] };
+  const stats = { scans: 0, refreshes: 0, installs: 0, roots: [], previewPatches: 0, previewCleanups: 0 };
   let hidden = false;
   let settings;
   Object.defineProperty(document, 'hidden', { get: () => hidden });
@@ -113,6 +113,8 @@ function harness(t, html = '', options = {}) {
   window.ctRunFavoriteHistory = async () => {};
   window.ctStopFavoriteHistory = () => {};
   window.ctRestartFavoriteHistory = async () => {};
+  window.ctLinkPreviewsPatch = () => { stats.previewPatches += 1; };
+  window.ctLinkPreviewsCleanup = () => { stats.previewCleanups += 1; };
   if (options.navigation) {
     window.API_ORIGIN = 'https://api.tweet.app';
     window.ctNetworkState = { authUID: 'fixture-viewer' };
@@ -355,6 +357,48 @@ test('observer settles after own scan writes and batches dynamic navigation and 
   f.window.dispatchEvent(new f.window.PopStateEvent('popstate'));
   await f.advance(100); assert.equal(f.stats.scans, 4, 'route changes are debounced into one page pass');
   assert.equal(f.stats.refreshes, 3);
+});
+
+test('URL preview setting persists before cleanup and failed storage leaves active work untouched', async t => {
+  const f = harness(t);
+  f.qa.start();
+  assert.equal(f.settings.getLinkPreviews(), true);
+  f.settings.setLinkPreviews(false);
+  assert.equal(f.values.get('ct-link-previews-enabled-v1'), false);
+  assert.equal(f.settings.getLinkPreviews(), false);
+  assert.equal(f.stats.previewCleanups, 1);
+  assert.equal(f.stats.previewPatches, 1);
+  await f.advance(100);
+  const g = harness(t, '', { storageFailure: true });
+  g.qa.start();
+  assert.throws(() => g.settings.setLinkPreviews(false), /Storage unavailable/);
+  assert.equal(g.settings.getLinkPreviews(), true);
+  assert.equal(g.stats.previewCleanups, 0);
+  assert.equal(g.stats.previewPatches, 0);
+});
+
+test('URL preview lifecycle cancels on relevant storage, background and pagehide, while href edits rescan', async t => {
+  const f = harness(t, '<main><article><p><a id="url" href="https://ogp.me/">link</a></p></article></main>');
+  f.qa.start();
+  f.window.dispatchEvent(new f.window.StorageEvent('storage', { key: 'unrelated' }));
+  assert.equal(f.stats.previewCleanups, 0);
+  f.values.set('ct-link-previews-enabled-v1', false);
+  f.window.dispatchEvent(new f.window.StorageEvent('storage', { key: 'ct-link-previews-enabled-v1' }));
+  assert.equal(f.stats.previewCleanups, 1);
+  assert.equal(f.settings.getLinkPreviews(), false);
+  await f.advance(100);
+  const before = f.stats.scans;
+  f.document.getElementById('url').setAttribute('href', 'https://example.com/changed');
+  await f.advance(100);
+  assert.equal(f.stats.scans, before + 1, 'a reused native link updates its card without polling');
+  f.hidden(true);
+  assert.equal(f.stats.previewCleanups, 2);
+  f.hidden(false); await f.advance(100);
+  f.window.dispatchEvent(new f.window.Event('pagehide'));
+  assert.equal(f.stats.previewCleanups, 3);
+  f.window.dispatchEvent(new f.window.PageTransitionEvent('pageshow', { persisted: true }));
+  await f.advance(100);
+  assert.equal(f.intervals.size, 0);
 });
 
 test('busy translation controls are reconsidered when native loading finishes', async t => {

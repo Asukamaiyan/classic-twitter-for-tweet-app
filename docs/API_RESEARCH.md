@@ -1,5 +1,13 @@
 # Tweet.app API / userscript enhancement research
 
+## 2026-10-10: URL preview boundary
+
+The publicly referenced Tweet 2.3.0 bundle `index-DwZGTvzZ.js` remains the asset inspected on 2026-10-09 (SHA-256 in the 2026-10-09 section below). The observed post URL tokenizer renders ordinary anchors; no public card renderer or post-preview API contract was found in that client. This does not establish that no private or future server capability exists.
+
+Host validation rejects explicit local names and IP literals; it is not DNS pinning. Returned redirect/final URLs are checked, but managers control intermediate redirect behavior. The pinned [Stay request bridge](https://github.com/shenruisi/Stay/blob/9b78d761d307234d4ed5ea72ac423804ea0c4301/Stay%20Extension/Resources/background.js) does not implement a manual-redirect option; this source observation is not current physical Stay acceptance.
+
+The local URL-card feature uses [Open Graph](https://ogp.me/) metadata from public HTTPS link destinations and validated image hosts, via anonymous GM requests. It adds no Tweet API/write endpoint, no external preview proxy, and sends no Tweet auth or post body. `@connect *` is an intentional new userscript permission, described in the guides. Links remain usable when metadata or images cannot be read. Unsafe destinations and credential-bearing queries are excluded from automatic/manual metadata reads. Native TweetNest uses its own anonymous ephemeral URLSession under equivalent limits; its in-app service login remains unsupported.
+
 ## 2026-10-09: Tweet 2.3.0 compatibility refresh
 
 Read the current signed-in UI and the public asset referenced by [the application HTML](https://app.tweet.app/). The UI shows 2.3.0 / build 1791512375. The first-party [index-DwZGTvzZ.js](https://app.tweet.app/assets/index-DwZGTvzZ.js) is 1,716,154 bytes, SHA-256 `a9cb81e99b523222f7b84d23fda9a89b625095e59bf73771bbfdfdbc03ebfd7c`. The following API shapes are public client-code observations; they do not establish a supported third-party contract or authenticated acceptance.

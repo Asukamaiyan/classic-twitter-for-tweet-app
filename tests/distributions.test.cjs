@@ -36,6 +36,8 @@ test('six editions preserve existing identifiers and share their platform implem
     assert.equal(source.match(/^\/\/ @version\s+(.+)$/m)?.[1], releaseVersion);
     assert.match(source, new RegExp(`const CT_LOCALE = '${locale}'`));
     assert.match(source, new RegExp(`const CT_PLATFORM = '${platform}'`));
+    assert.match(source, /^\/\/ @connect\s+\*$/m, 'general public URL cards have an explicit connection permission');
+    assert.match(source, /function ctLinkPreviewsPatch\(/, 'all editions include the same URL-card module');
     for (const host of ['news.yahoo.co.jp', 'news.web.nhk', 'www.nikkansports.com', 'rss.itmedia.co.jp']) {
       assert.equal(source.includes(`// @connect      ${host}`), true, 'each publisher uses an explicit public feed permission');
     }
@@ -240,6 +242,14 @@ for (const { file, locale } of distributions) {
         window.document.querySelector('[data-ct-news-region="jp"]').click();
         await new Promise(resolve => setTimeout(resolve,200));
       }
+      // A request starting inside a debounced scan can finish after a fixed
+      // delay on a busy runner. Wait for the real completion, with a deadline;
+      // never treat a missing headline or a recurring scan as success.
+      const headlineDeadline = Date.now() + 5000;
+      while (!window.document.querySelector('.ct-news-article h3') && Date.now() < headlineDeadline) {
+        await new Promise(resolve => setTimeout(resolve,25));
+      }
+      assert.ok(window.document.querySelector('.ct-news-article h3'), 'news completion must render a headline within 5 seconds');
       assert.equal(requests.length,2);
       assert.equal(requests.every(request => request.anonymous && request.responseType === 'text'),true);
       assert.equal(window.document.querySelector('.ct-news-article h3').textContent,'国内の新しいニュース');

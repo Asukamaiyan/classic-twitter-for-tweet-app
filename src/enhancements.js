@@ -1,5 +1,5 @@
 /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getLinkPreviews, setLinkPreviews, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -7,6 +7,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     tools: '便利ツール', title: '便利ツール', close: '閉じる',
     appearance: '昔のTwitterの表示', classic: 'クラシック表示を使う', classicHelp: '青いナビゲーションと星のお気に入り。オフにするとハート・いいね表記・Tweet標準の色や形に戻ります。日本語化と便利機能はそのまま使えます。動きを減らす端末設定にも対応します。',
     scope: '表示設定・キーワード・保存検索・保存投稿は、このブラウザ内で共有します。お気に入りの履歴はログインアカウント別です。',
+    links: 'URLカードとリンク', linksAutomatic: 'URLカードを自動で取得する',
+    linksHelp: '表示中の投稿のリンク先と画像配信元へ直接通信します。ログイン情報や投稿本文は送りません。オフでもカードの「プレビューを取得」から手動で読めます。サイトによってはアクセス許可が必要です。',
+    linksOnly: 'ホームでリンク付き投稿だけ表示する', linksOnlyHelp: '読み込み済みの投稿だけを絞り込みます。詳細・返信・通知・プロフィールには適用しません。',
+    linksCount: (shown, total) => `リンク付きのみ · 確認済み ${shown} / ${total}件`, linksAll: 'すべて表示',
     filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
     words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
     save: 'フィルターを保存', saved: '設定を保存しました。', searches: '保存した検索',
@@ -49,6 +53,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     tools: 'Tools', title: 'Tools', close: 'Close',
     appearance: 'Classic Twitter appearance', classic: 'Use classic appearance', classicHelp: 'Blue navigation and star favorites. Turn off to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available. Respects your reduced motion preference.',
     scope: 'Appearance, keywords, saved searches and saved links are shared within this browser. Favorites history is saved separately for each signed-in account.',
+    links: 'URL cards and links', linksAutomatic: 'Automatically load URL previews',
+    linksHelp: 'Reads visible posts’ destination pages and image hosts directly, without sign-in credentials or post text. Turn off for manual Load preview. A site permission may be required.',
+    linksOnly: 'Show only posts with links on Home', linksOnlyHelp: 'Filters only loaded posts. Does not filter details, replies, notifications or profiles.',
+    linksCount: (shown, total) => `Links only · ${shown} / ${total} verified posts`, linksAll: 'Show all',
     filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
     words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
     save: 'Save filters', saved: 'Settings saved.', searches: 'Saved searches',
@@ -94,7 +102,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   const unique = values => values.filter((value, index, all) =>
     all.findIndex(other => normalize(other) === normalize(value)) === index);
   const postPathPattern = /^\/post\/[A-Za-z0-9_-]{1,200}$/;
-  let state = { version: 1, enabled: false, keywords: [], searches: [], bookmarks: [] };
+  let state = { version: 1, enabled: false, linksOnly: false, keywords: [], searches: [], bookmarks: [] };
   let loadError = '';
   let lastSavedRaw = null;
   try {
@@ -103,6 +111,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     if (raw) {
       const parsed = JSON.parse(raw);
       if (!parsed || parsed.version !== 1 || typeof parsed.enabled !== 'boolean' ||
+          (parsed.linksOnly !== undefined && typeof parsed.linksOnly !== 'boolean') ||
           !Array.isArray(parsed.keywords) || !Array.isArray(parsed.searches) ||
           parsed.keywords.length > 30 || parsed.searches.length > 20 ||
           parsed.keywords.some(s => typeof s !== 'string' || !s.trim() || s.length > 80) ||
@@ -112,7 +121,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
               typeof item.label !== 'string' || !item.label.trim() || item.label.length > 200)))) {
         throw new Error('Invalid local settings');
       }
-      state = { version: 1, enabled: parsed.enabled,
+      state = { version: 1, enabled: parsed.enabled, linksOnly: parsed.linksOnly === true,
         keywords: unique(parsed.keywords.map(s => s.trim())),
         searches: unique(parsed.searches.map(s => s.trim())),
         bookmarks: (parsed.bookmarks || []).filter((item, index, all) => all.findIndex(other => other.path === item.path) === index)
@@ -160,6 +169,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     #ct-local-tools #ct-local-tools-status { margin:0; font-size:13px; overflow-wrap:anywhere; }
     #ct-local-tools-status[data-error=true] { color:var(--color-tl-app-danger, #c23636); }
     article.ct-keyword-collapsed > :not(.ct-keyword-notice) { display:none !important; }
+    article.ct-links-filter-hidden { display:none !important; }
+    .ct-links-filter-summary { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:4px 12px; font:13px/1.5 system-ui,sans-serif; color:var(--color-tl-app-text-muted,#536471); }
+    .ct-links-filter-summary button { min-height:44px; padding:4px 8px; font:inherit; border:0; color:var(--color-tl-app-primary,#1688d4); background:transparent; cursor:pointer; }
+    .ct-links-filter-summary button:focus-visible { outline:3px solid var(--color-tl-app-primary,#1688d4); outline-offset:2px; }
     .ct-keyword-notice { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 0; font:13px/1.5 system-ui,sans-serif; }
     .ct-keyword-notice span { flex:1; min-width:140px; }
     @media (min-width:1024px) { #ct-local-tools { --ct-base-gap:20px; } }
@@ -188,7 +201,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   document.body.append(root);
 
   function openPanel(open, moveFocus = true) {
-    if (open) { updateBookmarkControl(); refreshAppearance(); }
+    if (open) { updateBookmarkControl(); refreshAppearance(); refreshLinkPreviews(); }
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open && moveFocus) close.focus({ preventScroll: true });
@@ -274,6 +287,36 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     });
     body.append(section);
   }
+
+  let refreshLinkPreviews = () => {};
+  const linksSection = element('section');
+  linksSection.append(element('h3', copy.links));
+  if (typeof getLinkPreviews === 'function' && typeof setLinkPreviews === 'function') {
+    const label = element('label');
+    const input = element('input', undefined, { type:'checkbox', id:'ct-local-link-previews', 'aria-describedby':'ct-local-link-help' });
+    refreshLinkPreviews = () => { input.checked = getLinkPreviews() === true; };
+    refreshLinkPreviews();
+    label.append(input, document.createTextNode(copy.linksAutomatic));
+    input.addEventListener('change', () => {
+      const requested = input.checked;
+      try {
+        if (setLinkPreviews(requested) === false || getLinkPreviews() !== requested) throw new Error('Setting was not saved');
+        announce(copy.saved);
+      } catch { announce(copy.storageError, true); }
+      refreshLinkPreviews();
+    });
+    linksSection.append(label, element('p', copy.linksHelp, { id:'ct-local-link-help', class:'ct-local-note' }));
+  }
+  const linksOnlyLabel = element('label');
+  const linksOnly = element('input', undefined, { type:'checkbox', id:'ct-local-links-only', 'aria-describedby':'ct-local-links-only-help' });
+  linksOnly.checked = state.linksOnly;
+  linksOnlyLabel.append(linksOnly, document.createTextNode(copy.linksOnly));
+  linksOnly.addEventListener('change', () => {
+    if (persist({ ...state, linksOnly:linksOnly.checked })) refresh();
+    else linksOnly.checked = state.linksOnly;
+  });
+  linksSection.append(linksOnlyLabel, element('p', copy.linksOnlyHelp, { id:'ct-local-links-only-help', class:'ct-local-note' }));
+  body.append(linksSection);
 
   let refreshTranslation = () => {};
   if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {
@@ -509,6 +552,51 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
 
   let reveals = new WeakMap();
   const collapsed = new Set();
+  const linksHidden = new Set();
+  let linksSummary = null;
+  function originalBodyNodes(article) {
+    return [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')]
+      .filter(p => p.closest('article') === article &&
+        !p.closest('[data-ct-owned],[data-ct-local-ui],blockquote,[data-testid="quote-tweet"],[aria-label^="Quoted post"],input,textarea,[contenteditable]') &&
+        !p.querySelector('input,textarea,[contenteditable]'));
+  }
+  function hasOriginalLink(nodes) {
+    return nodes.some(p => [...p.querySelectorAll('a[href]')].some(a => {
+      if (a.closest('[data-ct-owned],[data-ct-local-ui],blockquote,[data-testid="quote-tweet"],[aria-label^="Quoted post"]')) return false;
+      try { const url = new URL(a.getAttribute('href'), location.origin); return ['https:', 'http:'].includes(url.protocol) && url.origin !== location.origin; }
+      catch { return false; }
+    }));
+  }
+  function refreshLinksFilter() {
+    const active = state.linksOnly && /^\/(?:feed\/?)?$/.test(location.pathname);
+    const verified = active ? [...document.querySelectorAll('main article')]
+      .filter(article => !article.closest('[data-ct-owned],[data-ct-local-ui]'))
+      .map(article => ({ article, nodes:originalBodyNodes(article) })).filter(row => row.nodes.length) : [];
+    const unwanted = new Set(verified.filter(row => !hasOriginalLink(row.nodes)).map(row => row.article));
+    for (const article of [...linksHidden]) if (!unwanted.has(article)) {
+      article.classList.remove('ct-links-filter-hidden'); linksHidden.delete(article);
+    }
+    for (const article of unwanted) if (!linksHidden.has(article)) {
+      article.classList.add('ct-links-filter-hidden'); linksHidden.add(article);
+    }
+    const parent = verified[0]?.article.parentElement;
+    if (!active || !parent) { linksSummary?.remove(); linksSummary = null; return; }
+    if (!linksSummary || linksSummary.parentElement !== parent) {
+      linksSummary?.remove();
+      linksSummary = element('div', undefined, { class:'ct-links-filter-summary', 'data-ct-local-ui':'' });
+      const label = element('span', '', { role:'status', 'aria-live':'polite' });
+      const clear = element('button', copy.linksAll, { type:'button' });
+      clear.addEventListener('click', event => {
+        event.stopPropagation();
+        if (persist({ ...state, linksOnly:false })) { linksOnly.checked = false; refresh(); toggle.focus({ preventScroll:true }); }
+      });
+      linksSummary.append(label, clear);
+      parent.insertBefore(linksSummary, verified[0].article);
+    }
+    const label = linksSummary.firstElementChild;
+    const value = copy.linksCount(verified.length - unwanted.size, verified.length);
+    if (label.textContent !== value) label.textContent = value;
+  }
   function articleText(article) {
     // Both native post and reply components use this paragraph class. Avoid
     // matching author names, buttons, composer text, or nested reply articles.
@@ -524,6 +612,8 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   function refresh() {
     refreshBrowserNotifications();
+    refreshLinkPreviews();
+    refreshLinksFilter();
     updateBookmarkControl();
     for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);
     if (!state.enabled && collapsed.size === 0) return;
@@ -735,6 +825,8 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     window.removeEventListener('resize', queueViewport);
     if (viewportFrame != null) window.cancelAnimationFrame(viewportFrame);
     for (const article of [...collapsed]) uncollapse(article);
+    for (const article of linksHidden) article.classList.remove('ct-links-filter-hidden');
+    linksHidden.clear(); linksSummary?.remove();
     root.remove();
     style.remove();
   } };

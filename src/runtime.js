@@ -527,7 +527,7 @@
   let ctScanConversationPanels = new WeakSet();
   let ctScanConversationPath = location.pathname;
   const ctScanOwnedSelector = '[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel';
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-selected', 'aria-current', 'role', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'data-app-theme'];
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-selected', 'aria-current', 'role', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'href', 'data-app-theme'];
 
   function ctScanElement(node) {
     return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
@@ -700,11 +700,15 @@
 
   let ctTools = null;
   let ctBrowserNotifications = null;
+  const ctLinkPreviewsSettingKey = 'ct-link-previews-enabled-v1';
+  function ctGetLinkPreviewsEnabled() {
+    return loadJSON(ctLinkPreviewsSettingKey, true) !== false;
+  }
 
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.24.0';
+    document.documentElement.dataset.ctActiveVersion = '6.25.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -715,6 +719,13 @@
     });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
+      getLinkPreviews: ctGetLinkPreviewsEnabled,
+      setLinkPreviews: enabled => {
+        if (!saveJSON(ctLinkPreviewsSettingKey, enabled === true)) throw new Error('Storage unavailable');
+        ctLinkPreviewsCleanup();
+        ctLinkPreviewsPatch(document);
+        ctScheduleScan();
+      },
       browserNotifications: ctBrowserNotifications,
       restoreVisibleFavorites: ctRestoreVisibleFavorites,
       getFavoriteHistoryStatus: ctFavoriteHistoryStatus,
@@ -750,6 +761,12 @@
     document.addEventListener('click', ctRememberTranslationChoice, true);
     ctRunScan();
     window.addEventListener('popstate', ctScheduleScan);
+    window.addEventListener('storage', event => {
+      if (event.key !== ctLinkPreviewsSettingKey && event.key !== null) return;
+      ctLinkPreviewsCleanup();
+      ctTools?.refresh();
+      ctScheduleScan();
+    });
     for (const name of ['pushState', 'replaceState']) {
       const original = history[name];
       history[name] = function (...args) {
@@ -762,6 +779,7 @@
       if (document.hidden) {
         observer.disconnect(); clearTimeout(ctScanTimer); ctScanTimer = null;
         ctScanFull = false; ctScanRoots.clear(); ctCancelTranslations();
+        ctLinkPreviewsCleanup();
       } else { ctObserve(); ctScheduleScan(); }
     });
     window.addEventListener('pagehide', () => {
@@ -771,6 +789,7 @@
       ctScanTimer = null;
       ctScanFull = false; ctScanRoots.clear();
       ctCancelTranslations();
+      ctLinkPreviewsCleanup();
     });
     window.addEventListener('pageshow', event => {
       if (event.persisted && !ctPageActive) {
