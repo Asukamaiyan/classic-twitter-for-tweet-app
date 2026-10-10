@@ -28,6 +28,70 @@ function acknowledgeNativeSearch(input) {
   input.parentElement.append(button);
 }
 
+test('link preview toggle reflects persisted state and restores its checkbox after a save failure', t => {
+  let automatic = true, reject = false;
+  const { document, controller } = setup(t, { options:{
+    getLinkPreviews:() => automatic,
+    setLinkPreviews:value => { if (reject) return false; automatic = value; }
+  }});
+  const input = document.getElementById('ct-local-link-previews');
+  assert.equal(input.checked, true);
+  input.click(); assert.equal(automatic, false); assert.equal(input.checked, false);
+  reject = true; input.click(); assert.equal(input.checked, false);
+  assert.match(document.getElementById('ct-local-tools-status').textContent, /Could not save/);
+  automatic = true; controller.refresh(); assert.equal(input.checked, true);
+  assert.match(document.getElementById('ct-local-link-help').textContent, /directly.*without sign-in credentials or post text/);
+});
+
+test('links-only Home filter preserves native nodes, counts verified originals and can be cleared immediately', t => {
+  const html = post('plain', 'Ordinary post') + post('linked', '<a href="https://example.com/article">Read more</a>') +
+    post('quoted', '<blockquote><a href="https://example.com/quote">Quoted link</a></blockquote>') +
+    '<article id="unknown"><span>Unknown native layout</span></article>';
+  const { window, document, controller } = setup(t, { html });
+  const plain = document.getElementById('plain'), linked = document.getElementById('linked');
+  const original = linked.innerHTML;
+  document.getElementById('ct-local-links-only').click();
+  assert.equal(plain.classList.contains('ct-links-filter-hidden'), true);
+  assert.equal(linked.classList.contains('ct-links-filter-hidden'), false);
+  assert.equal(document.getElementById('unknown').classList.contains('ct-links-filter-hidden'), false);
+  assert.equal(linked.innerHTML, original);
+  assert.match(document.querySelector('.ct-links-filter-summary').textContent, /1 \/ 3 verified posts/);
+  assert.equal(JSON.parse(window.localStorage.getItem(KEY)).linksOnly, true);
+  document.querySelector('.ct-links-filter-summary button').click();
+  assert.equal(document.querySelector('.ct-links-filter-hidden'), null);
+  assert.equal(document.querySelector('.ct-links-filter-summary'), null);
+  assert.equal(document.getElementById('ct-local-links-only').checked, false);
+  controller.destroy(); assert.equal(document.getElementById('plain'), plain);
+});
+
+test('links-only filtering ignores preview-owned and quoted anchors, restores after route changes and reacts to reused bodies', t => {
+  const { document, window, controller } = setup(t, { settings:state({ linksOnly:true }), html:
+    post('a', '<a href="https://example.com/article">External</a>') +
+    post('b', '<span data-ct-owned><a href="https://example.com/preview">Preview</a></span>') });
+  const a = document.getElementById('a'), b = document.getElementById('b');
+  assert.equal(a.classList.contains('ct-links-filter-hidden'), false);
+  assert.equal(b.classList.contains('ct-links-filter-hidden'), true);
+  a.querySelector('a').setAttribute('href', '/user/someone'); controller.refresh();
+  assert.equal(a.classList.contains('ct-links-filter-hidden'), true);
+  window.history.pushState({}, '', '/post/example'); controller.refresh();
+  assert.equal(document.querySelector('.ct-links-filter-hidden'), null);
+  window.history.pushState({}, '', '/feed'); controller.refresh();
+  assert.equal(a.classList.contains('ct-links-filter-hidden'), true);
+  controller.destroy(); assert.equal(document.querySelector('.ct-links-filter-hidden'), null);
+});
+
+test('old Tools settings preserve searches and bookmarks when links-only is added, while invalid optional values fail validation', t => {
+  const saved = state({ searches:['my search'], bookmarks:[{path:'/post/my-post',label:'My note'}] });
+  const { document, window } = setup(t, { settings:saved, html:post('a', 'Plain') });
+  assert.equal(document.getElementById('ct-local-links-only').checked, false);
+  document.getElementById('ct-local-links-only').click();
+  const result = JSON.parse(window.localStorage.getItem(KEY));
+  assert.deepEqual(result.searches, saved.searches); assert.deepEqual(result.bookmarks, saved.bookmarks);
+  const invalid = setup(t, { settings:state({ linksOnly:'yes' }) });
+  assert.match(invalid.document.getElementById('ct-local-tools-status').textContent, /Could not read/);
+  assert.equal(invalid.document.getElementById('ct-local-links-only').checked, false);
+});
+
 test('filters are opt-in and tools are keyboard-accessible', t => {
   const { document, window } = setup(t, { html: post('a', 'News about sports') });
   assert.equal(document.querySelector('.ct-keyword-collapsed'), null);

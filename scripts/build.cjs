@@ -9,7 +9,7 @@ for (const { locale, file, platform, name } of distributions) {
   source = source.replace('/* @platform */', `const CT_PLATFORM = '${platform}';`);
   if (name) source = source.replace(/^\/\/ @name\s+.*$/m, `// @name         ${name}`);
   source = source.replace('/* @safari-grants */', safari ? '// @connect      firebasestorage.googleapis.com\n// @connect      storage.googleapis.com' : '');
-  for (const part of ['timestamps', 'network', 'browser-notifications', 'enhancements', 'translation', 'classic', 'motion', 'runtime', 'presentation', 'photo-viewport', 'profile', 'favorite-capture', 'reply-times', 'favorite-history', 'navigation', 'notification-filters', 'badges', 'media', 'news']) {
+  for (const part of ['timestamps', 'network', 'browser-notifications', 'enhancements', 'translation', 'classic', 'motion', 'runtime', 'presentation', 'photo-viewport', 'profile', 'favorite-capture', 'reply-times', 'favorite-history', 'navigation', 'notification-filters', 'badges', 'media', 'news', 'link-preview']) {
     source = source.replace(`/* @include ${part} */`, read(`src/${part}.js`));
   }
   source = source.replace('/* @include safari */', safari ? read('src/safari-extras.js') : '');

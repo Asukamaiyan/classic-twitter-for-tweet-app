@@ -1,5 +1,13 @@
 # Changelog
 
+## All distributions v6.25.0 — 2026-10-10
+
+All six editions are published on Greasy Fork with matching generated code and complete guides. Final automated checks pass 740 tests; controlled Chromium checks cover both narrow and desktop widths. Physical Safari/Stay and Android acceptance remains separate and was not performed for this release.
+
+Add URL cards for verified original post bodies in native feeds, details/replies and owned Media/Favorites rows. Keep original URLs, post text and native handlers. Direct anonymous HTTPS reads supply public Open Graph/title/description and bounded raster thumbnails, with no preview proxy. Add Open, Copy, Share, manual loading, retry and an automatic-preview setting. Public HTTPS destinations and redirects are validated; local/IP URLs and credential-bearing metadata requests are rejected.
+
+Add a reversible Home links-only filter with loaded/verified coverage, retaining unknown layouts and restoring posts on route or setting changes. Preserve edition identities, grants and existing storage; intentionally add `@connect *` for arbitrary public link metadata and explain the new site-access permission in all six guides. Publication and acceptance evidence are recorded separately in VALIDATION.md.
+
 ## All distributions v6.24.0 — 2026-10-09
 
 All six 6.24.0 editions are published on Greasy Fork with matching generated code and complete installation/update guides. This compatibility update targets the inspected Tweet 2.3.0 web client. Automated and controlled-browser validation passed; physical Safari/Stay and Android acceptance was not performed for this release. Detailed evidence is recorded in VALIDATION.md.

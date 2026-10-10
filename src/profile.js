@@ -790,7 +790,8 @@
       edited.textContent = ctProfileText('編集済み', 'Edited'); meta.append(edited);
     }
     main.append(meta);
-    if (item.text) { const text = document.createElement('p'); text.className = 'ct-profile-text'; text.textContent = item.text; main.append(text); }
+    if (item.text) { const text = document.createElement('p'); text.className = 'ct-profile-text';
+      text.dataset.ctLinkPreviewSource = 'original'; text.textContent = item.text; main.append(text); }
     const images = (item.media || []).filter(asset => asset.type === 'image');
     if (images.length) {
       const gallery = document.createElement('div'); gallery.className = 'ct-profile-gallery';
@@ -842,6 +843,7 @@
     if (typeof ctMediaEnhanceVideo === 'function') {
       for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
     }
+    if (typeof ctLinkPreviewsPatch === 'function') ctLinkPreviewsPatch(panel);
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
   function ctProfileFavoriteMuteState() {

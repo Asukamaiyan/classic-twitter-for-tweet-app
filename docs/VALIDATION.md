@@ -1,3 +1,23 @@
+# 6.25.0 URLカード検証
+
+2026-10-10。元の本文とリンクを保持するURLカードを全6版へ追加しました。現行Tweet 2.3.0の公開bundleの調査範囲はAPI_RESEARCH.mdに記録しています。
+
+- 最終の `npm run check` は**740 PASS、0 FAIL、0 SKIP**。6生成版の構文検査、URLカード20件、設定・リンク表示フィルター、元のプロフィール・写真・ニュース・日本語化・通知等の回帰を含みます。
+- 初回全体実行は738 PASS／2 FAIL。ニュースの2ケースが固定350ms待ちの後に未表示の見出しを参照しました。news本体は変更せず、実際の見出し表示を上限5秒で待つ検証にし、最後に740件を全て再実行して成功。初回ログも保存しています。
+- 公開ページの実取得は、実モジュールの通信／parserへ匿名Node Fetchアダプターを接続して確認。Tapbots IvoryのOGPとJPEG、MozillaからFirefoxへの公開redirect・OGP・PNGを取得しました。これは実際のGM管理アプリやSafari/Stay実機の証明ではありません。
+- 独立の読み取りレビューで、credential query、本文／script／comment中の偽メタ情報、停止・cache・blob解放・件数／bytes上限・小画面の操作領域・旧保存互換を確認し、指摘を修正しました。全6版のmetadataは6.24.0に対して版番号と意図した `@connect *` の追加のみが差分です。既存grant・identity・配布URLは保持しています。
+- host文字列と返されたredirect/finalURLを検証します。DNS解決先の固定や、管理アプリが内部で追う全redirectの抑止は保証しません。公開Stay bridgeのredirect option未実装とbinary整数配列を考慮していますが、現行Stay実機の挙動は未確認です。
+- 物理iPhone・Androidを操作していません。公開HTTPSページ・画像の匿名読み込みだけを追加し、Tweet auth／本文を送りません。Tweetへの投稿等のwrite API、外部preview proxy、新規依存は追加していません。
+
+- Chromiumの制御fixtureで全6生成版×390/1280pxの12ケースが成功。タイトル・320×160px検証画像・44px操作・横overflowなし・下書き保持を確認。架空の投稿／画像／通信を明示した開発検証であり、実アカウントや外部通信は使っていません。Safari/Stay／Firefox実行エンジンそのものの証拠ではありません。
+- 同じブラウザのDOM handlerで13項目が成功。自動OFFの保存・処理停止・画像参照の解放、OFF中の手動取得、元本文とanchor identity、元のお気に入りhandler、Home filterの3/4確認範囲・詳細/Show allの復帰、再利用anchorの変更を確認。Copy/Shareの行先は検証用アダプターで取得した元URLであり、OSクリップボード／共有先の受け入れとは区別します。ブラウザIPCの一時timeoutがありましたが、12ケースは各画像の実decode完了後に収集しました。
+- GitHub [PR #25](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/25)の実装commit `15528d4` のpush／PR CIは2件成功。Greasy Forkの既存6 IDへ6.25.0を公開し、送信前に全コード・全案内のSHA256を照合。限定公開・HTML・adult=falseの設定を保持しました。
+- 通常の6コードURL＋6案内URLを匿名GET（計12件、再試行なし）し、全HTTP200、コード／ページとも6.25.0を確認。全コードは正当なGF追加download/update metadataと改行・末尾空白だけを正規化して一致。全案内は順序付きの非空見出し・段落・全リスト項目・全表セルと全リンクラベル／行先が一致し、未比較の非空textは許容していません。導入済みStay／Tampermonkey自体をこの公開操作で更新したとは扱いません。
+
+証跡はリポジトリ外 `outputs/url-cards-6.25.0/` の `full-check-final.txt`、`browser-card-audit.json`、`browser-interactions.json`、`publication-submit-checks.json`、`public-code-checks.json`、`greasyfork-6.25.0.png`、`ci-implementation.json` と `outputs/link-preview-2026-10-10/validation/userscript-public-probe.json` に保存しています。最終head／mainのCIは `ci-final.json`／`ci-main.json` に別途記録します。過去の記録は以下に保持します。
+
+---
+
 # 6.24.0 検証記録
 
 2026-10-09。現行Tweet 2.3.0 / build 1791512375のUIと、HTMLが参照する公開bundleを照合しました。最新bundleと匿名media configの日時・SHA256はリポジトリ外 `outputs/release-6.24.0/research/fetch-manifest.json`、契約の範囲はAPI_RESEARCH.mdに記録しています。
