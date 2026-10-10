@@ -9,7 +9,12 @@
 - host文字列と返されたredirect/finalURLを検証します。DNS解決先の固定や、管理アプリが内部で追う全redirectの抑止は保証しません。公開Stay bridgeのredirect option未実装とbinary整数配列を考慮していますが、現行Stay実機の挙動は未確認です。
 - 物理iPhone・Androidを操作していません。公開HTTPSページ・画像の匿名読み込みだけを追加し、Tweet auth／本文を送りません。Tweetへの投稿等のwrite API、外部preview proxy、新規依存は追加していません。
 
-ブラウザ操作とGreasy Fork公開の最終記録は確認後に追記します。証跡はリポジトリ外 `outputs/url-cards-6.25.0/` と `outputs/link-preview-2026-10-10/validation/userscript-public-probe.json` に保存しています。過去の記録は以下に保持します。
+- Chromiumの制御fixtureで全6生成版×390/1280pxの12ケースが成功。タイトル・320×160px検証画像・44px操作・横overflowなし・下書き保持を確認。架空の投稿／画像／通信を明示した開発検証であり、実アカウントや外部通信は使っていません。Safari/Stay／Firefox実行エンジンそのものの証拠ではありません。
+- 同じブラウザのDOM handlerで13項目が成功。自動OFFの保存・処理停止・画像参照の解放、OFF中の手動取得、元本文とanchor identity、元のお気に入りhandler、Home filterの3/4確認範囲・詳細/Show allの復帰、再利用anchorの変更を確認。Copy/Shareの行先は検証用アダプターで取得した元URLであり、OSクリップボード／共有先の受け入れとは区別します。ブラウザIPCの一時timeoutがありましたが、12ケースは各画像の実decode完了後に収集しました。
+- GitHub [PR #25](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/25)の実装commit `15528d4` のpush／PR CIは2件成功。Greasy Forkの既存6 IDへ6.25.0を公開し、送信前に全コード・全案内のSHA256を照合。限定公開・HTML・adult=falseの設定を保持しました。
+- 通常の6コードURL＋6案内URLを匿名GET（計12件、再試行なし）し、全HTTP200、コード／ページとも6.25.0を確認。全コードは正当なGF追加download/update metadataと改行・末尾空白だけを正規化して一致。全案内は順序付きの非空見出し・段落・全リスト項目・全表セルと全リンクラベル／行先が一致し、未比較の非空textは許容していません。導入済みStay／Tampermonkey自体をこの公開操作で更新したとは扱いません。
+
+証跡はリポジトリ外 `outputs/url-cards-6.25.0/` の `full-check-final.txt`、`browser-card-audit.json`、`browser-interactions.json`、`publication-submit-checks.json`、`public-code-checks.json`、`greasyfork-6.25.0.png`、`ci-implementation.json` と `outputs/link-preview-2026-10-10/validation/userscript-public-probe.json` に保存しています。最終head／mainのCIは `ci-final.json`／`ci-main.json` に別途記録します。過去の記録は以下に保持します。
 
 ---
 

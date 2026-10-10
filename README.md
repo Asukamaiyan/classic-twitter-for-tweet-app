@@ -2,7 +2,7 @@
 
 **6.25.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**配布状況:** 6.25.0を準備中です。現在の公開版は6.24.0です。
+**配布状況:** 日本語・英語の全6版を6.25.0としてGreasy Forkへ公開済みです。公開コードと導入案内の全文を照合しました。
 
 ## URLカード
 
@@ -59,7 +59,7 @@
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
 
-6.24.0はTweet 2.3.0に対応。通知アイコンはそれぞれのプロフィールへ移動し、GIF・動画追加やブロック関連のUIも日本語化します。保存したGIFのループ再生と「編集済み」表示を維持し、ブロック・ミュート相手の保存投稿は表示しません。標準の返信通知・投票・ブロック・写真の複数選択を使います。
+6.25.0はTweet 2.3.0に対応。通知アイコンはそれぞれのプロフィールへ移動し、GIF・動画追加やブロック関連のUIも日本語化します。保存したGIFのループ再生と「編集済み」表示を維持し、ブロック・ミュート相手の保存投稿は表示しません。標準の返信通知・投票・ブロック・写真の複数選択を使います。
 
 日本ニュースの **「配信元」** から、国内はYahoo!／NHK、スポーツ・エンタメはYahoo!／日刊スポーツ、ITはYahoo!／ITmediaを選べます。ジャンルごとに最低1つを選択し、取得できない配信元は名前を表示します。ジャンル別RSSを使う方式で、任意のRSS追加や本文からの自動分類は未対応です。
 
@@ -85,7 +85,7 @@
 
 お気に入りはミュート・ブロック一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。自動同期はなく、サイトデータを消すと失われます。
 
-画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。今回の6.24.0では実機操作を行っていません。過去のStayの6.23.1更新は実機確認済み。6.23.0のニュース選択・再読み込み後の保持・プロフィール写真の左右スワイプも確認済みですが、6.23.1の画質表示と閉じるボタンは実機テストのタップ判定で止まり、最終確認待ちです。
+画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。今回の6.25.0では実機操作を行っていません。過去のStayの6.23.1更新は実機確認済み。6.23.0のニュース選択・再読み込み後の保持・プロフィール写真の左右スワイプも確認済みですが、6.23.1の画質表示と閉じるボタンは実機テストのタップ判定で止まり、最終確認待ちです。
 
 **6.22.0での実機記録：** iPhone 17 Pro Max＋Stay 2.9.24で更新、Yahoo!・NHKのニュース、写真の中央配置・前後切替、左右スワイプ、約2倍のピンチ拡大を確認しました。日刊スポーツは追加許可待ち、ITmediaは実機未確認。縮小の直前にXCTestの内部エラーが発生し、ピンチ縮小は未確認です。Safari再起動で通常倍率へ復元済み。長時間操作、Android＋Tampermonkeyは未検証です。
 
@@ -123,7 +123,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.23.1 supports Tweet 2.2.3 and is published for all six editions; device checks are recorded separately. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
+Version 6.25.0 supports the inspected Tweet 2.3.0 client and is published for all six editions with matching code and complete guides. URL cards add public titles, descriptions and static thumbnails with Open, Copy, Share, manual loading and retry. Tools → Automatically load URL cards controls direct anonymous HTTPS reads; Home → Show only posts with links reports loaded coverage. Destination/image-site permission may be required. Physical Safari/Stay and Android acceptance was not performed for this release; device checks below are historical. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
 
 Optional browser alerts remain off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported.
 
