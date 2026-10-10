@@ -6,7 +6,7 @@
 - 初回全体実行は738 PASS／2 FAIL。ニュースの2ケースが固定350ms待ちの後に未表示の見出しを参照しました。news本体は変更せず、実際の見出し表示を上限5秒で待つ検証にし、最後に740件を全て再実行して成功。初回ログも保存しています。
 - 公開ページの実取得は、実モジュールの通信／parserへ匿名Node Fetchアダプターを接続して確認。Tapbots IvoryのOGPとJPEG、MozillaからFirefoxへの公開redirect・OGP・PNGを取得しました。これは実際のGM管理アプリやSafari/Stay実機の証明ではありません。
 - 独立の読み取りレビューで、credential query、本文／script／comment中の偽メタ情報、停止・cache・blob解放・件数／bytes上限・小画面の操作領域・旧保存互換を確認し、指摘を修正しました。全6版のmetadataは6.24.0に対して版番号と意図した `@connect *` の追加のみが差分です。既存grant・identity・配布URLは保持しています。
-- host文字列と返されたredirect/finalURLを検証します。DNS解決先の固定や、管理アプリが内部で追う全redirectの抑止は保証しません。公開Stay bridgeのredirect option未実装とbinary整数配列を考慮していますが、現行Stay実機の挙動は未確認です。
+- host文字列と返されたredirect/finalURLを検証します。DNS解決先の固定や、管理アプリが内部で追う全redirectの抑止は保証しません。公開Stay bridgeのredirect／anonymous option未実装とbinary整数配列を考慮しています。同bridgeのXHRはuser/password指定時だけwithCredentialsを設定し、本moduleはuser/password/cookieを渡しません。ただしStayによるanonymous optionの保証や、現行実機のCookie挙動を検証済みとは扱いません。
 - 物理iPhone・Androidを操作していません。公開HTTPSページ・画像の匿名読み込みだけを追加し、Tweet auth／本文を送りません。Tweetへの投稿等のwrite API、外部preview proxy、新規依存は追加していません。
 
 - Chromiumの制御fixtureで全6生成版×390/1280pxの12ケースが成功。タイトル・320×160px検証画像・44px操作・横overflowなし・下書き保持を確認。架空の投稿／画像／通信を明示した開発検証であり、実アカウントや外部通信は使っていません。Safari/Stay／Firefox実行エンジンそのものの証拠ではありません。
