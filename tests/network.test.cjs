@@ -339,6 +339,44 @@ test('auth deduplicates concurrent lookups but refreshes immediately after token
   assert.equal(c.network.state.authPending, null);
 });
 
+test('first auth settlement waits for persistence and schedules one scan with the resolved identity', async () => {
+  const mock = idbMock([{ key: firebaseKey, value: authValue() }], { delay: 5 });
+  const scans = [];
+  const c = harness({ ...mock, ctScheduleScan() {
+    scans.push({ settled: c.network.state.authSettled, uid: c.network.state.authUID });
+  } });
+  assert.equal(c.network.state.authSettled, false);
+  const pending = c.network.getAuth();
+  assert.equal(c.network.getAuth(), pending);
+  await Promise.resolve();
+  assert.equal(c.network.state.authSettled, false);
+  assert.equal(scans.length, 0);
+  assert.equal((await pending).uid, 'viewer');
+  assert.equal(c.network.state.authSettled, true);
+  assert.deepEqual(scans, [{ settled: true, uid: 'viewer' }]);
+  assert.equal(mock.stats.opens, 1);
+  await c.network.getAuth();
+  assert.equal(scans.length, 1, 'later lookup of the same identity must not restart scans');
+});
+
+test('missing user, read failure and persistence deadline each settle initial auth without repeated scans', async () => {
+  for (const mode of ['missing-user', 'read-failure', 'deadline']) {
+    let scans = 0;
+    const c = harness({ ctScheduleScan() { scans++; }, ...(mode === 'deadline' ? {
+      indexedDB: { open() { return {}; } }, IDBKeyRange: { bound() { return {}; } }
+    } : {}) });
+    if (mode === 'read-failure') vm.runInContext('ctReadIDBAuth = () => Promise.reject(new Error("fixture read failure"));', c);
+    assert.equal(c.network.state.authSettled, false, mode);
+    assert.equal(await c.network.getAuth(), null, mode);
+    assert.equal(c.network.state.authSettled, true, mode);
+    assert.equal(c.network.state.authUID, null, mode);
+    assert.equal(c.network.state.authPending, null, mode);
+    assert.equal(scans, 1, mode);
+    assert.equal(await c.network.getAuth(), null, mode);
+    assert.equal(scans, 1, 'settled null identity must not schedule scans on every lookup');
+  }
+});
+
 test('expired tokens, arbitrary nested tokens and mixed accounts are rejected', async () => {
   for (const value of [authValue(tokenA, 'viewer', Date.now() - 1),
     authValue(tokenA, 'viewer', 'invalid'), { nested: authValue() },

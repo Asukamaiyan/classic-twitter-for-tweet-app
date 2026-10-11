@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Safari
 // @namespace    https://tweet.app/
-// @version      6.25.0
+// @version      6.25.1
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -32,6 +32,7 @@
     authTimeout: 2500,
     authPending: null,
     authUID: null,
+    authSettled: false,
     profileTTL: 5 * 60 * 1000,
     profileTimes: new Map(),
     profileFailures: new Map()
@@ -244,6 +245,7 @@
 
   function getAuth() {
     if (ctNetworkState.authPending) return ctNetworkState.authPending;
+    let identityChanged = false;
     const pending = Promise.resolve().then(async () => {
       const local = ctReadStorageAuth();
       const candidates = [...local, ...await ctReadIDBAuth()];
@@ -253,17 +255,21 @@
         ? candidates.sort((a, b) => b.expires - a.expires)[0] : null;
       const auth = latest ? { token: latest.token, uid: latest.uid } : null;
       if (ctNetworkState.authUID !== (auth?.uid || null)) {
+        identityChanged = true;
         ctNetworkState.authUID = auth?.uid || null;
         profileCache.clear();
         ctNetworkState.profileTimes.clear();
         ctNetworkState.profileFailures.clear();
-        // Identity can finish loading after the current DOM scan. Revisit
-        // account-scoped panels even when no native node changes afterward.
-        if (typeof ctScheduleScan === 'function') ctScheduleScan();
       }
       return auth;
     }).catch(() => null).finally(() => {
+      const firstSettlement = !ctNetworkState.authSettled;
+      ctNetworkState.authSettled = true;
       if (ctNetworkState.authPending === pending) ctNetworkState.authPending = null;
+      // The first lookup can finish without a user, or after a local read
+      // failure. Revisit the original DOM before native auto translation is
+      // allowed to start, as well as whenever the account identity changes.
+      if ((firstSettlement || identityChanged) && typeof ctScheduleScan === 'function') ctScheduleScan();
     });
     ctNetworkState.authPending = pending;
     return pending;
@@ -2420,6 +2426,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     ctDeviceTranslation?.clear();
     if (!autoTranslationEnabled() || !active) { ctCancelTranslations(); return; }
+    // Auth may still be resolving from Firebase's local persistence. Native
+    // translation must wait for the account-scoped original URL baseline;
+    // getAuth schedules a full scan after its first success or failure.
+    if (typeof ctNetworkState !== 'undefined' && ctNetworkState.authSettled === false &&
+        typeof getAuth === 'function') { getAuth(); return; }
     if (ctAutoCooldownUntil > Date.now()) return;
     if (ctAutoCooldownUntil) { ctAutoCooldownUntil = 0; ctTranslationStatus(''); }
     // Tweet's native translator chooses navigator.language, not the userscript UI locale.
@@ -2991,7 +3002,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.25.0';
+    document.documentElement.dataset.ctActiveVersion = '6.25.1';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -7827,7 +7838,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
     // Link cards use anonymous reads of the original public destination. Neither
   // native post text nor its anchors/handlers are replaced.
-  const ctLinkPreviewState = { records: new Map(), jobs: new Map(), cache: new Map(), observer: null, observedSources: new Set(),
+  const ctLinkPreviewState = { records: new Map(), cards: new Map(), originals: new WeakMap(), jobs: new Map(), cache: new Map(), observer: null, observedSources: new Set(),
     context: '', generation: 0, running: 0, enabled: null, style: null, imageBytes: 0, recordImageBytes: 0 };
   const ctLinkPreviewLimits = { text: 512 * 1024, image: 2 * 1024 * 1024, cacheImages: 16 * 1024 * 1024,
     cache: 100, records: 160, timeout: 8000, ttl: 15 * 60 * 1000, failureTTL: 60000 };
@@ -8009,8 +8020,29 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const uid = typeof ctNetworkState === 'undefined' ? '' : ctNetworkState.authUID || '';
     return `${location.pathname}${location.search}\n${uid}`;
   }
+  function ctLinkPreviewNativeIdentity(post, parent, header) {
+    // A translated paragraph occupies the native original's same DOM node.
+    // Only an independently verified creation instant can bind the saved URL
+    // to that row; standalone consumers without timestamp helpers fail closed.
+    if (typeof ctTimestampCreationNode !== 'function' || typeof ctTimestampNativeValue !== 'function' ||
+        typeof ctTimestampParse !== 'function') return null;
+    const authors = [...header.querySelectorAll('button.font-bold.truncate')];
+    const author = authors.length === 1 ? authors[0] : null;
+    const authorText = author && ctLinkPreviewText(author.textContent, 160).toLowerCase();
+    const creation = ctTimestampCreationNode(post), createdAt = creation && ctTimestampNativeValue(creation);
+    if (!authorText || !creation || !createdAt || !header.contains(creation)) return null;
+    const edits = [...header.querySelectorAll('span.text-tl-app-text-muted')]
+      .filter(node => /^(?:Edited|編集済み)$/.test(ctLinkPreviewText(node.textContent)))
+      .map(node => ({ node, value: node.getAttribute('title') || '' }));
+    if (edits.length > 1 || edits.some(edit => !ctTimestampParse(edit.value))) return null;
+    return { post, parent, header, author, authorText, creation, createdAt, edits, context: ctLinkPreviewContext() };
+  }
+  function ctLinkPreviewRejectSource(body) {
+    if (body) ctLinkPreviewState.originals.delete(body);
+    return null;
+  }
   function ctLinkPreviewSource(body) {
-    if (!body?.isConnected || body.closest('[hidden],[aria-hidden="true"],[data-ct-profile-timeline-hidden],[data-ct-keyword-hidden],.ct-keyword-collapsed,.ct-links-filter-hidden')) return null;
+    if (!body?.isConnected || body.closest('[hidden],[aria-hidden="true"],[data-ct-profile-timeline-hidden],[data-ct-keyword-hidden],.ct-keyword-collapsed,.ct-links-filter-hidden')) return ctLinkPreviewRejectSource(body);
     const profile = body.matches('p.ct-profile-text[data-ct-link-preview-source="original"]') && body.closest('.ct-profile-row[data-ct-profile-post]');
     if (profile) {
       if (body.parentElement?.matches('.ct-profile-row-main') && body.parentElement.parentElement === profile &&
@@ -8019,21 +8051,38 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
       return null;
     }
-    if (!body.matches('p.tl-user-text.whitespace-pre-wrap.break-words') || body.closest(ctLinkPreviewProtected)) return null;
+    if (!body.matches('p.tl-user-text.whitespace-pre-wrap.break-words') || body.closest(ctLinkPreviewProtected)) return ctLinkPreviewRejectSource(body);
     const post = body.closest('article'), parent = body.parentElement;
-    if (!post || !parent?.matches('div.min-w-0.flex-1') || parent.closest('article') !== post) return null;
+    if (!post || !parent?.matches('div.min-w-0.flex-1') || parent.closest('article') !== post) return ctLinkPreviewRejectSource(body);
     const header = body.previousElementSibling;
-    if (!header?.matches('div') || !header.querySelector('button.font-bold.truncate') ||
-        [...header.querySelectorAll('button')].some(button => /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()))) return null;
+    if (!header?.matches('div') || !header.querySelector('button.font-bold.truncate')) return ctLinkPreviewRejectSource(body);
     // A nested original body belongs to its own article. Poll labels, quoted
     // line-clamped snippets and live translation paragraphs do not qualify.
     const originals = [...parent.children].filter(node => node.matches('p.tl-user-text.whitespace-pre-wrap.break-words'));
-    if (originals.length !== 1) return null;
+    if (originals.length !== 1) return ctLinkPreviewRejectSource(body);
+    let url = '';
     for (const anchor of body.querySelectorAll('a[href]')) {
-      const url = ctLinkPreviewURL(anchor.getAttribute('href'), '', false);
-      if (url && !anchor.closest('button,[role="button"]')) return { body, post, url, text: body.textContent };
+      const candidate = ctLinkPreviewURL(anchor.getAttribute('href'), '', false);
+      if (candidate && !anchor.closest('button,[role="button"]')) { url = candidate; break; }
     }
-    return null;
+    if (!url) return ctLinkPreviewRejectSource(body);
+    const translated = [...header.querySelectorAll('button')]
+      .some(button => /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()));
+    const identity = ctLinkPreviewNativeIdentity(post, parent, header);
+    if (translated) {
+      const original = ctLinkPreviewState.originals.get(body);
+      if (!identity || !original || original.url !== url ||
+          ['post', 'parent', 'header', 'author', 'authorText', 'creation', 'createdAt', 'context']
+            .some(key => identity[key] !== original[key]) || identity.edits.length !== original.edits.length ||
+          identity.edits.some((edit, index) => edit.node !== original.edits[index].node || edit.value !== original.edits[index].value)) {
+        return ctLinkPreviewRejectSource(body);
+      }
+      return { body, post, url: original.url, text: original.text };
+    }
+    const result = { body, post, url, text: body.textContent };
+    if (identity) ctLinkPreviewState.originals.set(body, { ...identity, url, text: result.text });
+    else ctLinkPreviewState.originals.delete(body);
+    return result;
   }
   function ctLinkPreviewCopy(ja, en) { return typeof CT_LOCALE !== 'undefined' && CT_LOCALE === 'ja' ? ja : en; }
   function ctLinkPreviewEnsureStyle() {
@@ -8110,7 +8159,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const metadataURL = ctLinkPreviewURL(url);
     const record = { body, post, url, text, metadataURL: metadataURL ? metadataURL.split('#')[0] : '',
       card, link, domain, title, description, fetch: fetchButton, status, context: ctLinkPreviewContext(),
-      visible: false, attempted: false, manual: false, job: null, objectURL: '', imageBytes: 0 };
+      visible: false, bodyVisible: false, cardVisible: false, attempted: false, manual: false, job: null, objectURL: '', imageBytes: 0 };
     // Stop only the containing native post's click navigation. Link default
     // navigation and all native body handlers remain intact.
     card.addEventListener('click', event => event.stopPropagation());
@@ -8160,8 +8209,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctLinkPreviewDrop(record, keepObserved = false) {
     ctLinkPreviewDetach(record); if (!keepObserved) { ctLinkPreviewState.observer?.unobserve(record.body); ctLinkPreviewState.observedSources.delete(record.body); }
+    ctLinkPreviewState.observer?.unobserve(record.card); ctLinkPreviewState.cards.delete(record.card);
+    record.visible = false; record.bodyVisible = false; record.cardVisible = false;
     ctLinkPreviewReleaseImage(record);
     record.card.remove(); ctLinkPreviewState.records.delete(record.body);
+  }
+  function ctLinkPreviewObserve(record) {
+    ctLinkPreviewState.cards.set(record.card, record);
+    if (!ctLinkPreviewState.observer) return;
+    ctLinkPreviewState.observer.observe(record.body); ctLinkPreviewState.observedSources.add(record.body);
+    ctLinkPreviewState.observer.observe(record.card);
   }
   function ctLinkPreviewMakeRoom() {
     if (ctLinkPreviewState.records.size < ctLinkPreviewLimits.records) return true;
@@ -8225,35 +8282,58 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctLinkPreviewsPatch(root = document) {
     if (!ctLinkPreviewActive()) { ctLinkPreviewsCleanup(); return; }
     const context = ctLinkPreviewContext(), enabled = ctLinkPreviewEnabled();
-    if (ctLinkPreviewState.context && ctLinkPreviewState.context !== context) ctLinkPreviewsCleanup();
+    if (ctLinkPreviewState.context && ctLinkPreviewState.context !== context ||
+        ctLinkPreviewState.enabled !== null && ctLinkPreviewState.enabled !== enabled) ctLinkPreviewsCleanup();
     ctLinkPreviewState.context = context;
-    if (ctLinkPreviewState.enabled !== null && ctLinkPreviewState.enabled !== enabled) {
-      ctLinkPreviewState.generation++;
-      for (const record of ctLinkPreviewState.records.values()) { ctLinkPreviewDetach(record); record.manual = false; record.attempted = false; }
-    }
     ctLinkPreviewState.enabled = enabled;
-    for (const body of ctLinkPreviewState.observedSources) if (!body.isConnected) {
+    for (const body of ctLinkPreviewState.observedSources) if (!body.isConnected ||
+        !ctLinkPreviewState.records.has(body) && !ctLinkPreviewSource(body)) {
       ctLinkPreviewState.observer?.unobserve(body); ctLinkPreviewState.observedSources.delete(body);
     }
     for (const record of [...ctLinkPreviewState.records.values()]) if (!ctLinkPreviewValid(record)) ctLinkPreviewDrop(record);
     if (!ctLinkPreviewState.observer && typeof IntersectionObserver === 'function') {
-      ctLinkPreviewState.observer = new IntersectionObserver(entries => {
+      const observer = new IntersectionObserver(entries => {
+        // A disconnected observer may still deliver an already queued batch.
+        if (ctLinkPreviewState.observer !== observer) return;
+        const affected = new Set(), returning = [];
         for (const entry of entries) {
+          let record = ctLinkPreviewState.records.get(entry.target) || ctLinkPreviewState.cards.get(entry.target);
           if (!entry.target.isConnected) { ctLinkPreviewState.observer?.unobserve(entry.target);
-            ctLinkPreviewState.observedSources.delete(entry.target); continue; }
-          let record = ctLinkPreviewState.records.get(entry.target);
-          if (!record && entry.isIntersecting && entry.intersectionRatio > 0 && ctLinkPreviewMakeRoom()) {
-            const source = ctLinkPreviewSource(entry.target);
-            if (source) { ctLinkPreviewEnsureStyle(); record = ctLinkPreviewCreate(source); ctLinkPreviewState.records.set(entry.target, record); }
+            ctLinkPreviewState.observedSources.delete(entry.target);
+            if (record) ctLinkPreviewDrop(record);
+            continue; }
+          const visible = entry.isIntersecting && entry.intersectionRatio > 0;
+          if (!record) {
+            if (visible && ctLinkPreviewState.observedSources.has(entry.target)) returning.push(entry);
+            continue;
           }
-          if (!record) continue;
-          record.visible = entry.isIntersecting && entry.intersectionRatio > 0;
-          if (!record.visible) ctLinkPreviewDetach(record);
-          else if (!ctLinkPreviewValid(record)) ctLinkPreviewDrop(record);
-          else ctLinkPreviewQueue(record);
+          if (entry.target === record.body) record.bodyVisible = visible;
+          else record.cardVisible = visible;
+          affected.add(record);
         }
+        // Resolve the whole batch before detaching a request. Scrolling from
+        // the original text into its card often reports body=false first.
+        for (const record of affected) record.visible = record.bodyVisible || record.cardVisible;
+        for (const entry of returning) {
+          if (!entry.target.isConnected || ctLinkPreviewState.records.has(entry.target)) continue;
+          const source = ctLinkPreviewSource(entry.target);
+          if (!source) { observer.unobserve(entry.target); ctLinkPreviewState.observedSources.delete(entry.target); continue; }
+          if (!ctLinkPreviewMakeRoom()) continue;
+          ctLinkPreviewEnsureStyle(); const record = ctLinkPreviewCreate(source);
+          record.bodyVisible = true; record.visible = true;
+          ctLinkPreviewState.records.set(entry.target, record); ctLinkPreviewObserve(record); affected.add(record);
+        }
+        for (const record of [...affected]) {
+          if (ctLinkPreviewState.records.get(record.body) !== record) { affected.delete(record); continue; }
+          if (!ctLinkPreviewValid(record)) { ctLinkPreviewDrop(record); affected.delete(record); }
+        }
+        // Attach newly visible duplicate destinations before removing their
+        // old row, so a same-batch handoff can reuse the pending request too.
+        for (const record of affected) if (record.visible) ctLinkPreviewQueue(record);
+        for (const record of affected) if (!record.visible) ctLinkPreviewDetach(record);
         ctLinkPreviewPump();
       }, { threshold: 0 });
+      ctLinkPreviewState.observer = observer;
     }
     const selector = 'p.tl-user-text.whitespace-pre-wrap.break-words,p.ct-profile-text[data-ct-link-preview-source="original"]';
     const bodies = new Set(root.querySelectorAll?.(selector) || []);
@@ -8266,10 +8346,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (!ctLinkPreviewMakeRoom()) { if (ctLinkPreviewState.observer) {
         ctLinkPreviewState.observer.observe(body); ctLinkPreviewState.observedSources.add(body); } continue; }
       ctLinkPreviewEnsureStyle(); const record = ctLinkPreviewCreate(source); ctLinkPreviewState.records.set(body, record);
-      if (ctLinkPreviewState.observer) { ctLinkPreviewState.observer.observe(body); ctLinkPreviewState.observedSources.add(body); }
-      else {
+      ctLinkPreviewObserve(record);
+      if (!ctLinkPreviewState.observer) {
         // Older browsers keep a useful manual card; no unseen automatic reads.
-        const rect = body.getBoundingClientRect(); record.visible = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight;
+        const visible = node => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight; };
+        record.bodyVisible = visible(body); record.cardVisible = visible(record.card);
+        record.visible = record.bodyVisible || record.cardVisible;
       }
     }
     for (const record of ctLinkPreviewState.records.values()) ctLinkPreviewQueue(record);
@@ -8277,9 +8359,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctLinkPreviewsCleanup() {
     ctLinkPreviewState.generation++;
+    ctLinkPreviewState.originals = new WeakMap();
     ctLinkPreviewState.observer?.disconnect(); ctLinkPreviewState.observer = null;
     ctLinkPreviewState.observedSources.clear();
     for (const record of [...ctLinkPreviewState.records.values()]) ctLinkPreviewDrop(record);
+    ctLinkPreviewState.cards.clear();
     for (const job of ctLinkPreviewState.jobs.values()) { job.canceled = true; job.request?.abort(); }
     ctLinkPreviewState.jobs.clear(); ctLinkPreviewState.cache.clear(); ctLinkPreviewState.imageBytes = 0; ctLinkPreviewState.recordImageBytes = 0;
     ctLinkPreviewState.style?.remove(); ctLinkPreviewState.style = null;
@@ -9420,5 +9504,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.25.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.25.1 loaded');
 })();

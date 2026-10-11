@@ -137,6 +137,11 @@
     }
     ctDeviceTranslation?.clear();
     if (!autoTranslationEnabled() || !active) { ctCancelTranslations(); return; }
+    // Auth may still be resolving from Firebase's local persistence. Native
+    // translation must wait for the account-scoped original URL baseline;
+    // getAuth schedules a full scan after its first success or failure.
+    if (typeof ctNetworkState !== 'undefined' && ctNetworkState.authSettled === false &&
+        typeof getAuth === 'function') { getAuth(); return; }
     if (ctAutoCooldownUntil > Date.now()) return;
     if (ctAutoCooldownUntil) { ctAutoCooldownUntil = 0; ctTranslationStatus(''); }
     // Tweet's native translator chooses navigator.language, not the userscript UI locale.
@@ -708,7 +713,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.25.0';
+    document.documentElement.dataset.ctActiveVersion = '6.25.1';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);

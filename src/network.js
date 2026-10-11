@@ -4,6 +4,7 @@
     authTimeout: 2500,
     authPending: null,
     authUID: null,
+    authSettled: false,
     profileTTL: 5 * 60 * 1000,
     profileTimes: new Map(),
     profileFailures: new Map()
@@ -216,6 +217,7 @@
 
   function getAuth() {
     if (ctNetworkState.authPending) return ctNetworkState.authPending;
+    let identityChanged = false;
     const pending = Promise.resolve().then(async () => {
       const local = ctReadStorageAuth();
       const candidates = [...local, ...await ctReadIDBAuth()];
@@ -225,17 +227,21 @@
         ? candidates.sort((a, b) => b.expires - a.expires)[0] : null;
       const auth = latest ? { token: latest.token, uid: latest.uid } : null;
       if (ctNetworkState.authUID !== (auth?.uid || null)) {
+        identityChanged = true;
         ctNetworkState.authUID = auth?.uid || null;
         profileCache.clear();
         ctNetworkState.profileTimes.clear();
         ctNetworkState.profileFailures.clear();
-        // Identity can finish loading after the current DOM scan. Revisit
-        // account-scoped panels even when no native node changes afterward.
-        if (typeof ctScheduleScan === 'function') ctScheduleScan();
       }
       return auth;
     }).catch(() => null).finally(() => {
+      const firstSettlement = !ctNetworkState.authSettled;
+      ctNetworkState.authSettled = true;
       if (ctNetworkState.authPending === pending) ctNetworkState.authPending = null;
+      // The first lookup can finish without a user, or after a local read
+      // failure. Revisit the original DOM before native auto translation is
+      // allowed to start, as well as whenever the account identity changes.
+      if ((firstSettlement || identityChanged) && typeof ctScheduleScan === 'function') ctScheduleScan();
     });
     ctNetworkState.authPending = pending;
     return pending;

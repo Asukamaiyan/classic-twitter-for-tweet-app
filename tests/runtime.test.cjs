@@ -11,6 +11,8 @@ const timestamps = fs.readFileSync(path.join(__dirname, '../src/timestamps.js'),
 const motion = fs.readFileSync(path.join(__dirname, '../src/motion.js'), 'utf8');
 const navigation = fs.readFileSync(path.join(__dirname, '../src/navigation.js'), 'utf8');
 const browserNotifications = fs.readFileSync(path.join(__dirname, '../src/browser-notifications.js'), 'utf8');
+const network = fs.readFileSync(path.join(__dirname, '../src/network.js'), 'utf8');
+const linkPreviews = fs.readFileSync(path.join(__dirname, '../src/link-preview.js'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../classic-twitter-ja.user.js'), 'utf8');
 const helperNames = new Set(['ctTranslationButtonText', 'ctTranslationControls', 'ctDeclaredLanguage', 'ctLikelyLanguage']);
 const helpers = [];
@@ -121,6 +123,7 @@ function harness(t, html = '', options = {}) {
     window.getAuth = async () => ({ uid: 'fixture-viewer', token: 'fixture-token' });
     window.requestJSON = async () => { throw new Error('Known native notification handles must not need a lookup'); };
   }
+  options.configureNetwork?.(window);
   window.eval(`
     const KEY = { autoTranslate: 'autoTranslate' };
     const CT_LOCALE = ${JSON.stringify(options.locale || 'ja')};
@@ -128,9 +131,12 @@ function harness(t, html = '', options = {}) {
     ${helpers.join('\n')}
     ${translation}
     ${options.timestamps ? timestamps : ''}
+    ${options.network ? `const profileCache = new Map(); const profilePending = new Map();
+      const PROFILE_API = 'https://api.tweet.app/api/users/by-username/'; ${network}` : ''}
     ${options.motion ? motion : ''}
     ${browserNotifications}
     ${runtime}
+    ${options.linkPreviews ? linkPreviews : ''}
     ${options.navigation ? navigation : ''}
     ${options.localization && !options.navigation ? localizationNavigationSource : ''}
     ${options.localization ? localizationSource : ''}
@@ -141,6 +147,10 @@ function harness(t, html = '', options = {}) {
       patchClassicMotion: typeof patchClassicMotion === 'function' ? patchClassicMotion : null,
       patchNavigation: typeof patchNavigation === 'function' ? patchNavigation : null,
       patchUI: typeof patchUI === 'function' ? patchUI : null,
+      networkState: typeof ctNetworkState === 'undefined' ? null : ctNetworkState,
+      getAuth: typeof getAuth === 'function' ? getAuth : null,
+      linkPreviewsPatch: ctLinkPreviewsPatch, linkPreviewsCleanup: ctLinkPreviewsCleanup,
+      linkPreviewState: typeof ctLinkPreviewState === 'undefined' ? null : ctLinkPreviewState,
       destroyBrowserNotifications: () => ctBrowserNotifications?.destroy() };
   `);
   async function flush() { await Promise.resolve(); await Promise.resolve(); }
@@ -231,6 +241,139 @@ test('opted-in translation is throttled, deduplicated and never hides manual con
   assert.equal(one(), 1); assert.equal(two(), 1);
   assert.equal(f.button('one').style.display, '');
   assert.equal(f.button('two').hidden, false);
+});
+
+test('native auto translation waits for initial auth, then preserves the resolved original link card', async t => {
+  const destination = 'https://example.org/original';
+  let idbRequest, opens = 0, intersectionObserver;
+  const requests = [];
+  const f = harness(t, `<main><article id="one"><div class="flex-1 min-w-0">
+    <div class="flex items-start justify-between gap-2"><div class="min-w-0 flex-1">
+      <div class="flex items-center gap-1 min-w-0 flex-wrap"><button class="font-bold truncate">Alice</button>
+        <span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted hover:underline" title="2026-10-10T00:00:00Z">1m</span></div>
+      <p aria-live="polite"><button id="one-translate">Show translation</button></p>
+    </div></div>
+    <p class="tl-user-text whitespace-pre-wrap break-words" lang="en">This is an original post. <a href="${destination}" target="_blank" rel="noopener noreferrer">${destination}</a></p>
+  </div></article></main>`, {
+    network: true, timestamps: true, linkPreviews: true, values: { 'autoTranslate.optInV2': true },
+    configureNetwork(window) {
+      window.localStorage.setItem('firebase:authUser:public_fixture_key:[DEFAULT]', JSON.stringify({
+        uid: 'fixture-viewer', apiKey: 'public_fixture_key',
+        stsTokenManager: { accessToken: 'fixture-token.'.repeat(6), expirationTime: 1000000 }
+      }));
+      window.IDBKeyRange = { bound() { return {}; } };
+      window.indexedDB = { open() { opens++; idbRequest = {}; return idbRequest; } };
+      window.IntersectionObserver = class {
+        constructor(callback) { this.callback = callback; this.targets = new Set(); intersectionObserver = this; }
+        observe(target) { this.targets.add(target); }
+        unobserve(target) { this.targets.delete(target); }
+        disconnect() { this.targets.clear(); }
+      };
+      window.GM_xmlhttpRequest = details => {
+        const call = { details, aborts: 0 }; requests.push(call);
+        return { abort() { call.aborts++; details.onabort({ status: 0 }); details.onloadend({ status: 0 }); } };
+      };
+    },
+    scan(root, qa) { qa.patchAutoTranslation(root); qa.linkPreviewsPatch(root); }
+  });
+  const body = f.document.querySelector('p.tl-user-text');
+  const originalText = body.textContent;
+  const show = () => intersectionObserver.callback([...intersectionObserver.targets]
+    .map(target => ({ target, isIntersecting: true, intersectionRatio: 1 })));
+  let clicks = 0, resolvedCard;
+  f.button('one').addEventListener('click', () => {
+    clicks++;
+    assert.equal(f.qa.networkState.authSettled, true);
+    assert.equal(f.qa.networkState.authUID, 'fixture-viewer');
+    assert.equal(f.qa.linkPreviewState.originals.get(body)?.context, '/feed\nfixture-viewer',
+      'the resolved-account scan captures original URL evidence before the zero-delay native click');
+    resolvedCard = f.document.querySelector('.ct-link-preview');
+    assert.ok(resolvedCard);
+    body.innerHTML = `翻訳された本文 <a href="${destination}" target="_blank" rel="noopener noreferrer">${destination}</a>`;
+    f.button('one').textContent = 'Show original';
+  });
+  f.qa.start(); show();
+  assert.equal(f.qa.networkState.authSettled, false);
+  await f.advance(100);
+  f.qa.patchAutoTranslation(); await f.flush();
+  assert.equal(opens, 1, 'all scans share the existing bounded persistence lookup');
+  assert.equal(clicks, 0);
+  assert.equal(f.qa.pending(), 0);
+  assert.equal(body.textContent, originalText);
+  assert.equal(requests.length, 1);
+  idbRequest.onerror();
+  await f.flush(); await f.flush(); await f.flush();
+  assert.equal(f.qa.networkState.authSettled, true);
+  assert.equal(clicks, 0, 'settlement schedules a scan rather than clicking from its promise');
+  await f.advance(100);
+  assert.equal(clicks, 1);
+  assert.equal(requests[0].aborts, 1, 'the initial unknown-account record is discarded');
+  assert.equal(f.document.querySelector('.ct-link-preview'), resolvedCard);
+  show();
+  assert.equal(requests.length, 2);
+  requests[1].details.onload({ status: 200, readyState: 4, finalUrl: destination,
+    responseHeaders: 'Content-Type: text/html', responseText: '<html><head><title>Original link</title></head></html>' });
+  await f.flush(); await f.advance(100);
+  assert.equal(f.document.querySelector('.ct-link-preview'), resolvedCard);
+  assert.equal(resolvedCard.querySelector('.ct-link-preview-title').textContent, 'Original link');
+  assert.equal(requests[1].aborts, 0);
+  assert.equal(requests.length, 2);
+});
+
+test('initial auth without a user, after read failure or at the deadline still resumes native automatic translation', async t => {
+  for (const mode of ['missing-user', 'read-failure', 'deadline']) {
+    const f = harness(t, post('one'), {
+      network: true, values: { 'autoTranslate.optInV2': true },
+      configureNetwork(window) {
+        if (mode === 'deadline') {
+          window.IDBKeyRange = { bound() { return {}; } };
+          window.indexedDB = { open() { return {}; } };
+        }
+      },
+      scan(root, qa) { qa.patchAutoTranslation(root); }
+    });
+    if (mode === 'read-failure') f.window.eval('ctReadIDBAuth = () => Promise.reject(new Error("fixture read failure"));');
+    const count = countClicks(f, 'one');
+    f.qa.start();
+    const pending = f.qa.getAuth();
+    assert.equal(count(), 0);
+    if (mode === 'deadline') {
+      await f.advance(2499);
+      assert.equal(count(), 0);
+      assert.equal(f.qa.networkState.authSettled, false);
+      await f.advance(1);
+    }
+    await pending;
+    assert.equal(f.qa.networkState.authSettled, true, mode);
+    assert.equal(f.qa.networkState.authUID, null, mode);
+    await f.advance(100);
+    assert.equal(count(), 1, mode);
+    await f.advance(2000);
+    assert.equal(count(), 1, 'null identity settlement does not loop or repeat automatic clicks');
+  }
+});
+
+test('initial auth lookup is not started by disabled, device, hidden or inactive auto translation', async t => {
+  for (const mode of ['off', 'device', 'hidden', 'inactive']) {
+    let opens = 0;
+    const f = harness(t, post('one'), {
+      network: true,
+      values: { 'autoTranslate.optInV2': mode !== 'off', 'autoTranslate.engine': mode === 'device' ? 'device' : 'native' },
+      configureNetwork(window) {
+        window.IDBKeyRange = { bound() { return {}; } };
+        window.indexedDB = { open() { opens++; return {}; } };
+      },
+      scan(root, qa) { if (mode !== 'inactive') qa.patchAutoTranslation(root); }
+    });
+    const count = countClicks(f, 'one');
+    if (mode === 'hidden') f.hidden(true);
+    f.qa.start();
+    if (mode === 'inactive') f.window.dispatchEvent(new f.window.Event('pagehide'));
+    f.qa.patchAutoTranslation(); await f.advance();
+    assert.equal(opens, 0, mode);
+    assert.equal(f.qa.networkState.authSettled, false, mode);
+    assert.equal(count(), 0, mode);
+  }
 });
 
 test('Show original is preserved and manual choice cancels delayed and replacement controls', async t => {
