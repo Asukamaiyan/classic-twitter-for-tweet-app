@@ -1,5 +1,15 @@
 # Changelog
 
+## All distributions v6.25.1 candidate — 2026-10-11
+
+Keep URL previews loaded while either the native body or the card remains visible. Observe both elements, apply intersection batches before detaching requests, and release old observers and image references on context or settings changes.
+
+Retain a native card through translation only when the original URL was independently observed and the body structure, author, exact creation time and edit state still match. Reject unverified translated URLs. Existing original text, anchors, native handlers, manager grants and browser-local data remain intact.
+
+Wait for the initial local authentication lookup before native automatic translation, then scan the original URL under the resolved account. Resume after a missing user, read failure or deadline as well. Automatic translation OFF, inactive pages and device translation do not initiate this lookup.
+
+Physical Safari/Stay diagnosis confirmed missing cards on translated posts and a separate request failure in 6.25.0. Candidate acceptance and publication remain pending; automated and physical evidence are separated in VALIDATION.md.
+
 ## All distributions v6.25.0 — 2026-10-10
 
 All six editions are published on Greasy Fork with matching generated code and complete guides. Final automated checks pass 740 tests; controlled Chromium checks cover both narrow and desktop widths. Physical Safari/Stay and Android acceptance remains separate and was not performed for this release.
