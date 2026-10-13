@@ -46,6 +46,7 @@ function fixture(language, html, route = '/feed') {
     'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
     'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber', 'nativeTimestampJapaneseText',
     'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
+    'nativeLocalizationSessionContext', 'nativeSessionJapaneseText',
     'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia',
     'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
@@ -1285,6 +1286,77 @@ for (const language of ['ja', 'en']) test(`${language}: Tweet 2.3.0 mention meta
   time.nodeValue = '3m'; f.run(meta);
   assert.equal(meta.textContent, language === 'ja' ? '@1h · 3分前' : '@1h · 3m');
   f.dom.window.close();
+});
+
+test('ja: native detail title translates without changing author names or quoted headings', () => {
+  const f = fixture('ja', '<main><div class="sticky"><h2 class="truncate" id="detail-title">Feed</h2></div><article><button class="truncate" id="detail-author">Feed</button><h2 class="truncate" id="quote-title">Feed</h2></article></main>', '/post/detail-id');
+  const node = f.document.getElementById('detail-title').firstChild;
+  f.run(); f.run(); assert.equal(f.text('detail-title'), 'ツイート');
+  assert.equal(f.text('detail-author'), 'Feed'); assert.equal(f.text('quote-title'), 'Feed');
+  node.nodeValue = 'Feed'; f.run(); assert.equal(f.text('detail-title'), 'ツイート'); f.dom.window.close();
+});
+
+for (const connector of [false, true]) test(`ja: Tweet 2.3.1 parent thread ${connector ? 'connector' : 'preview'} preserves native links and source content`, () => {
+  const f = fixture('ja', `<main><div class="${connector ? 'min-h-0 flex-1 overflow-y-auto' : 'border-b border-tl-app-border'}"><div class="flex w-full items-start gap-3 px-4 pt-3 ${connector ? 'pb-0' : 'pb-2'} text-left">
+    <div class="min-w-0 flex-1"><div class="flex min-w-0 flex-wrap items-center gap-1 leading-4">
+      <span class="font-semibold truncate" id="parent-name">Active now</span><span class="text-tl-app-text-muted truncate">@alice</span>
+      <span class="text-tl-app-text-muted">·</span><span class="shrink-0 text-tl-app-text-muted"><a href="/post/parent-id" aria-label="Open the post by @alice that this replies to" class="hover:underline" id="parent-time">3h</a></span></div>
+      <p class="mt-1 line-clamp-3 wrap-break-word" id="parent-body">Poll · 3 choices</p>
+      <p class="mt-1 text-tl-app-text-muted" id="parent-summary">Poll · 3 choices</p></div></div><article><p class="whitespace-pre-wrap">Quoted a post</p></article></div></main>`, '/post/reply-id');
+  const link = f.document.getElementById('parent-time'); const node = link.firstChild;
+  let clicks = 0; link.addEventListener('click', e => { e.preventDefault(); clicks++; });
+  f.run(); f.run();
+  assert.equal(link.textContent, '3時間前'); assert.equal(link.firstChild, node);
+  assert.equal(link.getAttribute('aria-label'), '@aliceへの返信元のツイートを開く');
+  assert.equal(link.getAttribute('href'), '/post/parent-id'); link.click(); assert.equal(clicks, 1);
+  assert.equal(f.text('parent-name'), 'Active now'); assert.equal(f.text('parent-body'), 'Poll · 3 choices');
+  assert.equal(f.text('parent-summary'), '投票 · 3個の選択肢');
+  node.nodeValue = 'Sep 27'; f.run(link); assert.equal(link.textContent, '9月27日');
+  f.document.getElementById('parent-summary').textContent = 'Quoted a post'; f.run();
+  assert.equal(f.text('parent-summary'), '引用ツイート'); f.dom.window.close();
+});
+
+test('ja: Tweet 2.3.1 sessions localize status and dates while preserving device labels and native handlers', () => {
+  const f = fixture('ja', `<main><section><div class="flex flex-col gap-5"><div><h4 class="font-extrabold">Where you're signed in</h4><p class="leading-relaxed">The devices signed in to your account. Sign out of any you do not recognize.</p></div>
+    <div class="divide-y"><div class="flex items-center gap-3 px-4"><svg></svg><div><div><span class="truncate" id="device">Active now</span><span class="shrink-0 rounded-full" id="current">This device</span></div>
+    <span class="text-tl-app-text-muted mt-0.5" id="session-time">Active now<!-- --> · Signed in Sep 26, 2026</span></div><button aria-label="Sign out Chrome on macOS" id="session-sign-out">Sign out</button></div>
+    <div class="flex items-center gap-3 px-4"><svg></svg><div><span class="truncate" id="unknown-device">Unknown device</span><span class="text-tl-app-text-muted mt-0.5" id="last">Last active Sep 11 · Signed in Sep 11, 2026</span></div></div></div>
+    <button id="others">Sign out of all other devices</button><p id="truncated">Showing your 50 most recently active devices. Signing out of all other devices also signs out the ones not shown.</p></div>
+    <span class="text-tl-app-text-muted mt-0.5" id="unscoped-session">Active 3h ago · Signed in Sep 26, 2026</span>
+    <textarea id="draft">Where you're signed in</textarea></section></main>`, '/settings');
+  const time = f.document.getElementById('session-time'); const node = time.firstChild;
+  const action = f.document.getElementById('session-sign-out'); let clicks = 0; action.addEventListener('click', () => clicks++);
+  f.run(); f.run();
+  assert.equal(f.text('device'), 'Active now'); assert.equal(f.text('unknown-device'), '不明な端末'); assert.equal(f.text('current'), 'この端末');
+  assert.equal(time.textContent, '現在使用中 · 2026年9月26日にログイン'); assert.equal(time.firstChild, node);
+  assert.equal(time.lastChild.nodeValue, ' · 2026年9月26日にログイン');
+  time.lastChild.nodeValue = ' · Signed in Feb 29, 2024'; f.run(time);
+  assert.equal(time.textContent, '現在使用中 · 2024年2月29日にログイン');
+  time.lastChild.remove(); time.childNodes[1]?.remove();
+  assert.equal(f.text('last'), '最終使用：9月11日 · 2026年9月11日にログイン');
+  assert.equal(action.textContent, 'ログアウト'); assert.equal(action.getAttribute('aria-label'), 'Chrome on macOSからログアウト');
+  action.click(); assert.equal(clicks, 1); assert.equal(f.document.getElementById('draft').value, "Where you're signed in");
+  assert.equal(f.text('unscoped-session'), 'Active 3h ago · Signed in Sep 26, 2026');
+  node.nodeValue = 'Active 3h ago · Signed in Feb 29, 2026'; f.run(time);
+  assert.equal(time.textContent, 'Active 3h ago · Signed in Feb 29, 2026');
+  node.nodeValue = 'Active 8m ago · Signed in Feb 29, 2024'; f.run(time);
+  assert.equal(time.textContent, '8分前に使用 · 2024年2月29日にログイン'); f.dom.window.close();
+});
+
+test('ja: session confirmation keeps device text and password input intact', () => {
+  const f = fixture('ja', `<div role="dialog"><h3>Sign out this device?</h3><p id="confirm-body">Safari on iOS will be signed out and will need your password to sign back in.</p><input type="password" value="unchanged"><button>Sign out</button></div><p class="whitespace-pre-wrap" id="user-text">Safari on iOS will be signed out and will need your password to sign back in.</p>`, '/settings');
+  f.run(); assert.equal(f.text('confirm-body'), 'Safari on iOSからログアウトします。再度ログインするにはパスワードが必要です。');
+  assert.equal(f.document.querySelector('input').value, 'unchanged');
+  assert.equal(f.text('user-text'), 'Safari on iOS will be signed out and will need your password to sign back in.'); f.dom.window.close();
+});
+
+test('ja: native parent media and deleted metadata translate without changing unrelated descriptions', () => {
+  const f = fixture('ja', `<main><div class="border-b border-tl-app-border"><div class="flex w-full items-start gap-3 px-4 pt-3 pb-2 text-left"><div class="min-w-0 flex-1"><div class="flex min-w-0 flex-wrap items-center gap-1 leading-4"><span class="font-semibold truncate">Alice</span><span class="text-tl-app-text-muted truncate">@alice</span></div><img id="parent-media" alt="Media in the post this replies to" src="https://images.example/a.png"></div></div><article></article></div>
+  <div class="min-h-0 flex-1 overflow-y-auto"><div class="flex w-full items-start gap-3 px-4 pt-3 pb-0 text-left"><span aria-hidden="true" class="h-8 w-8"></span><p class="min-w-0 flex-1 self-center italic leading-5 text-tl-app-text-muted" id="deleted-parent">This post is no longer available</p></div><article><p class="whitespace-pre-wrap" id="deleted-body">This post is no longer available</p></article></div>
+  <img id="unscoped-media" alt="Media in the post this replies to" src="https://images.example/b.png"></main>`, '/post/reply-id');
+  f.run(); assert.equal(f.document.getElementById('parent-media').alt, '返信先のツイートの写真・動画');
+  assert.equal(f.document.getElementById('unscoped-media').alt, 'Media in the post this replies to');
+  assert.equal(f.text('deleted-parent'), 'このツイートは表示できません'); assert.equal(f.text('deleted-body'), 'This post is no longer available'); f.dom.window.close();
 });
 
 test('en: Tweet 2.3.0 blocked-account settings restore native text when classic appearance is off', () => {

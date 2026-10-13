@@ -4,11 +4,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(path.join(__dirname, '../src/link-preview.js'), 'utf8');
+const timestamps = fs.readFileSync(path.join(__dirname, '../src/timestamps.js'), 'utf8');
 const destination = 'https://example.org/article?topic=web#section';
 const metadata = '<!doctype html><html><head><meta property="og:title" content="Real title &amp; details"><meta property="og:description" content="Real description"><meta property="og:site_name" content="Example"><title>Fallback</title></head><body><script>window.untrusted=true</script></body></html>';
 const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 function native(url = destination, id = 'post') {
   return `<article id="${id}"><div class="flex-1 min-w-0"><div class="flex items-center"><button class="font-bold truncate">Alice</button><span>·</span><span title="2026-10-10T00:00:00Z">1m</span></div><p class="tl-user-text whitespace-pre-wrap break-words">My original <a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a></p><button class="native-action">Like</button></div></article>`;
+}
+function timestampedNative(url = destination, id = 'post') {
+  return `<article id="${id}"><div class="flex-1 min-w-0"><div class="flex items-start justify-between gap-2"><div class="min-w-0 flex-1"><div class="flex items-center gap-1 min-w-0 flex-wrap"><button class="font-bold truncate">Alice</button><span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted hover:underline" title="2026-10-10T00:00:00Z">1m</span></div><p aria-live="polite"><button class="translation-toggle">Show translation</button></p></div></div><p class="tl-user-text whitespace-pre-wrap break-words">My original <a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a></p><button class="native-action">Like</button></div></article>`;
+}
+function translateNative(h, body = h.doc.querySelector('article p.tl-user-text'), url = destination) {
+  body.innerHTML = `翻訳された文章 <a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  body.previousElementSibling.querySelector('.translation-toggle').textContent = 'Show original';
 }
 function harness(t, options = {}) {
   const dom = new JSDOM(`<!doctype html><head></head><body><main>${options.html || native()}</main></body>`, {
@@ -30,13 +38,15 @@ function harness(t, options = {}) {
     return { abort() { call.aborted++; details.onabort({ status: 0 }); details.onloadend({ status: 0 }); } }; };
   if (options.modernGM) w.GM = options.modernGM;
   else if (options.gm !== false) w.GM_xmlhttpRequest = options.gm || defaultGM;
-  w.eval(`const CT_LOCALE='${options.locale || 'en'}'; ${source}
+  w.eval(`const CT_LOCALE='${options.locale || 'en'}'; ${options.timestamps ? timestamps : ''} ${source}
     window.qa={patch:ctLinkPreviewsPatch,cleanup:ctLinkPreviewsCleanup,url:ctLinkPreviewURL,first:ctLinkPreviewFirstURL,
       parse:ctLinkPreviewParse,request:ctLinkPreviewRequest,state:ctLinkPreviewState,limits:ctLinkPreviewLimits,
       source:ctLinkPreviewSource,cache:ctLinkPreviewCache,deleteCache:ctLinkPreviewDeleteCache};`);
   const h = { w, doc: w.document, qa: w.qa, calls, timers, objects, revoked,
     enabled: value => { enabled = value; },
-    show(target, visible = true) { const targets = target ? [target] : [...observer.targets]; observer.callback(targets.map(node => ({ target: node, isIntersecting: visible, intersectionRatio: visible ? 1 : 0 }))); },
+    observer: () => observer,
+    intersections(entries) { observer.callback(entries.map(([target, visible]) => ({ target, isIntersecting: visible, intersectionRatio: visible ? 1 : 0 }))); },
+    show(target, visible = true) { const targets = target ? [target] : [...observer.targets]; this.intersections(targets.map(node => [node, visible])); },
     respond(index, html = metadata, changes = {}) { const details = calls[index].details;
       const response = { status: 200, readyState: 4, responseText: html, finalUrl: details.url, responseHeaders: 'Content-Type: text/html', ...changes };
       details.onload(response); details.onloadend(response); },
@@ -121,6 +131,107 @@ test('known profile original sources and verified inline replies qualify indepen
   assert.equal(h.doc.querySelector('.ct-profile-row .ct-link-preview a').href, 'https://example.org/saved');
 });
 
+test('verified original URL cards survive native translation during metadata and thumbnail reads', async t => {
+  const h = harness(t, { html: timestampedNative(), timestamps: true }); await h.ready();
+  const body = h.doc.querySelector('article p.tl-user-text'), originalText = body.textContent;
+  const card = h.doc.querySelector('.ct-link-preview');
+  translateNative(h, body); h.qa.patch(body);
+  assert.equal(h.doc.querySelector('.ct-link-preview'), card); assert.equal(h.calls.length, 1); assert.equal(h.calls[0].aborted, 0);
+  assert.equal(h.qa.source(body).text, originalText); assert.equal(h.qa.source(body).url, destination);
+  h.respond(0, metadata.replace('</head>', '<meta property="og:image" content="https://images.org/real.png"></head>'));
+  await flush(); assert.equal(h.calls.length, 2);
+  body.previousElementSibling.querySelector('.translation-toggle').textContent = '原文を表示';
+  body.previousElementSibling.querySelector('button.font-bold').textContent = 'ALICE';
+  body.previousElementSibling.querySelector('span[title]').textContent = '2時間前';
+  h.qa.patch(body); assert.equal(h.doc.querySelector('.ct-link-preview'), card); assert.equal(h.calls[1].aborted, 0);
+  h.respond(1, '', { response: [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0], responseHeaders: 'Content-Type: image/png' });
+  await flush(); assert.ok(card.querySelector('img')); assert.equal(card.querySelector('.ct-link-preview-title').textContent, 'Real title & details');
+  const image = card.querySelector('img'); h.qa.patch(); assert.equal(card.querySelector('img'), image);
+  assert.equal(card.querySelector('a').href, destination); assert.equal(body.textContent.includes('翻訳された文章'), true);
+});
+
+test('already translated, missing timestamp helpers, unknown creation and ambiguous native dates never establish original URL evidence', async t => {
+  for (const kind of ['already-translated', 'no-helpers', 'no-ISO', 'ambiguous-ISO']) {
+    const h = harness(t, { html: timestampedNative(), timestamps: kind !== 'no-helpers' });
+    const body = h.doc.querySelector('article p.tl-user-text'), header = body.previousElementSibling;
+    if (kind === 'already-translated') translateNative(h, body);
+    if (kind === 'no-ISO') header.querySelector('span[title]').removeAttribute('title');
+    if (kind === 'ambiguous-ISO') {
+      const creation = header.querySelector('span[title]');
+      creation.after(creation.previousElementSibling.cloneNode(true), creation.cloneNode(true));
+    }
+    h.qa.patch();
+    if (kind !== 'already-translated') { assert.ok(h.doc.querySelector('.ct-link-preview')); translateNative(h, body); h.qa.patch(body); }
+    assert.equal(h.doc.querySelector('.ct-link-preview'), null, kind); assert.equal(h.calls.length, 0, kind);
+  }
+});
+
+test('translated URL evidence rejects changed source, structure, author, creation instant and edit state', async t => {
+  for (const change of ['url', 'first-url', 'author', 'author-node', 'creation', 'creation-node', 'header', 'parent', 'body', 'edited']) {
+    const h = harness(t, { html: timestampedNative(), timestamps: true }); await h.ready();
+    const body = h.doc.querySelector('article p.tl-user-text'), header = body.previousElementSibling;
+    translateNative(h, body);
+    if (change === 'url') body.querySelector('a').href = 'https://translation-only.org/new';
+    if (change === 'first-url') body.insertAdjacentHTML('afterbegin', '<a href="https://translation-only.org/new">new first URL</a> ');
+    if (change === 'author') header.querySelector('button.font-bold').textContent = 'Bob';
+    if (change === 'author-node') { const author = header.querySelector('button.font-bold'); author.replaceWith(author.cloneNode(true)); }
+    if (change === 'creation') header.querySelector('span[title]').title = '2026-10-11T00:00:00Z';
+    if (change === 'creation-node') { const creation = header.querySelector('span[title]'); creation.replaceWith(creation.cloneNode(true)); }
+    if (change === 'header') header.replaceWith(header.cloneNode(true));
+    if (change === 'parent') {
+      const parent = body.parentElement, replacement = parent.cloneNode(false);
+      while (parent.firstChild) replacement.append(parent.firstChild);
+      parent.replaceWith(replacement);
+    }
+    if (change === 'body') body.replaceWith(body.cloneNode(true));
+    if (change === 'edited') header.querySelector('div.flex.items-center').insertAdjacentHTML('beforeend', '<span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted" title="2026-10-11T00:00:00Z">Edited</span>');
+    h.qa.patch(); await flush();
+    assert.equal(h.doc.querySelector('.ct-link-preview'), null, change); assert.equal(h.calls[0].aborted, 1, change);
+    h.show(); assert.equal(h.calls.length, 1, change);
+    h.respond(0); await flush(); assert.equal(h.doc.querySelector('.ct-link-preview-image'), null, change);
+  }
+  const edited = harness(t, { html: timestampedNative(), timestamps: true });
+  const body = edited.doc.querySelector('article p.tl-user-text'), header = body.previousElementSibling;
+  header.querySelector('div.flex.items-center').insertAdjacentHTML('beforeend', '<span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted" title="2026-10-10T01:00:00Z">Edited</span>');
+  await edited.ready(); translateNative(edited, body);
+  [...header.querySelectorAll('span[title]')].at(-1).title = '2026-10-11T00:00:00Z';
+  edited.qa.patch(); await flush(); assert.equal(edited.doc.querySelector('.ct-link-preview'), null); assert.equal(edited.calls[0].aborted, 1);
+});
+
+test('an original post edit replaces its baseline and only the newly verified URL survives translation', async t => {
+  const h = harness(t, { html: timestampedNative(), timestamps: true }); await h.ready();
+  const body = h.doc.querySelector('article p.tl-user-text'), header = body.previousElementSibling;
+  const oldCard = h.doc.querySelector('.ct-link-preview'), editedURL = 'https://example.org/edited';
+  body.innerHTML = `Edited original <a href="${editedURL}">${editedURL}</a>`;
+  header.querySelector('div.flex.items-center').insertAdjacentHTML('beforeend', '<span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted" title="2026-10-10T01:00:00Z">Edited</span>');
+  h.qa.patch(body); await flush(); assert.equal(h.calls[0].aborted, 1);
+  const card = h.doc.querySelector('.ct-link-preview'); assert.notEqual(card, oldCard);
+  h.show(card); assert.equal(h.calls[1].details.url, editedURL);
+  translateNative(h, body, editedURL); h.qa.patch(body); assert.equal(h.doc.querySelector('.ct-link-preview'), card);
+  assert.equal(h.qa.source(body).text, `Edited original ${editedURL}`); assert.equal(h.calls[1].aborted, 0);
+  h.respond(1); await flush(); assert.equal(card.querySelector('a').href, editedURL);
+});
+
+test('offscreen and capacity recycling preserve a verified translated URL but context and cleanup do not', async t => {
+  const h = harness(t, { html: timestampedNative() + timestampedNative('https://second.org/a', 'second'), timestamps: true, enabled: false });
+  h.qa.limits.records = 1; h.qa.patch();
+  const body = h.doc.querySelector('#post p.tl-user-text'); translateNative(h, body);
+  assert.equal(h.doc.querySelector('#post .ct-link-preview'), null);
+  h.show(body); const card = h.doc.querySelector('#post .ct-link-preview'); assert.ok(card); assert.equal(card.querySelector('a').href, destination);
+  h.intersections([[body, false], [card, false]]); h.show(card); assert.equal(h.doc.querySelector('#post .ct-link-preview'), card);
+  assert.equal(h.calls.length, 0);
+  for (const change of ['route', 'account', 'setting', 'cleanup']) {
+    const reset = harness(t, { html: timestampedNative(), timestamps: true }); await reset.ready();
+    const resetBody = reset.doc.querySelector('article p.tl-user-text'); translateNative(reset, resetBody);
+    if (change === 'route') reset.w.history.replaceState({}, '', '/post/original');
+    if (change === 'account') reset.w.ctNetworkState.authUID = 'account-b';
+    if (change === 'setting') reset.enabled(false);
+    if (change === 'cleanup') reset.qa.cleanup();
+    reset.qa.patch(); await flush(); assert.equal(reset.doc.querySelector('.ct-link-preview'), null, change);
+    assert.equal(reset.calls[0].aborted, 1, change); reset.show(); assert.equal(reset.calls.length, 1, change);
+  }
+});
+
 test('OFF retains fallback actions, stops requests and permits manual metadata reads', async t => {
   const h = harness(t); await h.ready(); assert.equal(h.calls.length, 1);
   h.enabled(false); h.qa.patch(); await flush(); assert.equal(h.calls[0].aborted, 1);
@@ -150,7 +261,7 @@ test('concurrency is bounded to two, inflight/cache reads deduplicate repeated d
 test('offscreen, changed URL/text, detached rows, route/account and cleanup discard late responses', async t => {
   for (const change of ['offscreen', 'url', 'text', 'detached', 'route', 'account', 'cleanup']) {
     const h = harness(t); await h.ready(); const body = h.doc.querySelector('p');
-    if (change === 'offscreen') h.show(body, false);
+    if (change === 'offscreen') h.intersections([[body, false], [h.doc.querySelector('.ct-link-preview'), false]]);
     if (change === 'url') { body.querySelector('a').href = 'https://changed.org/article'; h.qa.patch(body); }
     if (change === 'text') { body.prepend('Changed '); h.qa.patch(body); }
     if (change === 'detached') { body.closest('article').remove(); h.qa.patch(); }
@@ -260,7 +371,8 @@ test('offscreen image URLs release immediately and reappear from cached blobs wi
   const bytes = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0];
   h.respond(1, '', { response: bytes, responseHeaders: 'Content-Type: image/png' }); await flush();
   assert.equal(h.qa.state.recordImageBytes, bytes.length); const body = h.doc.querySelector('p');
-  h.show(body, false); assert.equal(h.qa.state.recordImageBytes, 0); assert.equal(h.objects.size, 0);
+  h.intersections([[body, false], [h.doc.querySelector('.ct-link-preview'), false]]);
+  assert.equal(h.qa.state.recordImageBytes, 0); assert.equal(h.objects.size, 0);
   assert.equal(h.doc.querySelector('.ct-link-preview-image'), null); h.show(body); await flush();
   assert.equal(h.calls.length, 2); assert.equal(h.objects.size, 1); assert.equal(h.qa.state.recordImageBytes, bytes.length);
   const bad = h.qa.request('https://images.org/bad.png', true);
@@ -280,6 +392,107 @@ test('bounded cards recycle old offscreen rows and returning sources recreate th
   assert.equal(h.doc.querySelector('#first .ct-link-preview'), null); assert.ok(h.doc.querySelector('#fourth .ct-link-preview'));
   h.show(fourth, false); h.show(first); assert.ok(h.doc.querySelector('#first .ct-link-preview'));
   assert.equal(h.qa.state.records.size, 2); assert.equal(h.calls.length, 0);
+});
+
+test('a visible card loads and retains its thumbnail while the original text is offscreen', async t => {
+  const h = harness(t); h.qa.patch();
+  const body = h.doc.querySelector('article p'), card = h.doc.querySelector('.ct-link-preview');
+  assert.ok(h.observer().targets.has(body)); assert.ok(h.observer().targets.has(card));
+  h.show(card); assert.equal(h.calls.length, 1);
+  h.respond(0, metadata.replace('</head>', '<meta property="og:image" content="https://images.org/real.png"></head>'));
+  await flush(); const bytes = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0];
+  h.respond(1, '', { response: bytes, responseHeaders: 'Content-Type: image/png' }); await flush();
+  const record = h.qa.state.records.get(body), image = card.querySelector('img'), objectURL = image.src;
+  h.show(body, false); await flush();
+  assert.equal(record.bodyVisible, false); assert.equal(record.cardVisible, true); assert.equal(record.visible, true);
+  assert.equal(card.querySelector('img'), image); assert.equal(h.objects.has(objectURL), true);
+  assert.equal(h.calls[0].aborted, 0); assert.equal(h.calls[1].aborted, 0);
+  h.show(card, false); assert.equal(record.visible, false); assert.equal(card.querySelector('img'), null);
+  assert.equal(h.objects.size, 0); assert.equal(h.qa.state.recordImageBytes, 0);
+  h.show(card); await flush(); assert.ok(card.querySelector('img')); assert.equal(h.calls.length, 2);
+  assert.equal(record.bodyVisible, false); assert.equal(record.visible, true);
+});
+
+test('one observer batch hands visibility from original text to its card without canceling the request', async t => {
+  for (const cardFirst of [false, true]) {
+    const h = harness(t); h.qa.patch();
+    const body = h.doc.querySelector('article p'), card = h.doc.querySelector('.ct-link-preview');
+    h.show(body); assert.equal(h.calls.length, 1);
+    const entries = [[body, false], [card, true]]; h.intersections(cardFirst ? entries.reverse() : entries);
+    assert.equal(h.calls[0].aborted, 0); assert.equal(h.calls.length, 1);
+    const record = h.qa.state.records.get(body);
+    assert.equal(record.bodyVisible, false); assert.equal(record.cardVisible, true); assert.equal(record.visible, true);
+    h.respond(0); await flush(); assert.equal(card.querySelector('.ct-link-preview-title').textContent, 'Real title & details');
+  }
+});
+
+test('both original text and card leaving the viewport cancel pending reads and can return', async t => {
+  const h = harness(t); h.qa.patch();
+  const body = h.doc.querySelector('article p'), card = h.doc.querySelector('.ct-link-preview');
+  h.show(card); assert.equal(h.calls.length, 1);
+  h.intersections([[card, false], [body, false]]); await flush();
+  assert.equal(h.calls[0].aborted, 1); assert.equal(h.qa.state.jobs.size, 0);
+  assert.equal(h.qa.state.records.get(body).visible, false); assert.equal(card.hasAttribute('aria-busy'), false);
+  h.respond(0); await flush(); assert.notEqual(card.querySelector('.ct-link-preview-title').textContent, 'Real title & details');
+  h.show(card); assert.equal(h.calls.length, 2); h.respond(1); await flush();
+  assert.equal(card.querySelector('.ct-link-preview-title').textContent, 'Real title & details');
+});
+
+test('removed and reused source rows clear both observer registrations and restore fresh cards', async t => {
+  const h = harness(t); h.qa.patch();
+  const article = h.doc.querySelector('article'), body = article.querySelector('p'), originalAnchor = body.querySelector('a');
+  const oldCard = article.querySelector('.ct-link-preview'), oldRecord = h.qa.state.records.get(body);
+  h.show(oldCard); article.remove(); h.qa.patch(); await flush();
+  assert.equal(h.calls[0].aborted, 1); assert.equal(h.qa.state.cards.size, 0); assert.equal(h.qa.state.records.size, 0);
+  assert.equal(h.observer().targets.has(body), false); assert.equal(h.observer().targets.has(oldCard), false);
+  assert.equal(oldRecord.bodyVisible, false); assert.equal(oldRecord.cardVisible, false); assert.equal(oldCard.isConnected, false);
+  h.doc.querySelector('main').append(article); h.qa.patch();
+  const restored = article.querySelector('.ct-link-preview'), restoredRecord = h.qa.state.records.get(body);
+  assert.notEqual(restored, oldCard); assert.notEqual(restoredRecord, oldRecord); assert.equal(body.querySelector('a'), originalAnchor);
+  assert.equal(restoredRecord.visible, false); assert.equal(h.observer().targets.has(body), true); assert.equal(h.observer().targets.has(restored), true);
+  h.show(oldCard); assert.equal(h.calls.length, 1);
+  h.show(restored); assert.equal(h.calls.length, 2);
+  originalAnchor.href = 'https://changed.org/article'; h.qa.patch(body); await flush();
+  assert.equal(h.calls[1].aborted, 1); assert.equal(h.observer().targets.has(restored), false); assert.equal(h.qa.state.cards.has(restored), false);
+  const reused = h.qa.state.records.get(body); assert.equal(reused.url, 'https://changed.org/article');
+  assert.equal(reused.bodyVisible, false); assert.equal(reused.cardVisible, false); assert.equal(reused.visible, false);
+  h.show(reused.card); assert.equal(h.calls[2].details.url, 'https://changed.org/article');
+});
+
+test('setting, account, route and cleanup reset visibility and ignore disconnected observer batches', async t => {
+  const h = harness(t); await h.ready();
+  const body = h.doc.querySelector('article p');
+  for (const change of ['setting', 'account', 'route', 'cleanup']) {
+    const observer = h.observer(), previous = h.qa.state.records.get(body), previousCount = h.calls.length;
+    if (change === 'setting') h.enabled(false);
+    if (change === 'account') h.w.ctNetworkState.authUID = 'account-b';
+    if (change === 'route') h.w.history.replaceState({}, '', '/post/original');
+    if (change === 'cleanup') h.qa.cleanup();
+    h.qa.patch(); await flush();
+    const current = h.qa.state.records.get(body);
+    assert.notEqual(current, previous); assert.equal(previous.card.isConnected, false); assert.equal(observer.targets.size, 0);
+    assert.equal(previous.bodyVisible, false); assert.equal(previous.cardVisible, false);
+    assert.equal(current.bodyVisible, false); assert.equal(current.cardVisible, false); assert.equal(current.visible, false);
+    observer.callback([{ target: body, isIntersecting: true, intersectionRatio: 1 }, { target: previous.card, isIntersecting: true, intersectionRatio: 1 }]);
+    assert.equal(current.visible, false); assert.equal(h.calls.length, previousCount);
+    assert.equal(h.qa.state.cards.size, 1); assert.equal(h.observer().targets.size, 2);
+    h.show(current.card); assert.equal(h.calls.length, previousCount); // automatic OFF remains OFF after each context change
+  }
+  const observer = h.observer(); h.qa.cleanup();
+  assert.equal(observer.targets.size, 0); assert.equal(h.qa.state.cards.size, 0); assert.equal(h.qa.state.records.size, 0);
+  assert.equal(h.qa.state.observedSources.size, 0); assert.equal(h.objects.size, 0);
+});
+
+test('recycled rows retain only their source observation and release it when that source no longer qualifies', t => {
+  const h = harness(t, { enabled: false, html: native('https://first.org/a', 'first') + native('https://second.org/a', 'second') });
+  h.qa.limits.records = 1; h.qa.patch();
+  const first = h.doc.querySelector('#first p'), second = h.doc.querySelector('#second p');
+  assert.equal(h.qa.state.records.has(first), false); assert.equal(h.qa.state.cards.size, 1);
+  assert.equal(h.observer().targets.size, 3); assert.equal(h.observer().targets.has(first), true);
+  first.textContent = 'The reused native row no longer has a URL.'; h.qa.patch(first);
+  assert.equal(h.qa.state.observedSources.has(first), false); assert.equal(h.observer().targets.has(first), false);
+  assert.equal(h.observer().targets.size, 2); assert.equal(h.qa.state.records.has(second), true);
+  h.show(first); assert.equal(h.qa.state.records.has(first), false); assert.equal(h.calls.length, 0);
 });
 
 test('unsafe, mislabeled, oversized and animated images are omitted without invented replacements', async t => {

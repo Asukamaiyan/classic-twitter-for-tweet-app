@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.25.0
+// @version      6.26.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -31,6 +31,7 @@
     authTimeout: 2500,
     authPending: null,
     authUID: null,
+    authSettled: false,
     profileTTL: 5 * 60 * 1000,
     profileTimes: new Map(),
     profileFailures: new Map()
@@ -47,6 +48,16 @@
     }
   }
 
+  function ctNativeClientDevice() {
+    // Tweet owns this persisted device identity. Reuse only its verified UUID;
+    // never create, migrate or write a session/device identifier here.
+    try {
+      const value = globalThis.localStorage?.getItem('bluebird.clientDeviceId');
+      return typeof value === 'string' && value.length === 36 &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : null;
+    } catch { return null; }
+  }
+
   function requestJSON(url, headers = {}) {
     const target = ctAllowedAPIURL(url);
     if (!target) return Promise.resolve(null);
@@ -54,7 +65,10 @@
     if (typeof headers?.Authorization === 'string' &&
         /^Bearer [A-Za-z0-9._~-]+$/.test(headers.Authorization)) {
       requestHeaders.Authorization = headers.Authorization;
+      const device = ctNativeClientDevice();
+      if (device) requestHeaders['X-Client-Device'] = device;
     }
+    const requestUID = ctNetworkState.authUID;
 
     return new Promise(resolve => {
       let settled = false;
@@ -125,10 +139,25 @@
         return;
       }
       if (typeof fetch !== 'function') return finish(null);
-      Promise.resolve().then(() => fetch(target, {
-        method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
-        ...(controller ? { signal: controller.signal } : {})
-      })).then(async response => {
+      const fetchRead = async () => {
+        const options = {
+          method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
+          ...(controller ? { signal: controller.signal } : {})
+        };
+        try { return await fetch(target, options); }
+        catch (error) {
+          // Match the native GET compatibility fallback only for a rejected
+          // fetch with the new header. An HTTP response (especially session
+          // revocation/expiry) is authoritative and never enters this path.
+          const device = requestHeaders['X-Client-Device'];
+          if (!device || settled || controller?.signal.aborted || error?.name === 'AbortError' ||
+              ctNetworkState.authUID !== requestUID || ctNativeClientDevice() !== device) throw error;
+          const fallbackHeaders = { ...requestHeaders };
+          delete fallbackHeaders['X-Client-Device'];
+          return fetch(target, { ...options, headers: fallbackHeaders });
+        }
+      };
+      Promise.resolve().then(fetchRead).then(async response => {
         if (!response?.ok || (response.url && ctAllowedAPIURL(response.url) !== target)) return null;
         const body = await response.text();
         if (typeof body !== 'string' || body.length > 2 * 1024 * 1024) return null;
@@ -243,6 +272,7 @@
 
   function getAuth() {
     if (ctNetworkState.authPending) return ctNetworkState.authPending;
+    let identityChanged = false;
     const pending = Promise.resolve().then(async () => {
       const local = ctReadStorageAuth();
       const candidates = [...local, ...await ctReadIDBAuth()];
@@ -252,17 +282,21 @@
         ? candidates.sort((a, b) => b.expires - a.expires)[0] : null;
       const auth = latest ? { token: latest.token, uid: latest.uid } : null;
       if (ctNetworkState.authUID !== (auth?.uid || null)) {
+        identityChanged = true;
         ctNetworkState.authUID = auth?.uid || null;
         profileCache.clear();
         ctNetworkState.profileTimes.clear();
         ctNetworkState.profileFailures.clear();
-        // Identity can finish loading after the current DOM scan. Revisit
-        // account-scoped panels even when no native node changes afterward.
-        if (typeof ctScheduleScan === 'function') ctScheduleScan();
       }
       return auth;
     }).catch(() => null).finally(() => {
+      const firstSettlement = !ctNetworkState.authSettled;
+      ctNetworkState.authSettled = true;
       if (ctNetworkState.authPending === pending) ctNetworkState.authPending = null;
+      // The first lookup can finish without a user, or after a local read
+      // failure. Revisit the original DOM before native auto translation is
+      // allowed to start, as well as whenever the account identity changes.
+      if ((firstSettlement || identityChanged) && typeof ctScheduleScan === 'function') ctScheduleScan();
     });
     ctNetworkState.authPending = pending;
     return pending;
@@ -2419,6 +2453,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     ctDeviceTranslation?.clear();
     if (!autoTranslationEnabled() || !active) { ctCancelTranslations(); return; }
+    // Auth may still be resolving from Firebase's local persistence. Native
+    // translation must wait for the account-scoped original URL baseline;
+    // getAuth schedules a full scan after its first success or failure.
+    if (typeof ctNetworkState !== 'undefined' && ctNetworkState.authSettled === false &&
+        typeof getAuth === 'function') { getAuth(); return; }
     if (ctAutoCooldownUntil > Date.now()) return;
     if (ctAutoCooldownUntil) { ctAutoCooldownUntil = 0; ctTranslationStatus(''); }
     // Tweet's native translator chooses navigator.language, not the userscript UI locale.
@@ -2990,7 +3029,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.25.0';
+    document.documentElement.dataset.ctActiveVersion = '6.26.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -7826,7 +7865,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
     // Link cards use anonymous reads of the original public destination. Neither
   // native post text nor its anchors/handlers are replaced.
-  const ctLinkPreviewState = { records: new Map(), jobs: new Map(), cache: new Map(), observer: null, observedSources: new Set(),
+  const ctLinkPreviewState = { records: new Map(), cards: new Map(), originals: new WeakMap(), jobs: new Map(), cache: new Map(), observer: null, observedSources: new Set(),
     context: '', generation: 0, running: 0, enabled: null, style: null, imageBytes: 0, recordImageBytes: 0 };
   const ctLinkPreviewLimits = { text: 512 * 1024, image: 2 * 1024 * 1024, cacheImages: 16 * 1024 * 1024,
     cache: 100, records: 160, timeout: 8000, ttl: 15 * 60 * 1000, failureTTL: 60000 };
@@ -8008,8 +8047,29 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const uid = typeof ctNetworkState === 'undefined' ? '' : ctNetworkState.authUID || '';
     return `${location.pathname}${location.search}\n${uid}`;
   }
+  function ctLinkPreviewNativeIdentity(post, parent, header) {
+    // A translated paragraph occupies the native original's same DOM node.
+    // Only an independently verified creation instant can bind the saved URL
+    // to that row; standalone consumers without timestamp helpers fail closed.
+    if (typeof ctTimestampCreationNode !== 'function' || typeof ctTimestampNativeValue !== 'function' ||
+        typeof ctTimestampParse !== 'function') return null;
+    const authors = [...header.querySelectorAll('button.font-bold.truncate')];
+    const author = authors.length === 1 ? authors[0] : null;
+    const authorText = author && ctLinkPreviewText(author.textContent, 160).toLowerCase();
+    const creation = ctTimestampCreationNode(post), createdAt = creation && ctTimestampNativeValue(creation);
+    if (!authorText || !creation || !createdAt || !header.contains(creation)) return null;
+    const edits = [...header.querySelectorAll('span.text-tl-app-text-muted')]
+      .filter(node => /^(?:Edited|編集済み)$/.test(ctLinkPreviewText(node.textContent)))
+      .map(node => ({ node, value: node.getAttribute('title') || '' }));
+    if (edits.length > 1 || edits.some(edit => !ctTimestampParse(edit.value))) return null;
+    return { post, parent, header, author, authorText, creation, createdAt, edits, context: ctLinkPreviewContext() };
+  }
+  function ctLinkPreviewRejectSource(body) {
+    if (body) ctLinkPreviewState.originals.delete(body);
+    return null;
+  }
   function ctLinkPreviewSource(body) {
-    if (!body?.isConnected || body.closest('[hidden],[aria-hidden="true"],[data-ct-profile-timeline-hidden],[data-ct-keyword-hidden],.ct-keyword-collapsed,.ct-links-filter-hidden')) return null;
+    if (!body?.isConnected || body.closest('[hidden],[aria-hidden="true"],[data-ct-profile-timeline-hidden],[data-ct-keyword-hidden],.ct-keyword-collapsed,.ct-links-filter-hidden')) return ctLinkPreviewRejectSource(body);
     const profile = body.matches('p.ct-profile-text[data-ct-link-preview-source="original"]') && body.closest('.ct-profile-row[data-ct-profile-post]');
     if (profile) {
       if (body.parentElement?.matches('.ct-profile-row-main') && body.parentElement.parentElement === profile &&
@@ -8018,21 +8078,38 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       }
       return null;
     }
-    if (!body.matches('p.tl-user-text.whitespace-pre-wrap.break-words') || body.closest(ctLinkPreviewProtected)) return null;
+    if (!body.matches('p.tl-user-text.whitespace-pre-wrap.break-words') || body.closest(ctLinkPreviewProtected)) return ctLinkPreviewRejectSource(body);
     const post = body.closest('article'), parent = body.parentElement;
-    if (!post || !parent?.matches('div.min-w-0.flex-1') || parent.closest('article') !== post) return null;
+    if (!post || !parent?.matches('div.min-w-0.flex-1') || parent.closest('article') !== post) return ctLinkPreviewRejectSource(body);
     const header = body.previousElementSibling;
-    if (!header?.matches('div') || !header.querySelector('button.font-bold.truncate') ||
-        [...header.querySelectorAll('button')].some(button => /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()))) return null;
+    if (!header?.matches('div') || !header.querySelector('button.font-bold.truncate')) return ctLinkPreviewRejectSource(body);
     // A nested original body belongs to its own article. Poll labels, quoted
     // line-clamped snippets and live translation paragraphs do not qualify.
     const originals = [...parent.children].filter(node => node.matches('p.tl-user-text.whitespace-pre-wrap.break-words'));
-    if (originals.length !== 1) return null;
+    if (originals.length !== 1) return ctLinkPreviewRejectSource(body);
+    let url = '';
     for (const anchor of body.querySelectorAll('a[href]')) {
-      const url = ctLinkPreviewURL(anchor.getAttribute('href'), '', false);
-      if (url && !anchor.closest('button,[role="button"]')) return { body, post, url, text: body.textContent };
+      const candidate = ctLinkPreviewURL(anchor.getAttribute('href'), '', false);
+      if (candidate && !anchor.closest('button,[role="button"]')) { url = candidate; break; }
     }
-    return null;
+    if (!url) return ctLinkPreviewRejectSource(body);
+    const translated = [...header.querySelectorAll('button')]
+      .some(button => /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()));
+    const identity = ctLinkPreviewNativeIdentity(post, parent, header);
+    if (translated) {
+      const original = ctLinkPreviewState.originals.get(body);
+      if (!identity || !original || original.url !== url ||
+          ['post', 'parent', 'header', 'author', 'authorText', 'creation', 'createdAt', 'context']
+            .some(key => identity[key] !== original[key]) || identity.edits.length !== original.edits.length ||
+          identity.edits.some((edit, index) => edit.node !== original.edits[index].node || edit.value !== original.edits[index].value)) {
+        return ctLinkPreviewRejectSource(body);
+      }
+      return { body, post, url: original.url, text: original.text };
+    }
+    const result = { body, post, url, text: body.textContent };
+    if (identity) ctLinkPreviewState.originals.set(body, { ...identity, url, text: result.text });
+    else ctLinkPreviewState.originals.delete(body);
+    return result;
   }
   function ctLinkPreviewCopy(ja, en) { return typeof CT_LOCALE !== 'undefined' && CT_LOCALE === 'ja' ? ja : en; }
   function ctLinkPreviewEnsureStyle() {
@@ -8109,7 +8186,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const metadataURL = ctLinkPreviewURL(url);
     const record = { body, post, url, text, metadataURL: metadataURL ? metadataURL.split('#')[0] : '',
       card, link, domain, title, description, fetch: fetchButton, status, context: ctLinkPreviewContext(),
-      visible: false, attempted: false, manual: false, job: null, objectURL: '', imageBytes: 0 };
+      visible: false, bodyVisible: false, cardVisible: false, attempted: false, manual: false, job: null, objectURL: '', imageBytes: 0 };
     // Stop only the containing native post's click navigation. Link default
     // navigation and all native body handlers remain intact.
     card.addEventListener('click', event => event.stopPropagation());
@@ -8159,8 +8236,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctLinkPreviewDrop(record, keepObserved = false) {
     ctLinkPreviewDetach(record); if (!keepObserved) { ctLinkPreviewState.observer?.unobserve(record.body); ctLinkPreviewState.observedSources.delete(record.body); }
+    ctLinkPreviewState.observer?.unobserve(record.card); ctLinkPreviewState.cards.delete(record.card);
+    record.visible = false; record.bodyVisible = false; record.cardVisible = false;
     ctLinkPreviewReleaseImage(record);
     record.card.remove(); ctLinkPreviewState.records.delete(record.body);
+  }
+  function ctLinkPreviewObserve(record) {
+    ctLinkPreviewState.cards.set(record.card, record);
+    if (!ctLinkPreviewState.observer) return;
+    ctLinkPreviewState.observer.observe(record.body); ctLinkPreviewState.observedSources.add(record.body);
+    ctLinkPreviewState.observer.observe(record.card);
   }
   function ctLinkPreviewMakeRoom() {
     if (ctLinkPreviewState.records.size < ctLinkPreviewLimits.records) return true;
@@ -8224,35 +8309,58 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctLinkPreviewsPatch(root = document) {
     if (!ctLinkPreviewActive()) { ctLinkPreviewsCleanup(); return; }
     const context = ctLinkPreviewContext(), enabled = ctLinkPreviewEnabled();
-    if (ctLinkPreviewState.context && ctLinkPreviewState.context !== context) ctLinkPreviewsCleanup();
+    if (ctLinkPreviewState.context && ctLinkPreviewState.context !== context ||
+        ctLinkPreviewState.enabled !== null && ctLinkPreviewState.enabled !== enabled) ctLinkPreviewsCleanup();
     ctLinkPreviewState.context = context;
-    if (ctLinkPreviewState.enabled !== null && ctLinkPreviewState.enabled !== enabled) {
-      ctLinkPreviewState.generation++;
-      for (const record of ctLinkPreviewState.records.values()) { ctLinkPreviewDetach(record); record.manual = false; record.attempted = false; }
-    }
     ctLinkPreviewState.enabled = enabled;
-    for (const body of ctLinkPreviewState.observedSources) if (!body.isConnected) {
+    for (const body of ctLinkPreviewState.observedSources) if (!body.isConnected ||
+        !ctLinkPreviewState.records.has(body) && !ctLinkPreviewSource(body)) {
       ctLinkPreviewState.observer?.unobserve(body); ctLinkPreviewState.observedSources.delete(body);
     }
     for (const record of [...ctLinkPreviewState.records.values()]) if (!ctLinkPreviewValid(record)) ctLinkPreviewDrop(record);
     if (!ctLinkPreviewState.observer && typeof IntersectionObserver === 'function') {
-      ctLinkPreviewState.observer = new IntersectionObserver(entries => {
+      const observer = new IntersectionObserver(entries => {
+        // A disconnected observer may still deliver an already queued batch.
+        if (ctLinkPreviewState.observer !== observer) return;
+        const affected = new Set(), returning = [];
         for (const entry of entries) {
+          let record = ctLinkPreviewState.records.get(entry.target) || ctLinkPreviewState.cards.get(entry.target);
           if (!entry.target.isConnected) { ctLinkPreviewState.observer?.unobserve(entry.target);
-            ctLinkPreviewState.observedSources.delete(entry.target); continue; }
-          let record = ctLinkPreviewState.records.get(entry.target);
-          if (!record && entry.isIntersecting && entry.intersectionRatio > 0 && ctLinkPreviewMakeRoom()) {
-            const source = ctLinkPreviewSource(entry.target);
-            if (source) { ctLinkPreviewEnsureStyle(); record = ctLinkPreviewCreate(source); ctLinkPreviewState.records.set(entry.target, record); }
+            ctLinkPreviewState.observedSources.delete(entry.target);
+            if (record) ctLinkPreviewDrop(record);
+            continue; }
+          const visible = entry.isIntersecting && entry.intersectionRatio > 0;
+          if (!record) {
+            if (visible && ctLinkPreviewState.observedSources.has(entry.target)) returning.push(entry);
+            continue;
           }
-          if (!record) continue;
-          record.visible = entry.isIntersecting && entry.intersectionRatio > 0;
-          if (!record.visible) ctLinkPreviewDetach(record);
-          else if (!ctLinkPreviewValid(record)) ctLinkPreviewDrop(record);
-          else ctLinkPreviewQueue(record);
+          if (entry.target === record.body) record.bodyVisible = visible;
+          else record.cardVisible = visible;
+          affected.add(record);
         }
+        // Resolve the whole batch before detaching a request. Scrolling from
+        // the original text into its card often reports body=false first.
+        for (const record of affected) record.visible = record.bodyVisible || record.cardVisible;
+        for (const entry of returning) {
+          if (!entry.target.isConnected || ctLinkPreviewState.records.has(entry.target)) continue;
+          const source = ctLinkPreviewSource(entry.target);
+          if (!source) { observer.unobserve(entry.target); ctLinkPreviewState.observedSources.delete(entry.target); continue; }
+          if (!ctLinkPreviewMakeRoom()) continue;
+          ctLinkPreviewEnsureStyle(); const record = ctLinkPreviewCreate(source);
+          record.bodyVisible = true; record.visible = true;
+          ctLinkPreviewState.records.set(entry.target, record); ctLinkPreviewObserve(record); affected.add(record);
+        }
+        for (const record of [...affected]) {
+          if (ctLinkPreviewState.records.get(record.body) !== record) { affected.delete(record); continue; }
+          if (!ctLinkPreviewValid(record)) { ctLinkPreviewDrop(record); affected.delete(record); }
+        }
+        // Attach newly visible duplicate destinations before removing their
+        // old row, so a same-batch handoff can reuse the pending request too.
+        for (const record of affected) if (record.visible) ctLinkPreviewQueue(record);
+        for (const record of affected) if (!record.visible) ctLinkPreviewDetach(record);
         ctLinkPreviewPump();
       }, { threshold: 0 });
+      ctLinkPreviewState.observer = observer;
     }
     const selector = 'p.tl-user-text.whitespace-pre-wrap.break-words,p.ct-profile-text[data-ct-link-preview-source="original"]';
     const bodies = new Set(root.querySelectorAll?.(selector) || []);
@@ -8265,10 +8373,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (!ctLinkPreviewMakeRoom()) { if (ctLinkPreviewState.observer) {
         ctLinkPreviewState.observer.observe(body); ctLinkPreviewState.observedSources.add(body); } continue; }
       ctLinkPreviewEnsureStyle(); const record = ctLinkPreviewCreate(source); ctLinkPreviewState.records.set(body, record);
-      if (ctLinkPreviewState.observer) { ctLinkPreviewState.observer.observe(body); ctLinkPreviewState.observedSources.add(body); }
-      else {
+      ctLinkPreviewObserve(record);
+      if (!ctLinkPreviewState.observer) {
         // Older browsers keep a useful manual card; no unseen automatic reads.
-        const rect = body.getBoundingClientRect(); record.visible = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight;
+        const visible = node => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight; };
+        record.bodyVisible = visible(body); record.cardVisible = visible(record.card);
+        record.visible = record.bodyVisible || record.cardVisible;
       }
     }
     for (const record of ctLinkPreviewState.records.values()) ctLinkPreviewQueue(record);
@@ -8276,9 +8386,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctLinkPreviewsCleanup() {
     ctLinkPreviewState.generation++;
+    ctLinkPreviewState.originals = new WeakMap();
     ctLinkPreviewState.observer?.disconnect(); ctLinkPreviewState.observer = null;
     ctLinkPreviewState.observedSources.clear();
     for (const record of [...ctLinkPreviewState.records.values()]) ctLinkPreviewDrop(record);
+    ctLinkPreviewState.cards.clear();
     for (const job of ctLinkPreviewState.jobs.values()) { job.canceled = true; job.request?.abort(); }
     ctLinkPreviewState.jobs.clear(); ctLinkPreviewState.cache.clear(); ctLinkPreviewState.imageBytes = 0; ctLinkPreviewState.recordImageBytes = 0;
     ctLinkPreviewState.style?.remove(); ctLinkPreviewState.style = null;
@@ -8639,6 +8751,33 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ['Manage your public profile, photo, and more.', '公開プロフィール、プロフィール画像などを管理します。'],
     ['Manage two-factor authentication and security.', '2要素認証などのセキュリティ設定を管理します。'],
     ['Manage two-factor authentication and account security.', '2要素認証などのセキュリティ設定を管理します。'],
+    ['Manage two-factor authentication and where you\'re signed in.', '2要素認証とログイン中の端末を管理します。'],
+    ['Where you\'re signed in', 'ログイン中の端末'],
+    ['The devices signed in to your account. Sign out of any you do not recognize.', 'このアカウントにログインしている端末です。心当たりのない端末からはログアウトできます。'],
+    ['Loading devices...', '端末を読み込み中…'],
+    ['This device', 'この端末'],
+    ['Active now', '現在使用中'],
+    ['Unknown device', '不明な端末'],
+    ['Sign out of all other devices', '他のすべての端末からログアウト'],
+    ['Sign out this device?', 'この端末からログアウトしますか？'],
+    ['Sign out of all other devices?', '他のすべての端末からログアウトしますか？'],
+    ['Every device except this one will be signed out and will need your password to sign back in.', 'この端末以外はすべてログアウトされます。再度ログインするにはパスワードが必要です。'],
+    ['Signed out of that device.', 'その端末からログアウトしました。'],
+    ['Signed out of all other devices.', '他のすべての端末からログアウトしました。'],
+    ['Could not sign out that device. Please try again.', 'その端末からログアウトできませんでした。もう一度お試しください。'],
+    ['Could not sign out other devices. Please try again.', '他の端末からログアウトできませんでした。もう一度お試しください。'],
+    ['Could not load your devices.', '端末を読み込めませんでした。'],
+    ['Could not refresh your devices. Showing the last list we loaded.', '端末を更新できませんでした。前回取得した一覧を表示しています。'],
+    ['Device list isn\'t available right now.', '現在、端末一覧を利用できません。'],
+    ['Enter your password to sign out other devices.', '他の端末からログアウトするにはパスワードを入力してください。'],
+    ['Confirm your password to manage your devices from this tab.', 'このタブで端末を管理するには、パスワードを確認してください。'],
+    ['Confirm password', 'パスワードを確認'],
+    ['Showing your 50 most recently active devices. Signing out of all other devices also signs out the ones not shown.', '最近使用した50台を表示しています。「他のすべての端末からログアウト」では、表示されていない端末からもログアウトします。'],
+    ['Enter your password to manage your devices.', '端末を管理するにはパスワードを入力してください。'],
+    ['Could not confirm it\'s you. Please try again.', '本人確認ができませんでした。もう一度お試しください。'],
+    ['You were signed out from another device.', '別の端末からの操作でログアウトされました。'],
+    ['Quoted a post', '引用ツイート'],
+    ['Media in the post this replies to', '返信先のツイートの写真・動画'],
     ['Update your public profile. To change your username or email, go to Your account.', '公開プロフィールを編集します。ユーザー名やメールアドレスを変更するには、アカウント設定を開いてください。'],
     ['Help protect your account from unauthorized access by requiring a second authentication method in addition to your password.', 'パスワードに加えて2つ目の認証方法を使用し、不正アクセスからアカウントを保護します。'],
     ['Your username was set when you created your account and cannot be changed here.', 'ユーザー名はアカウント作成時に設定されたため、ここでは変更できません。'],
@@ -8829,7 +8968,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (nativeLocalizationAccountMenu(el) || nativeLocalizationBlockMenu(el) || isNativeSettingsNavigation(el) || isNativeSettingsValue(el)) return true;
     if (record.attribute === null && isNativeNotificationTimestamp(el) && record.node === el.lastChild) return true;
     const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')] ||
-      (/^\/user\/[A-Za-z0-9_.-]+\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
+      (/^\/(?:user\/[A-Za-z0-9_.-]+|post\/[A-Za-z0-9_-]{1,160})\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
     if (record.attribute || !routeTitle || clean(record.original) !== routeTitle ||
         !el?.matches('h2.truncate') || el.closest('article')) return false;
     const visibleHeading = [...document.querySelectorAll('main h2')].find(heading => {
@@ -9378,6 +9517,61 @@ if (/^just\s+now$/i.test(t)) {
       !el.closest('article,button,a,[data-user-content]');
   }
 
+  function nativeLocalizationSessionContext(el) {
+    if (!/^\/settings\/?$/.test(location.pathname) || !el ||
+        el.closest('article,a,input,textarea,[data-user-content],[data-ct-owned]')) return null;
+    const dialog = el.closest('[role="dialog"]');
+    if (dialog && [...dialog.querySelectorAll('h2,h3,h4')].some(title =>
+      /^(?:Sign out this device\?|Sign out of all other devices\?|この端末からログアウトしますか？|他のすべての端末からログアウトしますか？)$/.test(clean(title.textContent)))) return { dialog };
+    const section = el.closest('main section');
+    const title = section && [...section.querySelectorAll('h4.font-extrabold')].find(title =>
+      /^(?:Where you're signed in|ログイン中の端末)$/.test(clean(title.textContent)));
+    const container = title?.parentElement?.parentElement;
+    if (!container?.matches('div.flex.flex-col.gap-5') || !container.contains(el)) return null;
+    const row = el.closest('div.flex.items-center.gap-3.px-4');
+    return { container, row: row && container.contains(row) && row.querySelector(':scope > svg') ? row : null };
+  }
+
+  function nativeSessionJapaneseText(el, text) {
+    const context = nativeLocalizationSessionContext(el);
+    if (!context) return null;
+    if (context.dialog && el.matches('p')) {
+      const confirmation = text.match(/^(.{1,160}) will be signed out and will need your password to sign back in\.$/);
+      if (confirmation) return `${confirmation[1]}からログアウトします。再度ログインするにはパスワードが必要です。`;
+    }
+    if (!context.row) return JP.get(text);
+    if (el.matches('span.truncate')) return text === 'Unknown device' ? JP.get(text) : null;
+    if (el.matches('span.shrink-0.rounded-full')) return text === 'This device' ? JP.get(text) : null;
+    if (!el.matches('span.text-tl-app-text-muted.mt-0\\.5')) return JP.get(text);
+    // React renders activity and the prefixed sign-in date as separate text
+    // nodes. Translate each in place without merging nodes React still owns.
+    const prefixedDate = /^· Signed in /.test(text);
+    const parts = (prefixedDate ? text.slice(2) : text).split(' · ');
+    if (parts.length > 2) return null;
+    const convert = part => {
+      if (part === 'Active now') return '現在使用中';
+      const age = part.match(/^Active (\d+)([mhd]) ago$/);
+      if (age) return `${age[1]}${{ m: '分', h: '時間', d: '日' }[age[2]]}前に使用`;
+      const last = part.match(/^Last active ([A-Za-z]+\.?) (\d{1,2})$/);
+      if (last) {
+        const month = nativeLocalizationMonthNumber(last[1]);
+        const day = Number(last[2]);
+        if (month && day >= 1 && day <= [31,29,31,30,31,30,31,31,30,31,30,31][month-1]) return `最終使用：${month}月${day}日`;
+      }
+      const joined = part.match(/^Signed in ([A-Za-z]+\.?) (\d{1,2}), (\d{4})$/);
+      if (joined) {
+        const month = nativeLocalizationMonthNumber(joined[1]);
+        const day = Number(joined[2]);
+        const year = Number(joined[3]);
+        const date = month && ctTimestampParse(`${joined[3]}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T00:00:00Z`);
+        if (date && year >= 1000) return `${year}年${month}月${day}日にログイン`;
+      }
+      return null;
+    };
+    const converted = parts.map(convert);
+    return converted.every(Boolean) ? (prefixedDate ? '· ' : '') + converted.join(' · ') : null;
+  }
+
   function isNativeNotificationTimestamp(el) {
     const row = el?.matches('span.text-tl-app-text-soft') && localizationNotificationRow(el);
     if (!row) return false;
@@ -9435,11 +9629,18 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   function nativeLocalizationParentPostPreview(el) {
-    const button = el?.closest('button.flex.w-full.items-start.gap-3.px-4.pt-3.pb-2.text-left');
-    if (!button?.parentElement?.matches('div.border-b.border-tl-app-border') ||
+    const button = el?.closest('button.flex.w-full.items-start.gap-3.px-4.pt-3.pb-2.text-left,div.flex.w-full.items-start.gap-3.px-4.pt-3.text-left');
+    const parent = button?.parentElement;
+    const wrapper = parent?.matches('div.border-b.border-tl-app-border') ||
+      button?.matches('div.pb-0') && parent?.matches('div.min-h-0.flex-1.overflow-y-auto') &&
+      !!parent.closest('main') && /^\/post\/[A-Za-z0-9_-]{1,160}\/?$/.test(location.pathname);
+    if (!wrapper ||
         button !== button.parentElement.firstElementChild ||
         !button.nextElementSibling?.matches('article')) return null;
+    if (button.tagName === 'DIV' && !button.matches('.pb-2,.pb-0')) return null;
     const body = button.querySelector(':scope > div.min-w-0.flex-1');
+    if (!body && button.tagName === 'DIV' && button.querySelector('span[aria-hidden="true"].h-8.w-8') &&
+        el.matches('p.min-w-0.flex-1.self-center.italic.leading-5.text-tl-app-text-muted') && el.parentElement === button) return { button, deleted: true };
     const header = body?.firstElementChild;
     return header?.matches('div.flex.min-w-0.flex-wrap.items-center.gap-1.leading-4') &&
       header.firstElementChild?.matches('span.font-semibold.truncate') &&
@@ -9449,10 +9650,16 @@ if (/^just\s+now$/i.test(t)) {
 
   function isNativeParentPostTimestamp(el) {
     const preview = nativeLocalizationParentPostPreview(el);
-    return !!preview && el.matches('span.shrink-0.text-tl-app-text-muted') && !el.hasAttribute('title') &&
-      el.parentElement === preview.header && el === preview.header.lastElementChild &&
-      el.previousElementSibling?.matches('span.text-tl-app-text-muted') &&
-      clean(el.previousElementSibling.textContent) === '·';
+    const time = el?.matches('a.hover\\:underline') ? el.parentElement : el;
+    if (!preview || !time?.matches('span.shrink-0.text-tl-app-text-muted') || time.hasAttribute('title') ||
+        time.parentElement !== preview.header || time !== preview.header.lastElementChild ||
+        !time.previousElementSibling?.matches('span.text-tl-app-text-muted') ||
+        clean(time.previousElementSibling.textContent) !== '·') return false;
+    if (el === time) return !time.children.length;
+    const handle = clean(preview.header.children[1].textContent);
+    return el === time.firstElementChild && time.children.length === 1 &&
+      /^\/post\/[A-Za-z0-9_-]{1,160}$/.test(el.getAttribute('href') || '') &&
+      [ `Open the post by ${handle} that this replies to`, `${handle}への返信元のツイートを開く` ].includes(el.getAttribute('aria-label'));
   }
 
   function isNativeTranslationMetadata(el) {
@@ -9635,7 +9842,7 @@ if (/^just\s+now$/i.test(t)) {
     // Native settings navigation also truncates its static labels. Keep the
     // protection for profile names and account values everywhere else.
     const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')] ||
-      (/^\/user\/[A-Za-z0-9_.-]+\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
+      (/^\/(?:user\/[A-Za-z0-9_.-]+|post\/[A-Za-z0-9_-]{1,160})\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
     const pageTitle = routeTitle && el.matches('h2.truncate') && clean(el.textContent) === routeTitle &&
       el === [...document.querySelectorAll('main h2')].find(heading => {
         for (let parent = heading; parent; parent = parent.parentElement) {
@@ -9643,7 +9850,8 @@ if (/^just\s+now$/i.test(t)) {
         }
         return !heading.closest('article');
       }) && !el.closest('article');
-    return !!el.closest('.truncate') && !nativeLocalizationAccountMenu(el) && !nativeLocalizationBlockMenu(el) && !isNativeNotificationTimestamp(el) && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle;
+    const unknownDevice = el.matches('span.truncate') && clean(el.textContent) === 'Unknown device' && nativeLocalizationSessionContext(el)?.row;
+    return !!el.closest('.truncate') && !unknownDevice && !nativeLocalizationAccountMenu(el) && !nativeLocalizationBlockMenu(el) && !isNativeNotificationTimestamp(el) && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle;
   }
 
   function localizationNotificationRow(el) {
@@ -9751,6 +9959,9 @@ if (/^just\s+now$/i.test(t)) {
     if (localizationNotificationAction(node)) return true;
     if (localizationNotificationRow(el)) return false;
     if (isNativeParentPostTimestamp(el)) return true;
+    const parentPreview = nativeLocalizationParentPostPreview(el);
+    if (parentPreview && el.matches('p.mt-1.text-tl-app-text-muted') &&
+        /^(?:Quoted a post|Poll · [2-5] choices)$/.test(clean(node.nodeValue))) return true;
     if (nativeLocalizationParentPostPreview(el) && el.matches('p.italic.leading-5.text-tl-app-text-muted') &&
         clean(node.nodeValue) === 'This post is no longer available') return true;
     if (isNativeTranslationMetadata(el) && node === el.firstChild &&
@@ -9760,6 +9971,7 @@ if (/^just\s+now$/i.test(t)) {
       /^(?:Report|Mute unavailable|(?:Mute|Unmute) @[A-Za-z0-9_.-]+)$/.test(clean(node.nodeValue));
     if (nativeLocalizationAccountDialog(el) && !el.closest('textarea,input')) return true;
     if (isNativeSettingsValue(el) || isNativeLocalizationHelp(el)) return true;
+    if (nativeLocalizationSessionContext(el) && nativeSessionJapaneseText(el, clean(node.nodeValue))) return true;
     if (isNativeTweetCount(el)) return true;
     const text = clean(node.nodeValue);
     const link = el.closest('a[href]');
@@ -9889,7 +10101,7 @@ if (/^just\s+now$/i.test(t)) {
   function patchUIAttributes(root = document) {
     const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
     const controls = [];
-    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],div[aria-label="Choose image"]';
+    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],div[aria-label="Choose image"],a[aria-label^="Open the post by @"],img[alt="Media in the post this replies to"]';
     if (host instanceof Element && host.matches(selector)) controls.push(host);
     host?.querySelectorAll?.(selector).forEach(el => controls.push(el));
     // Tweet 2.2.3 owns these photo controls. Match their actual structure so an
@@ -9925,8 +10137,12 @@ if (/^just\s+now$/i.test(t)) {
           el.querySelector(':scope > svg.lucide-x') &&
           el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
           el.parentElement.querySelector('textarea#public-modal-tweet-input')) el.setAttribute('aria-label', '閉じる');
-      for (const attr of ['aria-label', 'title']) {
+      for (const attr of ['aria-label', 'title', ...(el.matches('img') && nativeLocalizationParentPostPreview(el) ? ['alt'] : [])]) {
         const value = el.getAttribute(attr);
+        const parent = attr === 'aria-label' && isNativeParentPostTimestamp(el) &&
+          value?.match(/^Open the post by (@[A-Za-z0-9_.-]+) that this replies to$/);
+        const session = attr === 'aria-label' && nativeLocalizationSessionContext(el)?.row &&
+          value?.match(/^Sign out (.{1,160})$/);
         const gif = nativeLocalizationGIFMedia(el) && new Map([
           ['Animated GIF', 'GIFアニメーション'], ['Play GIF', 'GIFを再生'], ['Pause GIF', 'GIFを一時停止']
         ]).get(value);
@@ -9943,7 +10159,8 @@ if (/^just\s+now$/i.test(t)) {
         const image = photo && value?.match(/^(Open|Show) image ([1-5]) of ([2-5])$/);
         const imageLabel = image && Number(image[2]) === photo.index && Number(image[3]) === photo.count &&
           (image[1] === 'Open' ? photo.open : photo.show) ? `${image[3]}枚中${image[2]}枚目の画像を${image[1] === 'Open' ? '開く' : '表示'}` : null;
-        const out = gif || (unblockLabel ? unblockLabel[1] === 'Unblocking' ? `${unblockLabel[2]}のブロックを解除中…` : `${unblockLabel[2]}のブロックを解除` : null) || imageLabel || (value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
+        const out = (parent ? `${parent[1]}への返信元のツイートを開く` : null) ||
+          (session ? `${session[1]}からログアウト` : null) || gif || (unblockLabel ? unblockLabel[1] === 'Unblocking' ? `${unblockLabel[2]}のブロックを解除中…` : `${unblockLabel[2]}のブロックを解除` : null) || imageLabel || (value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
           choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
           likers ? `${likers[1]}件のお気に入りを表示` : JP.get(value));
@@ -9963,14 +10180,17 @@ if (/^just\s+now$/i.test(t)) {
     const sourceLanguage = isNativeTranslationMetadata(el) && node === el.firstChild && text.match(/^Translated from (.{1,80})$/);
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
-    let out = nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+    const parentPoll = nativeLocalizationParentPostPreview(el) && el.matches('p.mt-1.text-tl-app-text-muted') && text.match(/^Poll · ([2-5]) choices$/);
+    let out = nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
       (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
       isNativeTweetCount(el) && /^([\d,.]+[KMB]?) tweets?$/i.test(text) ? `${text.match(/^([\d,.]+[KMB]?)/)[1]}件のツイート` :
       isNativeTweetCount(el) && /^Tweets?$/i.test(text) ? 'ツイート' :
       /^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
-        el.closest('.sticky') && text === 'Feed' ? 'プロフィール' : JP.get(text) ||
+        el.closest('.sticky') && text === 'Feed' ? 'プロフィール' :
+      /^\/post\/[A-Za-z0-9_-]{1,160}\/?$/.test(location.pathname) && el.matches('h2.truncate') &&
+        el.closest('.sticky') && text === 'Feed' ? 'ツイート' : JP.get(text) ||
         (ctLocalizationClassicText(text) !== text ? ctLocalizationClassicText(text) : null));
     // The native help list splits this sentence around a React-owned counter.
     // Keep its text nodes and the counter so later updates still work.
@@ -10755,6 +10975,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.25.0 loaded'
+    '🐦 Classic Twitter JP v6.26.0 loaded'
   );
 })();

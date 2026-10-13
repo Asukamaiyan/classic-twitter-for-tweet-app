@@ -4,6 +4,7 @@
     authTimeout: 2500,
     authPending: null,
     authUID: null,
+    authSettled: false,
     profileTTL: 5 * 60 * 1000,
     profileTimes: new Map(),
     profileFailures: new Map()
@@ -20,6 +21,16 @@
     }
   }
 
+  function ctNativeClientDevice() {
+    // Tweet owns this persisted device identity. Reuse only its verified UUID;
+    // never create, migrate or write a session/device identifier here.
+    try {
+      const value = globalThis.localStorage?.getItem('bluebird.clientDeviceId');
+      return typeof value === 'string' && value.length === 36 &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : null;
+    } catch { return null; }
+  }
+
   function requestJSON(url, headers = {}) {
     const target = ctAllowedAPIURL(url);
     if (!target) return Promise.resolve(null);
@@ -27,7 +38,10 @@
     if (typeof headers?.Authorization === 'string' &&
         /^Bearer [A-Za-z0-9._~-]+$/.test(headers.Authorization)) {
       requestHeaders.Authorization = headers.Authorization;
+      const device = ctNativeClientDevice();
+      if (device) requestHeaders['X-Client-Device'] = device;
     }
+    const requestUID = ctNetworkState.authUID;
 
     return new Promise(resolve => {
       let settled = false;
@@ -98,10 +112,25 @@
         return;
       }
       if (typeof fetch !== 'function') return finish(null);
-      Promise.resolve().then(() => fetch(target, {
-        method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
-        ...(controller ? { signal: controller.signal } : {})
-      })).then(async response => {
+      const fetchRead = async () => {
+        const options = {
+          method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
+          ...(controller ? { signal: controller.signal } : {})
+        };
+        try { return await fetch(target, options); }
+        catch (error) {
+          // Match the native GET compatibility fallback only for a rejected
+          // fetch with the new header. An HTTP response (especially session
+          // revocation/expiry) is authoritative and never enters this path.
+          const device = requestHeaders['X-Client-Device'];
+          if (!device || settled || controller?.signal.aborted || error?.name === 'AbortError' ||
+              ctNetworkState.authUID !== requestUID || ctNativeClientDevice() !== device) throw error;
+          const fallbackHeaders = { ...requestHeaders };
+          delete fallbackHeaders['X-Client-Device'];
+          return fetch(target, { ...options, headers: fallbackHeaders });
+        }
+      };
+      Promise.resolve().then(fetchRead).then(async response => {
         if (!response?.ok || (response.url && ctAllowedAPIURL(response.url) !== target)) return null;
         const body = await response.text();
         if (typeof body !== 'string' || body.length > 2 * 1024 * 1024) return null;
@@ -216,6 +245,7 @@
 
   function getAuth() {
     if (ctNetworkState.authPending) return ctNetworkState.authPending;
+    let identityChanged = false;
     const pending = Promise.resolve().then(async () => {
       const local = ctReadStorageAuth();
       const candidates = [...local, ...await ctReadIDBAuth()];
@@ -225,17 +255,21 @@
         ? candidates.sort((a, b) => b.expires - a.expires)[0] : null;
       const auth = latest ? { token: latest.token, uid: latest.uid } : null;
       if (ctNetworkState.authUID !== (auth?.uid || null)) {
+        identityChanged = true;
         ctNetworkState.authUID = auth?.uid || null;
         profileCache.clear();
         ctNetworkState.profileTimes.clear();
         ctNetworkState.profileFailures.clear();
-        // Identity can finish loading after the current DOM scan. Revisit
-        // account-scoped panels even when no native node changes afterward.
-        if (typeof ctScheduleScan === 'function') ctScheduleScan();
       }
       return auth;
     }).catch(() => null).finally(() => {
+      const firstSettlement = !ctNetworkState.authSettled;
+      ctNetworkState.authSettled = true;
       if (ctNetworkState.authPending === pending) ctNetworkState.authPending = null;
+      // The first lookup can finish without a user, or after a local read
+      // failure. Revisit the original DOM before native auto translation is
+      // allowed to start, as well as whenever the account identity changes.
+      if ((firstSettlement || identityChanged) && typeof ctScheduleScan === 'function') ctScheduleScan();
     });
     ctNetworkState.authPending = pending;
     return pending;
