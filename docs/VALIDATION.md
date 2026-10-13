@@ -1,6 +1,6 @@
 # 6.26.0 / Tweet 2.3.1 対応の検証
 
-2026-10-13。公式Webの表示 **2.3.1 / build 1791852090** と公開bundleを照合し、全6配布版を6.26.0へ更新します。新契約は [API_RESEARCH.md](API_RESEARCH.md) に記録しました。
+2026-10-13。公式Webの表示 **2.3.1 / build 1791852090** と公開bundleを照合し、全6配布版を6.26.0へ更新し、Greasy Forkへ公開しました。新契約は [API_RESEARCH.md](API_RESEARCH.md) に記録しました。
 
 - 最終 `npm run check` は **771 PASS、0 FAIL、0 SKIP**。6生成版の構文・metadata・展開、端末識別header、読取だけのnetwork-error fallback、返信元とセッション画面の日本語化、既存メディア・お気に入り・ニュース・通知・URLカードの回帰を含みます。
 - 途中の全suiteは769 PASS／2 FAIL。配布版の固定400msで初期認証確定の正常な追加scanが遅れ、idle baselineの後に走ることを切り分けました。実際の起動markerと上限付きquiet windowで開始条件を揃え、500msの厳密な走査回数比較と後続native変更の確認を保持。450msの初期負荷で修正前の失敗・修正後の成功を再現し、意図的な100ms自己scan loopは修正後も失敗しました。機能コードの処理を隠す変更ではありません。
@@ -8,6 +8,10 @@
 - ログイン済み第一者Webを専用の一時Chromiumタブで通常操作し、native端末一覧の日本語日時・activity・ARIAを確認。ログアウト、パスワード、MFA、投稿操作は行っていません。公開コードを開発用CDPで実行した確認で、Tampermonkey／Stayそのものの起動やインストールを確認済みとは扱いません。
 - 返信一覧の新しい親リンクを実際に押して元投稿へ移動。詳細の見出し「ツイート」、返信元の日本語経過時間と元本文の保持を確認。1280pxと390pxのCSS viewportで表示し、390px時にdocumentの横幅も390px、元のリンクと返信入力を保持。viewport変更は解除し、操作用の一時タブは終了時に閉じます。
 - 以前の6.25.1候補にあるカード／本文の合算visibilityと、認証確定後の原文捕捉を含めて更新。実機Safari＋Stayの通信失敗の原因や、修正版での実取得は今回未確認です。Android実機、実サービスの書込受理、最低対応ブラウザの受入れも未確認です。
+
+- GitHub [PR #26](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/26)の実装commit `1e4edda` はpush／PR CIの2件成功。`501e66b` でmainへマージしました。既存の全6 Greasy Fork IDを更新し、送信前にコード／案内の完全一致、限定公開・HTML・adult=falseを確認して保持しました。
+- 通常の6コードURLと6案内URLを匿名GETし、全12件HTTP200、全コード6.26.0、生成コードとの一致を確認。Greasy Fork追加download/update metadataと改行・末尾空白だけを正規化しました。案内は追加される空段落と境界空白を除き、全非空text node・順序付き見出し／段落／リスト／表セル・全リンクラベル／行先が一致。未比較の非空textは許容していません。初回の全text連結比較はsanitizerの空段落と境界空白で不一致になり、診断と初回JSONを残しました。
+- 公開操作は、導入済みStay／Tampermonkeyの自動更新受入れとは区別します。利用者は管理アプリで更新を確認し、Tweetを再読み込みしてください。公開状態の画面と `public-code-guide-checks.json`、`publication-submit-checks.json`、`github-ci.json` を保存しました。
 
 証跡はリポジトリ外 `outputs/tweet-update-2026-10-13/` の `userscript-accepted-check.log`、公開bundle、独立レビュー、起動遅延の前後／自己loop診断、desktop/mobile画面に保存しています。アカウント・投稿・端末の画面を公開ソースへ入れません。以下の実機と公開履歴はそれぞれの日付の記録です。
 
