@@ -133,7 +133,7 @@ for (const { beforeReady, firstFile, locale } of [
 }
 
 for (const { file, locale } of distributions) {
-  test(`${file}: full startup preserves content and settles when idle`, async () => {
+  test(`${file}: full startup preserves content and settles when idle`, async t => {
     const dom = new JSDOM(`<!doctype html><html><head></head><body><nav><button>Settings</button></nav><main>
       <article><div><div class="relative inline-flex shrink-0 isolate"><button class="rounded-full" aria-label="View @someone's profile"><img class="rounded-full object-cover" alt="someone avatar"></button><span role="button" tabindex="0" aria-label="Follow @someone" class="absolute -bottom-0.5 -right-0.5"><svg class="lucide-plus"></svg></span></div><button class="truncate font-bold">someone</button>
       <p aria-live="polite"><button>Show translation</button></p></div>
@@ -143,6 +143,7 @@ for (const { file, locale } of distributions) {
       url: 'https://app.tweet.app/feed', runScripts: 'outside-only', pretendToBeVisual: true
     });
     const { window } = dom;
+    t.after(() => closeFixture(dom));
     const errors = [];
     window.addEventListener('error', e => errors.push(e.error || e.message));
     window.console.debug = (...args) => errors.push(args);
@@ -153,7 +154,22 @@ for (const { file, locale } of distributions) {
     const walker = window.document.createTreeWalker.bind(window.document);
     window.document.createTreeWalker = (...args) => { scans++; return walker(...args); };
     window.eval(fs.readFileSync(path.join(root, file), 'utf8'));
-    await new Promise(resolve => setTimeout(resolve, 400));
+    // DOMContentLoaded startup and first auth settlement can finish after a
+    // fixed delay when parallel suites occupy the runner. Wait for the actual
+    // runtime/tools and a bounded quiet window, then keep the strict idle
+    // observation below. A recurring scan loop cannot reach this window.
+    const settleDeadline = Date.now() + 3000;
+    let lastScans = scans, quietSince = Date.now(), startupReady = false;
+    while (Date.now() < settleDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+      const now = Date.now();
+      startupReady = window.document.documentElement.dataset.ctActiveVersion === releaseVersion &&
+        !!window.document.querySelector('[data-ct-local-ui]');
+      if (!startupReady || scans !== lastScans) { lastScans = scans; quietSince = now; }
+      if (startupReady && now - quietSince >= 250) break;
+    }
+    assert.ok(startupReady && Date.now() - quietSince >= 250,
+      'startup must complete and scans must reach a bounded quiet window');
     assert.deepEqual(errors, []);
     assert.equal(window.document.querySelector('article p.break-words').textContent, 'Home Like Post Following');
     assert.equal(window.document.querySelector('textarea').value, 'Post Home');
@@ -173,7 +189,6 @@ for (const { file, locale } of distributions) {
     await new Promise(resolve => setTimeout(resolve, 250));
     assert.equal(label.textContent, locale === 'en' ? 'Settings' : '設定');
     assert.deepEqual(errors, []);
-    closeFixture(dom);
   });
 }
 

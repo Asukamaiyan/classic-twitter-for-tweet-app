@@ -8,6 +8,7 @@ const apiURL = 'https://api.tweet.app/api/users/by-username/alice';
 const firebaseKey = 'firebase:authUser:public_api_key:[DEFAULT]';
 const tokenA = 'test-token-a.'.repeat(6);
 const tokenB = 'test-token-b.'.repeat(6);
+const deviceID = '01234567-89ab-4cde-8123-456789abcdef';
 function authValue(token = tokenA, uid = 'viewer', expirationTime = Date.now() + 60000) {
   return { uid, apiKey: 'public_api_key', stsTokenManager: { accessToken: token, expirationTime } };
 }
@@ -99,6 +100,143 @@ test('legacy GM request is GET-only, finite, cookie-free and returns parsed JSON
   assert.equal(options.responseType, 'text');
   assert.equal(options.headers.Authorization, `Bearer ${tokenA}`);
   assert.equal(options.headers.Cookie, undefined);
+});
+
+test('authenticated API reads reuse only the native persisted device UUID in GM and fetch transports', async () => {
+  for (const transport of ['GM', 'fetch']) {
+    let options;
+    const local = storage({ 'bluebird.clientDeviceId': deviceID });
+    const c = harness({ localStorage: local, ...(transport === 'GM' ? {
+      GM_xmlhttpRequest(value) { options = value; value.onload({ status: 200, responseText: '{}' }); }
+    } : { fetch: async (url, value) => { options = value; return { ok: true, url, text: async () => '{}' }; } }) });
+    await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}`, 'X-Client-Device': 'caller-spoof' });
+    assert.equal(options.headers['X-Client-Device'], deviceID);
+    assert.equal(options.headers.Authorization, `Bearer ${tokenA}`);
+    assert.equal(options.method, 'GET');
+    assert.deepEqual([...local.map], [['bluebird.clientDeviceId', deviceID]], 'native storage remains unchanged');
+  }
+});
+
+test('device identity is omitted for absent, malformed and inaccessible native storage', async () => {
+  for (const value of [undefined, '', 'device', deviceID + '\n', ' ' + deviceID, 'https://example.test/device', '0'.repeat(36)]) {
+    let options;
+    const local = storage(value == null ? {} : { 'bluebird.clientDeviceId': value });
+    const c = harness({ localStorage: local, GM_xmlhttpRequest(request) {
+      options = request; request.onload({ status: 200, responseText: '{}' });
+    } });
+    await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}` });
+    assert.equal(options.headers['X-Client-Device'], undefined, String(value));
+    assert.equal(local.map.get('bluebird.clientDeviceId'), value);
+  }
+  const c = harness({ localStorage: { getItem() { throw new Error('storage unavailable'); } },
+    GM_xmlhttpRequest(request) {
+      assert.equal(request.headers['X-Client-Device'], undefined);
+      request.onload({ status: 200, responseText: '{}' });
+    } });
+  assert.ok(await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}` }));
+});
+
+test('anonymous, invalid-auth and rejected foreign requests never read or disclose native device identity', async () => {
+  const local = storage({ 'bluebird.clientDeviceId': deviceID });
+  const calls = [];
+  const c = harness({ localStorage: local, GM_xmlhttpRequest(request) {
+    calls.push(request); request.onload({ status: 200, responseText: '{}' });
+  } });
+  await c.network.requestJSON(apiURL);
+  await c.network.requestJSON(apiURL, { Authorization: 'Bearer bad token', 'X-Client-Device': deviceID });
+  await c.network.requestJSON('https://publisher.example/api/posts', { Authorization: `Bearer ${tokenA}` });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(local.reads, []);
+  for (const request of calls) assert.equal(request.headers['X-Client-Device'], undefined);
+});
+
+test('native device UUID is read for every authenticated request after a device change', async () => {
+  const local = storage({ 'bluebird.clientDeviceId': deviceID });
+  const ids = [];
+  const c = harness({ localStorage: local, GM_xmlhttpRequest(request) {
+    ids.push(request.headers['X-Client-Device']); request.onload({ status: 200, responseText: '{}' });
+  } });
+  await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}` });
+  const next = 'abcdef01-2345-4abc-8def-0123456789AB';
+  local.map.set('bluebird.clientDeviceId', next);
+  await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenB}` });
+  assert.deepEqual(ids, [deviceID, next]);
+});
+
+test('a rejected fetch GET retries once without the device header and retains exact auth, URL and deadline', async () => {
+  const calls = [];
+  const c = harness({ localStorage: storage({ 'bluebird.clientDeviceId': deviceID }),
+    fetch: async (url, request) => {
+      calls.push({ url, request });
+      if (calls.length === 1) throw new TypeError('Failed to fetch');
+      return { ok: true, url, text: async () => '{"ok":true}' };
+    } });
+  assert.equal((await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}` })).ok, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].request.headers['X-Client-Device'], deviceID);
+  assert.equal(calls[1].request.headers['X-Client-Device'], undefined);
+  assert.equal(calls[1].request.headers.Authorization, `Bearer ${tokenA}`);
+  assert.equal(calls[1].request.signal, calls[0].request.signal);
+  assert.equal(calls[1].request.credentials, 'omit');
+  assert.equal(calls[1].request.redirect, 'error');
+  assert.equal(calls[1].request.method, 'GET');
+  assert.equal(calls[1].url, apiURL);
+});
+
+test('HTTP session revocation, expiry, errors and malformed bodies never retry without the device header', async () => {
+  for (const response of [
+    { status: 401, ok: false, body: '{"code":"SESSION_REVOKED"}' },
+    { status: 401, ok: false, body: '{"code":"SESSION_EXPIRED"}' },
+    { status: 500, ok: false, body: '{}' },
+    { status: 200, ok: true, body: '<html>' }
+  ]) {
+    let calls = 0;
+    const c = harness({ localStorage: storage({ 'bluebird.clientDeviceId': deviceID }),
+      fetch: async () => { calls++; return { ...response, url: apiURL, text: async () => response.body }; } });
+    assert.equal(await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}` }), null);
+    assert.equal(calls, 1);
+  }
+});
+
+test('abort, account or device changes and anonymous failures prohibit the device-header fallback', async () => {
+  for (const mode of ['abort', 'account', 'device', 'anonymous']) {
+    let calls = 0;
+    const local = storage({ 'bluebird.clientDeviceId': deviceID });
+    const c = harness({ localStorage: local, fetch: async () => {
+      calls++;
+      if (mode === 'account') c.network.state.authUID = 'next-account';
+      if (mode === 'device') local.map.delete('bluebird.clientDeviceId');
+      const error = new Error('failed');
+      if (mode === 'abort') error.name = 'AbortError';
+      throw error;
+    } });
+    assert.equal(await c.network.requestJSON(apiURL, mode === 'anonymous' ? {} : { Authorization: `Bearer ${tokenA}` }), null);
+    assert.equal(calls, 1, mode);
+  }
+});
+
+test('fetch header fallback is bounded to one retry and shares the original timeout', async () => {
+  for (const mode of ['reject', 'hang']) {
+    let calls = 0, signal;
+    const c = harness({ localStorage: storage({ 'bluebird.clientDeviceId': deviceID }),
+      fetch: async (url, request) => {
+        calls++; signal = request.signal;
+        if (calls === 1 || mode === 'reject') throw new TypeError('Failed to fetch');
+        return new Promise(() => {});
+      } });
+    assert.equal(await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}` }), null);
+    assert.equal(calls, 2);
+    if (mode === 'hang') assert.equal(signal.aborted, true);
+  }
+});
+
+test('a manager error never crosses into fetch or retries device headers through an unknown bridge failure', async () => {
+  let calls = 0;
+  const c = harness({ localStorage: storage({ 'bluebird.clientDeviceId': deviceID }),
+    GM_xmlhttpRequest(request) { calls++; request.onerror({ status: 0 }); },
+    fetch() { assert.fail('manager errors must not start another transport'); } });
+  assert.equal(await c.network.requestJSON(apiURL, { Authorization: `Bearer ${tokenA}` }), null);
+  assert.equal(calls, 1);
 });
 
 test('GM Promise method retains receiver and handles success or rejection', async () => {

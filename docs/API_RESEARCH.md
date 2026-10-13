@@ -1,3 +1,17 @@
+## 6.26.0: Tweet 2.3.1 compatibility (2026-10-13)
+
+The current first-party [application](https://app.tweet.app/) reports **2.3.1**, build `1791852090`. Its HTML references [index-B1cKv6dr.js](https://app.tweet.app/assets/index-B1cKv6dr.js), 1,637,969 bytes, SHA-256 `3e973f4736a14fba366ceac74f2ab18fc612c59f54c6bc6375581955a82d0e55`. This is a bounded inspection of the public client and ordinary signed-in UI, not an exhaustive backend change log.
+
+The Security screen adds native signed-in device management. The client calls `GET /api/me/sessions`, `DELETE /api/me/sessions/{id}`, `POST /api/me/sessions/revoke-others` and `DELETE /api/me/sessions/current`. The response model is `{ sessions, truncated }`; entries report `id`, `browser`, `os`, `deviceType`, `current`, `lastSeenAt` and `createdAt`. Keep the native management UI and actions. The Japanese extension translates the verified section, device activity, dates and confirmation labels without adding polling or its own sign-out controls. No sign-out, password, MFA or other account mutation was performed during inspection.
+
+The web client maintains a UUID in `bluebird.clientDeviceId` and sends `X-Client-Device`. Extension authenticated API reads reuse only an already valid native UUID; public/anonymous requests receive neither that identifier nor account credentials. A rejected GET may retry once without the device header, matching the native network-error fallback. HTTP errors, aborted requests, changed identity and write requests never enter that fallback. Terminal `401` codes `SESSION_REVOKED` and `SESSION_EXPIRED` require a new session; they are not transient retry conditions. This first-party identity is not borrowed by the native app.
+
+Reply-parent previews now use a `div` with a separate linked age, compact parent avatar and optional media/poll/quote summaries. The extension recognizes the verified feed wrapper and the direct detail scroll child separately, preserves native navigation, and localizes static text and elapsed age. Parent age without a zoned ISO creation time does not become a fabricated precise timestamp. Own post/reply ISO creation sources remain authoritative.
+
+No native URL preview card, Media/Favorites profile tab or external-app OAuth/App Check integration was established in this inspection; keep the complementary features and the integration limitations in [API_APP_FEASIBILITY.md](API_APP_FEASIBILITY.md). [Public media config](https://api.tweet.app/api/media/config) continues to report five images, 10 MiB per image, 15 MiB per GIF and 50 MiB/30 seconds per video; daily image/video limits are still enforced by the service. This release does not claim unlimited upload/translation, retained 4K/HDR or background push support.
+
+---
+
 # Tweet.app API / userscript enhancement research
 
 ## 2026-10-10: URL preview boundary

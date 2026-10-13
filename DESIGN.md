@@ -178,3 +178,7 @@ Fetch public HTTPS metadata and raster images directly via the existing anonymou
 The Home filter uses loaded, verified original link-bearing posts, leaves unknown layouts visible and shows coverage in an unboxed small line. OFF, route changes and destruction restore hidden native posts. No duplicate notification, poll, upload or reading-position function is added.
 
 Viewed references: [Open Graph protocol](https://ogp.me/) supplies metadata semantics; [Tampermonkey request documentation](https://www.tampermonkey.net/documentation.php#api:GM_xmlhttpRequest) supplies anonymous request/callback behavior. [Component Gallery Card](https://component.gallery/components/card/) informed the image/title/site hierarchy. Existing classic visual language is retained.
+
+## 6.26.0 Tweet 2.3.1 compatibility
+
+Use native session management without duplicate controls. Japanese localization keeps each React text node, device name, password field and handler; activity and sign-in dates are translated only in the verified session section. No credential or session identity is generated. New reply-parent div/link/connector layouts retain source content and native navigation, with metadata scoped separately from user text. There is no new continuous motion or layout redesign.

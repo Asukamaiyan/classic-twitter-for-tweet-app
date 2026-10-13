@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Safari
 // @namespace    https://tweet.app/
-// @version      6.25.1
+// @version      6.26.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -49,6 +49,16 @@
     }
   }
 
+  function ctNativeClientDevice() {
+    // Tweet owns this persisted device identity. Reuse only its verified UUID;
+    // never create, migrate or write a session/device identifier here.
+    try {
+      const value = globalThis.localStorage?.getItem('bluebird.clientDeviceId');
+      return typeof value === 'string' && value.length === 36 &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : null;
+    } catch { return null; }
+  }
+
   function requestJSON(url, headers = {}) {
     const target = ctAllowedAPIURL(url);
     if (!target) return Promise.resolve(null);
@@ -56,7 +66,10 @@
     if (typeof headers?.Authorization === 'string' &&
         /^Bearer [A-Za-z0-9._~-]+$/.test(headers.Authorization)) {
       requestHeaders.Authorization = headers.Authorization;
+      const device = ctNativeClientDevice();
+      if (device) requestHeaders['X-Client-Device'] = device;
     }
+    const requestUID = ctNetworkState.authUID;
 
     return new Promise(resolve => {
       let settled = false;
@@ -127,10 +140,25 @@
         return;
       }
       if (typeof fetch !== 'function') return finish(null);
-      Promise.resolve().then(() => fetch(target, {
-        method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
-        ...(controller ? { signal: controller.signal } : {})
-      })).then(async response => {
+      const fetchRead = async () => {
+        const options = {
+          method: 'GET', headers: requestHeaders, credentials: 'omit', redirect: 'error',
+          ...(controller ? { signal: controller.signal } : {})
+        };
+        try { return await fetch(target, options); }
+        catch (error) {
+          // Match the native GET compatibility fallback only for a rejected
+          // fetch with the new header. An HTTP response (especially session
+          // revocation/expiry) is authoritative and never enters this path.
+          const device = requestHeaders['X-Client-Device'];
+          if (!device || settled || controller?.signal.aborted || error?.name === 'AbortError' ||
+              ctNetworkState.authUID !== requestUID || ctNativeClientDevice() !== device) throw error;
+          const fallbackHeaders = { ...requestHeaders };
+          delete fallbackHeaders['X-Client-Device'];
+          return fetch(target, { ...options, headers: fallbackHeaders });
+        }
+      };
+      Promise.resolve().then(fetchRead).then(async response => {
         if (!response?.ok || (response.url && ctAllowedAPIURL(response.url) !== target)) return null;
         const body = await response.text();
         if (typeof body !== 'string' || body.length > 2 * 1024 * 1024) return null;
@@ -3002,7 +3030,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.25.1';
+    document.documentElement.dataset.ctActiveVersion = '6.26.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -9504,5 +9532,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.25.1 loaded');
+  console.log('🐦 Classic Twitter EN v6.26.0 loaded');
 })();

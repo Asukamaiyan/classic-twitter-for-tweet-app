@@ -1,5 +1,13 @@
 # Changelog
 
+## All distributions v6.26.0 — 2026-10-13
+
+Update for the inspected Tweet 2.3.1 / build 1791852090 client. Reuse only the existing native UUID in authenticated API GETs. Match the native fetch network-rejection fallback once, without retrying HTTP errors or creating/writing a device identity. Anonymous metadata requests never receive it.
+
+Localize the standard signed-in device list, activity/sign-in dates, errors and confirmations without changing device labels, password inputs or native handlers. Support both updated reply-parent previews and detail connectors, their linked relative dates, poll/quote summaries and native media description. Preserve user content, source links, creation timestamps and reversible classic controls. Keep standard session management, replies, polls, blocking and uploads authoritative; no new overlap was found.
+
+Include the prior candidate URL-card visibility/translation fixes. Safari/Stay card retrieval and physical acceptance are still unverified; this release does not claim to resolve the separate observed manager transport failure.
+
 ## All distributions v6.25.1 candidate — 2026-10-11
 
 Keep URL previews loaded while either the native body or the card remains visible. Observe both elements, apply intersection batches before detaching requests, and release old observers and image references on context or settings changes.
