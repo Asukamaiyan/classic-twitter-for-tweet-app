@@ -713,7 +713,7 @@
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.26.0';
+    document.documentElement.dataset.ctActiveVersion = '6.27.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);

@@ -1,5 +1,11 @@
 # Changelog
 
+## All distributions v6.27.0 — 2026-10-16
+
+Support the current profile-pinning UI: translate only verified Japanese pin actions, ordering labels, expansion, replacement dialogs, Undo/Retry messages and the native hint. Keep original post text, names, replacement choice text, timestamps and native handlers. Translate official Shop navigation and the Child Safety heading; English editions retain native English labels.
+
+The current official HTML/client and signed-in browser report **2.4.1 / build 1792115636**. The user-mentioned 2.4.2 has not been verified. No extra pin API, notification polling, storage identity, grant, dependency or duplicate native feature is added. Existing network, photo, favorite, news and link-card behavior remains. Physical Safari/Stay and Android acceptance remains unverified.
+
 ## All distributions v6.26.0 — 2026-10-13
 
 Update for the inspected Tweet 2.3.1 / build 1791852090 client. Reuse only the existing native UUID in authenticated API GETs. Match the native fetch network-rejection fallback once, without retrying HTTP errors or creating/writing a device identity. Anonymous metadata requests never receive it.

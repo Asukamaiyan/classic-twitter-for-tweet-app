@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese Android
 // @namespace    https://tweet.app/
-// @version      6.26.0
+// @version      6.27.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -3029,7 +3029,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.26.0';
+    document.documentElement.dataset.ctActiveVersion = '6.27.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -8849,6 +8849,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
     ['Terms of Service', '利用規約'],
     ['Privacy Policy', 'プライバシーポリシー'],
+    ['Child Safety Standards', '児童の安全に関する基準'],
 
     ['Save', '保存'],
     ['Saved', '保存しました'],
@@ -9831,6 +9832,121 @@ if (/^just\s+now$/i.test(t)) {
     return !!title && /^(?:Blocked accounts|ブロックしているアカウント)$/.test(clean(title.textContent));
   }
 
+  // Tweet owns pin state, ordering, replacement and undo. Only the verified
+  // controls/metadata are UI; replacement choices contain original post text.
+  function nativeLocalizationPinContext(el) {
+    if (!el?.isConnected || isOwnedLocalizationElement(el) || el.closest(
+      'textarea,input,select,option,[contenteditable]:not([contenteditable="false"]),' +
+      '[translate="no"],.notranslate,[data-user-content],.tl-user-text,[data-testid="tweet-text"],' +
+      '[data-testid="profile-bio"],.whitespace-pre-wrap,.break-words,.wrap-break-word,blockquote,[aria-label^="Quoted post"]'
+    )) return null;
+    const shop = el.matches('span') ? el.parentElement : null;
+    if (shop?.matches('a:is([href="https://tweet.shop"],[href="https://tweet.shop/"])[target="_blank"][rel~="noopener"][rel~="noreferrer"]') &&
+        shop.querySelector(':scope > svg.lucide-shopping-bag') &&
+        (shop.closest('aside nav') || shop.closest('[role="dialog"][aria-label="Account menu"]')) &&
+        shop.children.length === 3 && shop.children[1].matches('span:not(.sr-only)') &&
+        shop.children[2].matches('span.sr-only') && !el.children.length) return { kind: 'shop', root: shop };
+    const menu = el.matches('span') && el.parentElement?.matches('button[type="button"]') ? el.parentElement.parentElement : null;
+    const trigger = menu?.parentElement?.querySelector(':scope > button[data-post-menu-trigger][aria-label]');
+    if (menu?.matches('div.absolute.right-0.top-full.bg-tl-app-card.border.rounded-xl') &&
+        menu.parentElement?.matches('div.relative') && menu.closest('article') && trigger &&
+        /^[A-Za-z0-9_-]{1,160}$/.test(trigger.getAttribute('data-post-menu-trigger') || '') &&
+        /^(?:Post options|Reply options|ツイートのメニュー|返信のメニュー)$/.test(trigger.getAttribute('aria-label') || '') &&
+        !el.children.length && el.parentElement.children.length === 2 &&
+        el.parentElement.firstElementChild.matches('svg.lucide-pin,svg.lucide-pin-off,svg.lucide-arrow-up')) return { kind: 'menu', root: menu };
+    const dialog = el.closest('div[role="dialog"][aria-modal="true"][aria-labelledby="replace-pin-title"][aria-describedby="replace-pin-body"]');
+    if (dialog?.matches('.bg-tl-app-card.border.overflow-hidden') &&
+        dialog.querySelector(':scope > div > h3#replace-pin-title > svg.lucide-pin') &&
+        dialog.querySelector(':scope > div > p#replace-pin-body') &&
+        dialog.querySelectorAll(':scope > div > div[role="radiogroup"][aria-labelledby="replace-pin-title"] > label > input[type="radio"][name="replace-pin"]').length === 3) {
+      // Do not infer whether a choice's words are body text or the native
+      // "Post with media" fallback: those two sources have identical DOM.
+      if (!el.closest('label,[role="radiogroup"]') &&
+          (el.matches('h3#replace-pin-title,p#replace-pin-body,button[type="button"]'))) return { kind: 'dialog', root: dialog };
+    }
+    const toast = el.closest('div[role="status"][aria-live="polite"].pointer-events-auto.flex.items-center.gap-3.rounded-full.bg-sky-500');
+    if (toast?.parentElement?.matches('div.pointer-events-none.fixed.inset-x-0.bottom-6.flex.justify-center') &&
+        toast.firstElementChild?.matches('span') && !toast.firstElementChild.children.length &&
+        toast.children.length <= 2 && (el === toast.firstElementChild ||
+          el.matches('button[type="button"].shrink-0.font-bold.underline') && el.parentElement === toast)) return { kind: 'toast', root: toast };
+    if (!/^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) || !el.closest('main') || el.closest('article')) return null;
+    const section = el.closest('section[aria-label="Pinned posts"],section[aria-label="固定されたツイート"]');
+    if (section) {
+      if (el === section && section.querySelector('article')) return { kind: 'section', root: section };
+      const parent = el.parentElement;
+      if (el.matches('span') && parent?.matches('p.flex.items-center.font-bold.text-tl-app-text-muted') &&
+          parent.querySelector(':scope > svg.lucide-pin') && parent.children.length === 2 &&
+          parent.parentElement?.matches('div') && parent.parentElement.closest('section') === section &&
+          parent.parentElement.querySelector(':scope > article')) return { kind: 'label', root: section };
+      const button = el.matches('span') ? el.parentElement : null;
+      const target = button?.getAttribute('aria-controls');
+      const panel = target && section.ownerDocument.getElementById(target);
+      if (button?.matches('button[type="button"][aria-expanded][aria-controls].w-full.flex.items-center.border-b') &&
+          button.parentElement === section && button.children.length === 2 && button.firstElementChild.matches('svg') &&
+          panel?.matches('div') && panel.parentElement === section && panel.querySelector('article')) return { kind: 'expand', root: section };
+    }
+    const hint = el.parentElement;
+    if (hint?.matches('div.mx-4.my-3.flex.items-start.gap-3.rounded-2xl.border.bg-tl-app-card.px-4.py-3') &&
+        hint.children.length === 3 && hint.firstElementChild.matches('svg.lucide-pin') &&
+        hint.children[1].matches('p.min-w-0.flex-1.text-tl-app-text') &&
+        hint.lastElementChild.matches('button[type="button"][aria-label]') && hint.lastElementChild.querySelector(':scope > svg.lucide-x') &&
+        (el === hint.children[1] || el === hint.lastElementChild)) return { kind: 'hint', root: hint };
+    return null;
+  }
+
+  function nativePinJapaneseText(el, text, attr = null) {
+    // Most timeline text is user content. Avoid walking its ancestors for
+    // labels that cannot be one of the new native UI strings.
+    if (typeof text !== 'string' || !attr && !/^(?:Pin|Unpin|Move|Show [1-2] more pinned|Hide [1-2] pinned|You have 3 pinned|Choose one to replace|Replace$|Cancel$|Undo$|Retry$|Couldn't (?:pin|unpin|move)|This post can't be pinned|Your pins|Too many pin|That change couldn't be made|Shop$|\(opens in a new tab\)$)/.test(text)) return null;
+    const context = nativeLocalizationPinContext(el);
+    if (!context) return null;
+    const { kind, root } = context;
+    if (attr) {
+      if (attr !== 'aria-label') return null;
+      if (kind === 'section' && text === 'Pinned posts') return '固定されたツイート';
+      if (kind === 'hint' && text === 'Dismiss') return '閉じる';
+      return kind === 'dialog' && text === 'Cancel' ? 'キャンセル' : null;
+    }
+    if (kind === 'shop') return new Map([['Shop', 'ショップ'], ['(opens in a new tab)', '（新しいタブで開きます）']]).get(text) || null;
+    if (kind === 'menu') return new Map([
+      ['Pin to profile', 'プロフィールに固定'], ['Unpin from profile', 'プロフィールの固定を解除'], ['Move to top', '一番上に移動']
+    ]).get(text) || null;
+    if (kind === 'label') {
+      const match = /^Pinned · ([1-3]) of ([2-3])$/.exec(text);
+      return text === 'Pinned' ? '固定されたツイート' : match && Number(match[1]) <= Number(match[2]) ? `固定 · ${match[2]}件中${match[1]}件目` : null;
+    }
+    if (kind === 'expand') {
+      const show = /^Show ([1-2]) more pinned posts?$/.exec(text);
+      const hide = /^Hide ([1-2]) pinned posts?$/.exec(text);
+      return show ? `ほかの固定ツイート${show[1]}件を表示` : hide ? `固定ツイート${hide[1]}件を折りたたむ` : null;
+    }
+    if (kind === 'hint') return text === 'Pin up to 3 posts so visitors see your best work first. Use ··· on any of your posts.' ?
+      'ツイートは3件までプロフィールに固定できます。自分のツイートの「···」から設定できます。' : null;
+    if (kind === 'dialog') return new Map([
+      ['You have 3 pinned posts', 'ツイートを3件固定しています'],
+      ["Choose one to replace. It stays on your profile; it just won't be pinned.", '固定を解除するツイートを選んでください。ツイートはプロフィールに残ります。'],
+      ['Replace', '入れ替える'], ['Cancel', 'キャンセル']
+    ]).get(text) || null;
+    if (kind === 'toast') {
+      const messages = new Map([
+        ['Pinned to your profile.', 'プロフィールに固定しました。'], ['Unpinned from your profile.', 'プロフィールの固定を解除しました。'],
+        ["Unpinned. It's further down your Tweets, by its date.", '固定を解除しました。投稿日時の順にツイート一覧に表示されます。'],
+        ['Moved to the top.', '一番上に移動しました。'], ["Couldn't pin. Try again.", '固定できませんでした。もう一度お試しください。'],
+        ["Couldn't unpin. Try again.", '固定を解除できませんでした。もう一度お試しください。'],
+        ["Couldn't move it. Try again.", '移動できませんでした。もう一度お試しください。'],
+        ["This post can't be pinned.", 'このツイートは固定できません。'],
+        ['Your pins are updating. Use ··· to try again in a moment.', '固定を更新中です。少し待ってから「···」でお試しください。'],
+        ['Too many pin changes. Try again in a few minutes.', '固定の変更が多いため、数分待ってからお試しください。'],
+        ['Your pins changed elsewhere. Showing the latest.', '別の画面で固定が変更されました。最新の状態を表示しています。'],
+        ["That change couldn't be made.", '変更できませんでした。']
+      ]);
+      const message = clean(root.firstElementChild.textContent);
+      if (!messages.has(message) && ![...messages.values()].includes(message)) return null;
+      return el === root.firstElementChild ? messages.get(text) || null : new Map([['Undo', '元に戻す'], ['Retry', '再試行']]).get(text) || null;
+    }
+    return null;
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
@@ -9950,6 +10066,7 @@ if (/^just\s+now$/i.test(t)) {
   function isLocalizationUI(node) {
     const el = node?.parentElement;
     if (isProtectedLocalizationElement(el)) return false;
+    if (nativePinJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeMediaUploadJapaneseText(el, node.nodeValue)) return true;
     if (nativeLocalizationBlockMenu(el) || nativeLocalizationBlockDialog(el)) return true;
     const blockedProfile = nativeLocalizationBlockProfile(el);
@@ -10101,7 +10218,7 @@ if (/^just\s+now$/i.test(t)) {
   function patchUIAttributes(root = document) {
     const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
     const controls = [];
-    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],div[aria-label="Choose image"],a[aria-label^="Open the post by @"],img[alt="Media in the post this replies to"]';
+    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],div[aria-label="Choose image"],a[aria-label^="Open the post by @"],img[alt="Media in the post this replies to"],section[aria-label="Pinned posts"]';
     if (host instanceof Element && host.matches(selector)) controls.push(host);
     host?.querySelectorAll?.(selector).forEach(el => controls.push(el));
     // Tweet 2.2.3 owns these photo controls. Match their actual structure so an
@@ -10130,9 +10247,10 @@ if (/^just\s+now$/i.test(t)) {
     };
     for (const el of controls) {
       const photo = nativePhotoUI(el);
+      const pin = nativeLocalizationPinContext(el);
       if (!photo && isOwnedLocalizationElement(el) ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
-          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || !photo && el.querySelector('img')) continue;
+          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || !photo && !pin && el.querySelector('img')) continue;
       if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
           el.querySelector(':scope > svg.lucide-x') &&
           el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
@@ -10159,7 +10277,7 @@ if (/^just\s+now$/i.test(t)) {
         const image = photo && value?.match(/^(Open|Show) image ([1-5]) of ([2-5])$/);
         const imageLabel = image && Number(image[2]) === photo.index && Number(image[3]) === photo.count &&
           (image[1] === 'Open' ? photo.open : photo.show) ? `${image[3]}枚中${image[2]}枚目の画像を${image[1] === 'Open' ? '開く' : '表示'}` : null;
-        const out = (parent ? `${parent[1]}への返信元のツイートを開く` : null) ||
+        const out = nativePinJapaneseText(el, value, attr) || (parent ? `${parent[1]}への返信元のツイートを開く` : null) ||
           (session ? `${session[1]}からログアウト` : null) || gif || (unblockLabel ? unblockLabel[1] === 'Unblocking' ? `${unblockLabel[2]}のブロックを解除中…` : `${unblockLabel[2]}のブロックを解除` : null) || imageLabel || (value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
           choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
@@ -10181,7 +10299,7 @@ if (/^just\s+now$/i.test(t)) {
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
     const parentPoll = nativeLocalizationParentPostPreview(el) && el.matches('p.mt-1.text-tl-app-text-muted') && text.match(/^Poll · ([2-5]) choices$/);
-    let out = nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+    let out = nativePinJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
       (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :

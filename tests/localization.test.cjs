@@ -46,7 +46,7 @@ function fixture(language, html, route = '/feed') {
     'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
     'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber', 'nativeTimestampJapaneseText',
     'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
-    'nativeLocalizationSessionContext', 'nativeSessionJapaneseText',
+    'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
     'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia',
     'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
@@ -1294,6 +1294,81 @@ test('ja: native detail title translates without changing author names or quoted
   f.run(); f.run(); assert.equal(f.text('detail-title'), 'ツイート');
   assert.equal(f.text('detail-author'), 'Feed'); assert.equal(f.text('quote-title'), 'Feed');
   node.nodeValue = 'Feed'; f.run(); assert.equal(f.text('detail-title'), 'ツイート'); f.dom.window.close();
+});
+
+test('ja: native pin menu localizes its three actions while preserving post text and handlers', () => {
+  const f = fixture('ja', `<main><article><button class="font-bold truncate" id="pin-author">Pin to profile</button><p class="whitespace-pre-wrap" id="pin-post">Move to top</p><div class="relative"><button type="button" data-post-menu-trigger="post-a" aria-label="Post options"></button><div class="absolute right-0 top-full bg-tl-app-card border rounded-xl">
+    <button type="button" id="pin-action"><svg class="lucide-pin"></svg><span>Pin to profile</span></button>
+    <button type="button" id="unpin-action"><svg class="lucide-pin-off"></svg><span>Unpin from profile</span></button>
+    <button type="button" id="move-pin-action"><svg class="lucide-arrow-up"></svg><span>Move to top</span></button></div></div>
+    <button type="button" id="unverified-pin"><svg class="lucide-pin"></svg><span>Pin to profile</span></button></article></main>`);
+  const pin = f.document.getElementById('pin-action'), span = pin.lastElementChild, node = span.firstChild;
+  let clicks = 0; pin.addEventListener('click', () => clicks++);
+  f.run(); f.run();
+  assert.equal(pin.textContent.trim(), 'プロフィールに固定'); assert.equal(span.firstChild, node);
+  assert.equal(f.text('unpin-action'), 'プロフィールの固定を解除'); assert.equal(f.text('move-pin-action'), '一番上に移動');
+  assert.equal(f.text('pin-author'), 'Pin to profile'); assert.equal(f.text('pin-post'), 'Move to top');
+  assert.equal(f.text('unverified-pin'), 'Pin to profile'); pin.click(); assert.equal(clicks, 1);
+  node.nodeValue = 'Pin to profile'; f.run(span); assert.equal(span.textContent, 'プロフィールに固定'); f.dom.window.close();
+});
+
+test('ja: profile pinned section translates labels and expansion while leaving all native posts in place', () => {
+  const f = fixture('ja', `<main><section aria-label="Pinned posts" id="pins"><div><p class="flex items-center font-bold text-tl-app-text-muted"><svg class="lucide-pin"></svg><span id="pin-position">Pinned · 1 of 3</span></p><article><p class="whitespace-pre-wrap" id="pinned-content">Pinned · 1 of 3</p><img src="https://images.example/pin.webp"></article></div>
+    <button type="button" aria-expanded="false" aria-controls="more-pins" class="w-full flex items-center border-b" id="more-pin-action"><svg></svg><span>Show 2 more pinned posts</span></button><div id="more-pins" hidden><div><p class="flex items-center font-bold text-tl-app-text-muted"><svg class="lucide-pin"></svg><span>Pinned · 2 of 3</span></p><article></article></div></div></section>
+    <p class="text-tl-app-text-muted" id="unverified-position">Pinned · 1 of 3</p></main>`, '/profile');
+  const action = f.document.getElementById('more-pin-action'), node = action.lastElementChild.firstChild;
+  const article = f.document.querySelector('article'); let clicks = 0; action.addEventListener('click', () => clicks++);
+  f.run(); f.run(); assert.equal(f.document.getElementById('pins').getAttribute('aria-label'), '固定されたツイート');
+  assert.equal(f.text('pin-position'), '固定 · 3件中1件目'); assert.equal(action.textContent.trim(), 'ほかの固定ツイート2件を表示');
+  assert.equal(f.text('pinned-content'), 'Pinned · 1 of 3'); assert.equal(f.text('unverified-position'), 'Pinned · 1 of 3');
+  assert.equal(f.document.querySelector('article'), article); assert.equal(action.lastElementChild.firstChild, node);
+  action.click(); assert.equal(clicks, 1); assert.equal(f.document.getElementById('more-pins').hidden, true);
+  node.nodeValue = 'Hide 2 pinned posts'; action.setAttribute('aria-expanded', 'true'); f.run(action);
+  assert.equal(action.textContent.trim(), '固定ツイート2件を折りたたむ');
+  f.document.getElementById('pin-position').firstChild.nodeValue = 'Pinned · 3 of 2'; f.run();
+  assert.equal(f.text('pin-position'), 'Pinned · 3 of 2'); f.dom.window.close();
+});
+
+test('ja: native pin hint and replace sheet keep radio values, selection, body text and cancel actions native', () => {
+  const f = fixture('ja', `<main><div class="mx-4 my-3 flex items-start gap-3 rounded-2xl border bg-tl-app-card px-4 py-3"><svg class="lucide-pin"></svg><p class="min-w-0 flex-1 text-tl-app-text" id="pin-hint">Pin up to 3 posts so visitors see your best work first. Use ··· on any of your posts.</p><button type="button" aria-label="Dismiss" id="dismiss-pin"><svg class="lucide-x"></svg></button></div></main>
+    <div role="dialog" aria-modal="true" aria-labelledby="replace-pin-title" aria-describedby="replace-pin-body" class="bg-tl-app-card border overflow-hidden"><div><h3 id="replace-pin-title"><svg class="lucide-pin"></svg>You have 3 pinned posts</h3><button type="button" aria-label="Cancel" id="cancel-pin-icon"><svg></svg></button></div><div><p id="replace-pin-body">Choose one to replace. It stays on your profile; it just won't be pinned.</p><div role="radiogroup" aria-labelledby="replace-pin-title">${['Post with media', 'Pin to profile', 'Replace'].map((text, index) => `<label><input type="radio" name="replace-pin" value="post-${index}" ${index === 1 ? 'checked' : ''}><span class="break-words" id="pin-choice-${index}">${text}</span></label>`).join('')}</div><div><button type="button" id="cancel-pin">Cancel</button><button type="button" id="replace-pin">Replace</button></div></div></div>`, '/profile');
+  const radio = f.document.querySelector('input:checked'), cancel = f.document.getElementById('cancel-pin');
+  let clicks = 0; cancel.addEventListener('click', () => clicks++); const bodyNode = f.document.getElementById('replace-pin-body').firstChild;
+  f.run(); f.run(); assert.match(f.text('pin-hint'), /3件まで/); assert.equal(f.document.getElementById('dismiss-pin').getAttribute('aria-label'), '閉じる');
+  assert.equal(f.text('replace-pin-title'), 'ツイートを3件固定しています'); assert.match(f.text('replace-pin-body'), /固定を解除する/);
+  assert.equal(f.document.getElementById('replace-pin-body').firstChild, bodyNode);
+  assert.equal(f.text('replace-pin'), '入れ替える'); assert.equal(cancel.textContent, 'キャンセル');
+  assert.equal(f.document.getElementById('cancel-pin-icon').getAttribute('aria-label'), 'キャンセル');
+  assert.equal(f.document.querySelector('input:checked'), radio); assert.equal(radio.value, 'post-1');
+  assert.deepEqual([0,1,2].map(i => f.text(`pin-choice-${i}`)), ['Post with media', 'Pin to profile', 'Replace']); cancel.click(); assert.equal(clicks, 1); f.dom.window.close();
+});
+
+test('ja: verified native pin toasts translate real results and preserve Undo and Retry handlers', () => {
+  const f = fixture('ja', `<div class="pointer-events-none fixed inset-x-0 bottom-6 flex justify-center"><div role="status" aria-live="polite" class="pointer-events-auto flex items-center gap-3 rounded-full bg-sky-500"><span id="pin-toast">Pinned to your profile.</span><button type="button" class="shrink-0 font-bold underline" id="pin-undo">Undo</button></div></div><p class="whitespace-pre-wrap" id="toast-post">Pinned to your profile.</p><div role="status"><span id="unverified-toast">Pinned to your profile.</span></div>`);
+  const button = f.document.getElementById('pin-undo'), text = f.document.getElementById('pin-toast').firstChild;
+  let clicks = 0; button.addEventListener('click', () => clicks++);
+  f.run(); f.run(); assert.equal(f.text('pin-toast'), 'プロフィールに固定しました。'); assert.equal(button.textContent, '元に戻す');
+  assert.equal(f.text('toast-post'), 'Pinned to your profile.'); assert.equal(f.text('unverified-toast'), 'Pinned to your profile.');
+  button.click(); assert.equal(clicks, 1); text.nodeValue = "Couldn't pin. Try again."; button.firstChild.nodeValue = 'Retry'; f.run();
+  assert.equal(f.text('pin-toast'), '固定できませんでした。もう一度お試しください。'); assert.equal(button.textContent, '再試行');
+  assert.equal(f.document.getElementById('pin-toast').firstChild, text); f.dom.window.close();
+});
+
+for (const mobile of [false, true]) test(`ja: native ${mobile ? 'drawer' : 'desktop'} Shop link localizes without changing navigation or post links`, () => {
+  const link = `<a href="https://tweet.shop${mobile ? '/' : ''}" target="_blank" rel="noopener noreferrer" id="native-shop"><svg class="lucide-shopping-bag"></svg><span>Shop</span><span class="sr-only"> (opens in a new tab)</span></a>`;
+  const f = fixture('ja', (mobile ? `<div role="dialog" aria-label="Account menu">${link}</div>` : `<aside><nav>${link}</nav></aside>`) + '<article><p class="whitespace-pre-wrap"><a href="https://tweet.shop" target="_blank" rel="noopener noreferrer" id="body-shop">Shop</a></p></article>');
+  const native = f.document.getElementById('native-shop'), node = native.children[1].firstChild;
+  let clicks = 0; native.addEventListener('click', e => { e.preventDefault(); clicks++; }); f.run(); f.run();
+  assert.equal(native.children[1].textContent, 'ショップ'); assert.equal(native.children[2].textContent.trim(), '（新しいタブで開きます）');
+  assert.equal(native.children[1].firstChild, node); assert.equal(native.href, 'https://tweet.shop/'); assert.equal(native.target, '_blank');
+  assert.equal(native.rel, 'noopener noreferrer'); native.click(); assert.equal(clicks, 1); assert.equal(f.text('body-shop'), 'Shop'); f.dom.window.close();
+});
+
+test('ja: child safety chrome translates its heading while names and legal body remain exact', () => {
+  const f = fixture('ja', '<main><h1 id="safety-title">Child Safety Standards</h1><p id="safety-body">Child Safety Standards</p><article><button class="truncate" id="safety-name">Child Safety Standards</button><p class="whitespace-pre-wrap" id="safety-post">Child Safety Standards</p></article></main>', '/child-safety');
+  f.run(); assert.equal(f.text('safety-title'), '児童の安全に関する基準');
+  assert.equal(f.text('safety-body'), 'Child Safety Standards'); assert.equal(f.text('safety-name'), 'Child Safety Standards');
+  assert.equal(f.text('safety-post'), 'Child Safety Standards'); f.dom.window.close();
 });
 
 for (const connector of [false, true]) test(`ja: Tweet 2.3.1 parent thread ${connector ? 'connector' : 'preview'} preserves native links and source content`, () => {
