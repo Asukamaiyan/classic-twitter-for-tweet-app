@@ -6,6 +6,7 @@
 - 追加試験はnative pin menu、固定順表示／展開、置換ダイアログ／radioの選択と元本文、hint、成功／失敗のUndo/Retry、desktop／drawer Shop、Child Safety見出しの保護を確認。既存のtext node・handler・URL・input・名前・本文・保存キーを保持します。英語版はnative英語のpin操作を維持。
 - 独立レビューの追加3ケースで、全pin通知文の再描画とUndo/Retry、引用／表示名／本文、未検証toast／外部リンクを確認。P1/P2指摘なし。API・認証・device-ID・media configの公開コード差分も独立照合しています。
 - 通常の実Chrome画面では旧6.26.0が動作中で、新しいprofile固定欄・操作メニュー・Shopの実DOMと上記footerを確認。固定の追加／解除・入れ替え・投稿等は送信していません。候補版をdocument-startで読み込む開発CDP操作は非対応、限定日本語化関数の診断もブラウザのdocument response待ちにより実行されず、候補を実ブラウザで適用済みとは扱いません。Tampermonkeyでの更新後の受入れは別途確認が必要です。
+- GitHub [PR #27](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/27)は実装commit `e03f3b8` のpush／PR CIが2件成功し、`184f25b` でmainへマージしました。Chromeの拡張管理画面はブラウザのURLポリシー（HTTP/HTTPSのみ）で操作を拒否され、迂回せず停止。導入済みTampermonkeyの更新操作は未実施です。
 - 新規pin API、通知polling、重複した固定管理、依存、grant／connect、storage identityは追加していません。リンクカード・写真／お気に入りタブは現在のnativeで重複が見つからず保持。
 - Greasy Forkは現在6.26.0で、Chromeの既存アカウントへのログイン待ちです。6.27.0のコードと全6版のHTML導入案内を準備済み。公開・通常更新URLの照合・導入済みStay／Tampermonkey更新は未完了。物理Safari＋Stay／Android、実機のカード取得は今回未確認です。
 
