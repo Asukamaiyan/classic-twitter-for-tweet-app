@@ -1,3 +1,18 @@
+# 6.27.0 / Tweet 2.4系への対応
+
+2026-10-16。現在の公式HTML・公開bundleとログイン済みChromeのfooterは **2.4.1 / build 1792115636**。依頼にある2.4.2の配信は未確認です。新しい固定ツイートを標準UIのまま日本語化し、全6配布版を6.27.0として生成しました。
+
+- 最終 `npm run check`: **778 PASS、0 FAIL、0 SKIP**。全6版の構文・metadata・展開、通常起動と静止、既存メディア／通知／ニュース／お気に入り／URLカードの回帰を含みます。日本語化は追加7件を含む94件成功。
+- 追加試験はnative pin menu、固定順表示／展開、置換ダイアログ／radioの選択と元本文、hint、成功／失敗のUndo/Retry、desktop／drawer Shop、Child Safety見出しの保護を確認。既存のtext node・handler・URL・input・名前・本文・保存キーを保持します。英語版はnative英語のpin操作を維持。
+- 独立レビューの追加3ケースで、全pin通知文の再描画とUndo/Retry、引用／表示名／本文、未検証toast／外部リンクを確認。P1/P2指摘なし。API・認証・device-ID・media configの公開コード差分も独立照合しています。
+- 通常の実Chrome画面では旧6.26.0が動作中で、新しいprofile固定欄・操作メニュー・Shopの実DOMと上記footerを確認。固定の追加／解除・入れ替え・投稿等は送信していません。候補版をdocument-startで読み込む開発CDP操作は非対応、限定日本語化関数の診断もブラウザのdocument response待ちにより実行されず、候補を実ブラウザで適用済みとは扱いません。Tampermonkeyでの更新後の受入れは別途確認が必要です。
+- 新規pin API、通知polling、重複した固定管理、依存、grant／connect、storage identityは追加していません。リンクカード・写真／お気に入りタブは現在のnativeで重複が見つからず保持。
+- Greasy Forkは現在6.26.0で、Chromeの既存アカウントへのログイン待ちです。6.27.0のコードと全6版のHTML導入案内を準備済み。公開・通常更新URLの照合・導入済みStay／Tampermonkey更新は未完了。物理Safari＋Stay／Android、実機のカード取得は今回未確認です。
+
+リポジトリ外 `outputs/tweet-update-2026-10-16/` に `fetch-manifest.json`、`contract-independent-research.json`、`userscript-check.log`、`independent-review.json`、独立追加試験、全6版の導入案内を保存しました。実アカウントの画面・本文・認証情報を公開sourceへ入れません。以下は各日の検証・公開履歴です。
+
+---
+
 # 6.26.0 / Tweet 2.3.1 対応の検証
 
 2026-10-13。公式Webの表示 **2.3.1 / build 1791852090** と公開bundleを照合し、全6配布版を6.26.0へ更新し、Greasy Forkへ公開しました。新契約は [API_RESEARCH.md](API_RESEARCH.md) に記録しました。

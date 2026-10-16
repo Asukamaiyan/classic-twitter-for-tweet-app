@@ -48,7 +48,7 @@ const localizationNames = [
   'ctLocalizationClassicText', 'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
   'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber',
   'nativeTimestampJapaneseText', 'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
-    'nativeLocalizationSessionContext', 'nativeSessionJapaneseText',
+    'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
   'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText', 'nativeMediaUploadJapaneseText',
   'nativeLocalizationMediaUpload', 'nativeLocalizationGIFMedia', 'nativeLocalizationBlockMenu',
   'nativeLocalizationBlockDialog', 'nativeLocalizationBlockProfile', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError'

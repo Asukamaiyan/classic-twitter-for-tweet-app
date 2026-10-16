@@ -1,3 +1,17 @@
+## 6.27.0: Tweet 2.4 series compatibility (2026-10-16)
+
+The current [official app](https://app.tweet.app/) HTML serves [index-PeFpXU1d.js](https://app.tweet.app/assets/index-PeFpXU1d.js), 1,676,239 bytes, SHA-256 `4490c1b37fa7d917cbaac2e1995c97332537ef9b4cbe6f14cbc6961be5828ec4`. The public client constant and ordinary signed-in Chrome UI both report **2.4.1 / build 1792115636**. The requested 2.4.2 has not been established; do not label it verified from the request alone.
+
+The main addition since 2.3.1 is up to three profile pins. The existing `GET /api/users/{username}/posts` response has `pinned: Post[]` and `pinnedAt: { [postId]: ISODate }` separately from normal `posts`/`nextCursor`. The server-provided array order is the pin order. Pin time never replaces post creation time. The native profile renders the first pin and lets readers expand the remainder; pinned IDs are removed only from the ordinary displayed rows. Native `POST`/`DELETE /api/posts/{id}/pin` and `POST /api/posts/{id}/pin/move-to-top` control pinning, replacement, ordering, Undo/Retry and errors. A mutation response `pins` is an ID list, distinct from the profile read `pinned` objects. No mutation was exercised during this inspection.
+
+Keep all of that native behavior. The Japanese edition translates verified pin controls, metadata, hint, replacement dialog and toast actions, preserving every original post, name, radio choice, date, count and handler. Do not infer whether a replacement choice is the native media-only fallback or original text: both have the same DOM. The native Shop link points to `https://tweet.shop/` and remains an external new-tab link. Only its labels and the exact Child Safety heading are localized; legal document text is outside the scope.
+
+`isDeleted` and `status: BLOCKED/MUTED` placeholders and profile visibility flags already existed in 2.3.1. They are privacy boundaries, not new features or permission to reconstruct cached bodies. No new rank/ordering read field was found. First-party auth/device-ID/session logic is unchanged in this bounded code comparison. No supported external-app login/App Check registration has been established. Media limits remain image 10 MiB/five files, GIF 15 MiB, video 50 MiB/30 seconds, daily image 20/video five, according to the current [media config](https://api.tweet.app/api/media/config).
+
+No native URL preview card or Media/Favorites profile tab was found in the inspected client, so those complementary features remain. Native reply notifications, polls, uploads, photo slides, pin controls and session management are not reimplemented. This is a client/API observation, not a complete backend changelog or proof of third-party authentication/post acceptance.
+
+---
+
 ## 6.26.0: Tweet 2.3.1 compatibility (2026-10-13)
 
 The current first-party [application](https://app.tweet.app/) reports **2.3.1**, build `1791852090`. Its HTML references [index-B1cKv6dr.js](https://app.tweet.app/assets/index-B1cKv6dr.js), 1,637,969 bytes, SHA-256 `3e973f4736a14fba366ceac74f2ab18fc612c59f54c6bc6375581955a82d0e55`. This is a bounded inspection of the public client and ordinary signed-in UI, not an exhaustive backend change log.

@@ -182,3 +182,6 @@ Viewed references: [Open Graph protocol](https://ogp.me/) supplies metadata sema
 ## 6.26.0 Tweet 2.3.1 compatibility
 
 Use native session management without duplicate controls. Japanese localization keeps each React text node, device name, password field and handler; activity and sign-in dates are translated only in the verified session section. No credential or session identity is generated. New reply-parent div/link/connector layouts retain source content and native navigation, with metadata scoped separately from user text. There is no new continuous motion or layout redesign.
+
+
+Version 6.27.0 follows the observed Tweet 2.4.1 pin UI. Japanese pin labels are limited to the verified native menu, profile section, hint, replace dialog and status toast. Native buttons, order, Undo/Retry and server errors remain authoritative. Post content and radio choice summaries are never inferred as static UI. The official Shop anchor keeps its URL, new-tab behavior and event ownership. No pin API or duplicate manager is added.
