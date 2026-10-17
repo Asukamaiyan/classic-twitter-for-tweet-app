@@ -8970,6 +8970,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctLocalizationNativeRecordException(record) {
     const el = record.attribute ? record.node : record.node.parentElement;
     if (nativeLocalizationAccountMenu(el) || nativeLocalizationBlockMenu(el) || isNativeSettingsNavigation(el) || isNativeSettingsValue(el)) return true;
+    if (record.attribute === 'aria-label' && el?.matches('p[aria-label="Post preview"],p[aria-label="投稿プレビュー"]') && nativeLocalizationGameContext(el, record.attribute)?.kind === 'share-preview') return true;
     if (el?.matches('span.truncate') && el.parentElement?.matches('button[data-testid="games-rollup-row"]') && nativeGameJapaneseText(el, record.original, record.attribute)) return true;
     if (el?.matches('h2.truncate') && nativeLocalizationGameContext(el) && /^TWIRDLE(?: \d+)? results$/.test(clean(record.original))) return true;
     if (record.attribute === null && isNativeNotificationTimestamp(el) && record.node === el.lastChild) return true;
@@ -8988,6 +8989,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   function ctLocalizationRecordAllowed(record) {
     const el = record.attribute ? record.node : record.node.parentElement;
+    if (el?.closest('[aria-label="Post preview"],[aria-label="投稿プレビュー"]') &&
+        !(record.attribute === 'aria-label' && nativeLocalizationGameContext(el, record.attribute)?.kind === 'share-preview')) return false;
     return !!el && !el.closest('[id^="ct-"],[data-ct-owned],[data-ct-local-ui],[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],[contenteditable]:not([contenteditable="false"]),.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]') &&
       (!el.closest('.truncate') || ctLocalizationNativeRecordException(record)) &&
       !(record.attribute === null && el.closest('textarea,input,select,option'));
@@ -9954,11 +9957,22 @@ if (/^just\s+now$/i.test(t)) {
 
   // Tweet 2.5 owns puzzles, results, keyboard and result sharing. Localize
   // only its verified chrome, never game words, player names or post previews.
-  function nativeLocalizationGameContext(el) {
+  function nativeLocalizationGameContext(el, attribute = null) {
     if (!el || isOwnedLocalizationElement(el) || el.closest(
       'textarea,input,select,option,svg,code,pre,[contenteditable]:not([contenteditable="false"]),' +
       '[translate="no"],.notranslate,[data-user-content],.tl-user-text,[data-testid="tweet-text"],' +
-      '[data-testid="profile-bio"],[aria-label="Post preview"],[aria-label="投稿プレビュー"]')) return null;
+      '[data-testid="profile-bio"]')) return null;
+    const preview = el.closest('[aria-label="Post preview"],[aria-label="投稿プレビュー"]');
+    if (preview) {
+      const share = preview.parentElement;
+      // The preview body remains user content. Only this exact native P's
+      // own accessible label belongs to the share sheet's UI.
+      return attribute === 'aria-label' && el === preview && preview.matches('p') &&
+        share?.matches('section[aria-labelledby="tw-share-title"]') &&
+        share.querySelector(':scope > h2#tw-share-title') &&
+        share.querySelector(':scope > div[role="radiogroup"][aria-labelledby="tw-share-title"] input[type="radio"][name="tw-share-audience"]') ?
+        { root: share, kind: 'share-preview' } : null;
+    }
     const summary = el.closest('section[aria-labelledby="games-today"],section[aria-labelledby="games-settings"],' +
       'section[aria-labelledby="explore-games"],section[aria-labelledby="feed-games-title"]');
     if (summary && summary.querySelector(`:scope h2#${summary.getAttribute('aria-labelledby')}`)) return { root: summary, kind: 'summary' };
@@ -9995,6 +10009,8 @@ if (/^just\s+now$/i.test(t)) {
 
   function nativeGameJapaneseText(el, text, attr = null) {
     if (typeof text !== 'string' || text.length > 500) return null;
+    if (text === 'Post preview') return attr === 'aria-label' &&
+      nativeLocalizationGameContext(el, attr)?.kind === 'share-preview' ? '投稿プレビュー' : null;
     const words = nativeGameJapaneseText.words ||= new Map([
       ['Games', 'ゲーム'], ['Today’s games', '今日のゲーム'], ['All games', 'すべてのゲーム'], ['See all games', 'すべてのゲームを見る'],
       ['Today', '今日'], ['· new puzzles at midnight ET', '· 米国東部時間の午前0時に更新'],
@@ -10029,7 +10045,7 @@ if (/^just\s+now$/i.test(t)) {
       ['Share your result', '結果を共有'], ['Results page only', '結果ページのみ'], ['Post to my followers', 'フォロワーへ投稿'],
       ['Marked shared on your row of today’s Results page, which only you see. It won’t appear in anyone’s feed.', '今日の結果ページの自分の行に共有済みと表示します。この表示は自分だけに見え、誰かのタイムラインに投稿されることはありません。'],
       ['Your own post, with a card they can play from. Several at once fold into one row.', '遊べるカードを添えて、自分のツイートとして投稿します。複数の結果は1つの行にまとめられます。'],
-      ['Only today’s puzzle can be posted.', '投稿できるのは今日の問題だけです。'], ['Post preview', '投稿プレビュー'], ['Not now', '今はしない'],
+      ['Only today’s puzzle can be posted.', '投稿できるのは今日の問題だけです。'], ['Not now', '今はしない'],
       ['Sharing…', '共有中…'], ['Share', '共有'], ['You’ve already posted this result.', 'この結果はすでに投稿しています。'],
       ['Posting to followers isn’t available for this puzzle.', 'この問題の結果はフォロワーへ投稿できません。'],
       ['Finish the puzzle to share your result.', '問題を終えると結果を共有できます。'],
@@ -10098,7 +10114,7 @@ if (/^just\s+now$/i.test(t)) {
 
   function patchNativeGamesUI(root = document) {
     const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
-    const selector = 'button[aria-label],div[role="group"][aria-label],div[role="tablist"][aria-label],section[aria-label],ol[aria-label],.tw-egg[role="img"][aria-label],button[data-testid="games-rollup-row"] > span.truncate[title]';
+    const selector = 'button[aria-label],div[role="group"][aria-label],div[role="tablist"][aria-label],section[aria-label],ol[aria-label],.tw-egg[role="img"][aria-label],button[data-testid="games-rollup-row"] > span.truncate[title],section[aria-labelledby="tw-share-title"] > p[aria-label]';
     const elements = host instanceof Element && host.matches(selector) ? [host] : [];
     host?.querySelectorAll?.(selector).forEach(el => elements.push(el));
     for (const el of elements) {
@@ -10116,6 +10132,7 @@ if (/^just\s+now$/i.test(t)) {
       'textarea,input,select,option,script,style,code,pre,kbd,samp,svg,' +
       '[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,' +
       '[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],' +
+      '[aria-label="Post preview"],[aria-label="投稿プレビュー"],' +
       '.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
@@ -10419,6 +10436,7 @@ if (/^just\s+now$/i.test(t)) {
       const photo = nativePhotoUI(el);
       const pin = nativeLocalizationPinContext(el);
       if (!photo && isOwnedLocalizationElement(el) ||
+          el.closest('[aria-label="Post preview"],[aria-label="投稿プレビュー"]') ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
           el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || !photo && !pin && el.querySelector('img')) continue;
       if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&

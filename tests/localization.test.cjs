@@ -1478,20 +1478,40 @@ test('ja: Tweet 2.5 game board and share labels retain letters, native selection
     <p id="message" role="alert">Not enough letters.</p>
     <section aria-labelledby="tw-share-title"><h2 id="tw-share-title">Share your result</h2><div role="radiogroup" aria-labelledby="tw-share-title">
       <label><input type="radio" name="tw-share-audience" value="followers" checked><span id="audience">Post to my followers</span></label></div>
-      <p aria-label="Post preview" id="preview">TWIRDLE 1 3/6\nToday’s games\n🟩🟩🟩🟩🟩</p><button type="button" id="share">Share</button></section>
+      <p aria-label="Post preview" id="preview">TWIRDLE 1 3/6\nToday’s games\n🟩🟩🟩🟩🟩<span id="preview-user-text">Post preview</span><button type="button" aria-label="Results" id="preview-child">Share</button></p>
+      <p id="preview-word">Post preview</p><button type="button" id="share">Share</button></section>
+      <p aria-label="Post preview" id="unknown-preview">Share</p><p class="tl-user-text" id="user-preview-word">Post preview</p>
     <div role="group" aria-label="Keyboard"><button type="button" class="tw-key" aria-label="A, hatched" id="key">a</button>
       <button type="button" class="tw-key" aria-label="Enter" id="enter">enter</button></div></div></div></main>`, '/games/twirdle');
   const letter = f.document.getElementById('letter'), radio = f.document.querySelector('input'), share = f.document.getElementById('share');
-  const preview = f.text('preview'); let shares = 0; share.onclick = () => shares++;
+  const preview = f.text('preview'), previewElement = f.document.getElementById('preview'), body = previewElement.innerHTML;
+  let shares = 0; share.onclick = () => shares++;
   f.run();
   assert.equal(f.text('message'), '文字数が足りません。'); assert.equal(f.text('tw-share-title'), '結果を共有'); assert.equal(f.text('audience'), 'フォロワーへ投稿');
   assert.equal(f.text('preview'), preview); assert.equal(f.text('letter'), 'A'); assert.equal(f.text('key'), 'a');
+  assert.equal(previewElement.getAttribute('aria-label'), '投稿プレビュー'); assert.equal(previewElement.innerHTML, body);
+  assert.equal(f.document.getElementById('preview-child').getAttribute('aria-label'), 'Results');
+  for (const id of ['preview-user-text', 'preview-word', 'user-preview-word']) assert.equal(f.text(id), 'Post preview');
+  assert.equal(f.document.getElementById('unknown-preview').getAttribute('aria-label'), 'Post preview'); assert.equal(f.text('unknown-preview'), 'Share');
+  const previewRecord = { node: previewElement, attribute: 'aria-label', original: 'Post preview' };
+  assert.equal(f.qa.ctLocalizationNativeRecordException(previewRecord), true);
+  assert.equal(f.qa.ctLocalizationRecordAllowed(previewRecord), true);
+  assert.equal(f.qa.ctLocalizationRecordAllowed({ node: previewElement.firstChild, attribute: null }), false);
+  assert.equal(f.qa.ctLocalizationRecordAllowed({ node: f.document.getElementById('preview-child'), attribute: 'aria-label' }), false);
   assert.equal(f.document.querySelector('.tw-egg').getAttribute('aria-label'), '1文字目、A、文字と位置が正解');
   assert.equal(f.document.querySelector('.tw-board').getAttribute('aria-label'), 'TWIRDLE 1の盤面');
   assert.equal(f.text('enter'), '回答'); assert.equal(f.document.getElementById('enter').getAttribute('aria-label'), '回答する');
   assert.equal(radio.checked, true); assert.equal(radio.value, 'followers'); assert.equal(f.document.getElementById('letter'), letter);
-  share.click(); assert.equal(shares, 1); assert.equal(f.document.querySelectorAll('button').length, 3);
+  share.click(); assert.equal(shares, 1); assert.equal(f.document.querySelectorAll('button').length, 4);
   f.document.getElementById('message').firstChild.nodeValue = 'Hatched in 3!'; f.run(); assert.equal(f.text('message'), '3回で正解！');
+  for (const classic of [true, false, true]) {
+    f.dom.window.qaClassic = classic; f.run();
+    assert.equal(previewElement.getAttribute('aria-label'), '投稿プレビュー'); assert.equal(previewElement.innerHTML, body);
+    assert.equal(f.document.getElementById('preview-child').getAttribute('aria-label'), 'Results');
+    assert.equal(f.document.getElementById('unknown-preview').getAttribute('aria-label'), 'Post preview');
+  }
+  previewElement.setAttribute('aria-label', 'Post preview'); f.run(previewElement);
+  assert.equal(previewElement.getAttribute('aria-label'), '投稿プレビュー'); assert.equal(previewElement.innerHTML, body);
   f.dom.window.close();
 });
 
