@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.27.0
+// @version      6.28.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -128,6 +128,8 @@
     ['Poll choices', '投票の選択肢'],
     ['Poll results', '投票結果'],
     ['Vote', '投票する'],
+    ['Change vote', '投票を変更'],
+    ['Update vote', '投票を更新'],
     ['Final results', '最終結果'],
     ['Closing…', '終了処理中…'],
     ['(your vote)', '（あなたの投票）'],
@@ -198,6 +200,7 @@
     ['Sports', 'スポーツ'],
     ['Entertainment', 'エンターテインメント'],
     ['Technology', 'テクノロジー'],
+    ['Games', 'ゲーム'],
 
     ['Top', '話題'],
     ['Latest', '最新'],
@@ -615,6 +618,9 @@
   function ctLocalizationNativeRecordException(record) {
     const el = record.attribute ? record.node : record.node.parentElement;
     if (nativeLocalizationAccountMenu(el) || nativeLocalizationBlockMenu(el) || isNativeSettingsNavigation(el) || isNativeSettingsValue(el)) return true;
+    if (record.attribute === 'aria-label' && el?.matches('p[aria-label="Post preview"],p[aria-label="投稿プレビュー"]') && nativeLocalizationGameContext(el, record.attribute)?.kind === 'share-preview') return true;
+    if (el?.matches('span.truncate') && el.parentElement?.matches('button[data-testid="games-rollup-row"]') && nativeGameJapaneseText(el, record.original, record.attribute)) return true;
+    if (el?.matches('h2.truncate') && nativeLocalizationGameContext(el) && /^TWIRDLE(?: \d+)? results$/.test(clean(record.original))) return true;
     if (record.attribute === null && isNativeNotificationTimestamp(el) && record.node === el.lastChild) return true;
     const routeTitle = { '/explore': 'Explore', '/settings': 'Settings', '/notifications': 'Notifications', '/profile': 'Feed' }[location.pathname.replace(/\/$/, '')] ||
       (/^\/(?:user\/[A-Za-z0-9_.-]+|post\/[A-Za-z0-9_-]{1,160})\/?$/.test(location.pathname) && el?.matches('h2.truncate') && el.closest('.sticky') ? 'Feed' : null);
@@ -631,6 +637,8 @@
 
   function ctLocalizationRecordAllowed(record) {
     const el = record.attribute ? record.node : record.node.parentElement;
+    if (el?.closest('[aria-label="Post preview"],[aria-label="投稿プレビュー"]') &&
+        !(record.attribute === 'aria-label' && nativeLocalizationGameContext(el, record.attribute)?.kind === 'share-preview')) return false;
     return !!el && !el.closest('[id^="ct-"],[data-ct-owned],[data-ct-local-ui],[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],[contenteditable]:not([contenteditable="false"]),.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]') &&
       (!el.closest('.truncate') || ctLocalizationNativeRecordException(record)) &&
       !(record.attribute === null && el.closest('textarea,input,select,option'));
@@ -1595,12 +1603,184 @@ if (/^just\s+now$/i.test(t)) {
     return null;
   }
 
+  // Tweet 2.5 owns puzzles, results, keyboard and result sharing. Localize
+  // only its verified chrome, never game words, player names or post previews.
+  function nativeLocalizationGameContext(el, attribute = null) {
+    if (!el || isOwnedLocalizationElement(el) || el.closest(
+      'textarea,input,select,option,svg,code,pre,[contenteditable]:not([contenteditable="false"]),' +
+      '[translate="no"],.notranslate,[data-user-content],.tl-user-text,[data-testid="tweet-text"],' +
+      '[data-testid="profile-bio"]')) return null;
+    const preview = el.closest('[aria-label="Post preview"],[aria-label="投稿プレビュー"]');
+    if (preview) {
+      const share = preview.parentElement;
+      // The preview body remains user content. Only this exact native P's
+      // own accessible label belongs to the share sheet's UI.
+      return attribute === 'aria-label' && el === preview && preview.matches('p') &&
+        share?.matches('section[aria-labelledby="tw-share-title"]') &&
+        share.querySelector(':scope > h2#tw-share-title') &&
+        share.querySelector(':scope > div[role="radiogroup"][aria-labelledby="tw-share-title"] input[type="radio"][name="tw-share-audience"]') ?
+        { root: share, kind: 'share-preview' } : null;
+    }
+    const summary = el.closest('section[aria-labelledby="games-today"],section[aria-labelledby="games-settings"],' +
+      'section[aria-labelledby="explore-games"],section[aria-labelledby="feed-games-title"]');
+    if (summary && summary.querySelector(`:scope h2#${summary.getAttribute('aria-labelledby')}`)) return { root: summary, kind: 'summary' };
+    const rollup = el.closest('button[data-testid="games-rollup-row"]');
+    if (rollup?.matches('button.w-full.flex.items-center') &&
+        rollup.querySelector(':scope > span > svg') && rollup.querySelector(':scope > svg') &&
+        rollup.querySelector(':scope > span.truncate[title]')) return { root: rollup, kind: 'rollup' };
+    const card = el.closest('div[data-testid="game-result-card"]');
+    if (card?.querySelector(':scope > span.tw-egg[aria-hidden="true"]') &&
+        card.querySelector(':scope > button[type="button"][aria-label]')) return { root: card, kind: 'card' };
+    const howto = el.closest('div[role="dialog"][aria-modal="true"][aria-labelledby="tw-howto-title"]');
+    if (howto?.querySelector('h2#tw-howto-title') && howto.querySelector('div.tw-egg[role="img"]')) return { root: howto, kind: 'help' };
+    const share = el.closest('section[aria-labelledby="tw-share-title"]');
+    if (share?.querySelector(':scope > h2#tw-share-title') &&
+        share.querySelector('div[role="radiogroup"] input[type="radio"][name="tw-share-audience"]')) return { root: share, kind: 'share' };
+    const play = el.closest('div.tw-play');
+    if (play?.querySelector(':scope > div.tw-board[role="group"]') &&
+        play.querySelector('div[role="group"][aria-label="Keyboard"],div[role="group"][aria-label="キーボード"]')) return { root: play, kind: 'play' };
+    // Games can open in a native navigation stack without changing /feed.
+    // The actual board/results/settings markers, rather than the route alone,
+    // identify that stack and keep unrelated profile/timeline text protected.
+    const page = el.closest('main div.animate-fadeIn');
+    if (!page) return null;
+    const title = page.querySelector(':scope > div.sticky > div > h2.truncate');
+    const header = title?.parentElement?.parentElement;
+    const gameHeader = header?.querySelector(':scope > button[aria-label="Back"],:scope > button[aria-label="戻る"]') &&
+      /^TWIRDLE(?: \d+)?(?: results|の結果)?$/.test(clean(title.textContent));
+    if (!gameHeader && !page.querySelector('section[aria-labelledby="games-today"],div.tw-play > div.tw-board,' +
+      '[role="tablist"][aria-label="Leaderboard"],[role="tablist"][aria-label="ランキング"],section[aria-labelledby="twirdle-stats"]')) return null;
+    if (el.closest('ol li button,ul li button')?.querySelector('.truncate')) return null;
+    if (el.closest('ol li') && !el.closest('section[aria-labelledby="twirdle-stats"]')) return null;
+    return { root: page, kind: 'page' };
+  }
+
+  function nativeGameJapaneseText(el, text, attr = null) {
+    if (typeof text !== 'string' || text.length > 500) return null;
+    if (text === 'Post preview') return attr === 'aria-label' &&
+      nativeLocalizationGameContext(el, attr)?.kind === 'share-preview' ? '投稿プレビュー' : null;
+    const words = nativeGameJapaneseText.words ||= new Map([
+      ['Games', 'ゲーム'], ['Today’s games', '今日のゲーム'], ['All games', 'すべてのゲーム'], ['See all games', 'すべてのゲームを見る'],
+      ['Today', '今日'], ['· new puzzles at midnight ET', '· 米国東部時間の午前0時に更新'],
+      ['Today’s puzzle · new one at midnight ET', '今日の問題 · 米国東部時間の午前0時に更新'],
+      ['Closed · see how everyone did', '終了 · みんなの結果を見る'], ['No puzzle today', '今日の問題はありません'],
+      ['Loading…', '読み込み中…'], ['Couldn’t load today’s games.', '今日のゲームを読み込めませんでした。'],
+      ['Couldn’t load your game settings.', 'ゲームの設定を読み込めませんでした。'], ['Couldn’t save that. Try again.', '保存できませんでした。もう一度お試しください。'],
+      ['Settings', '設定'], ['Appear on leaderboards', 'ランキングに表示する'],
+      ['Your name, handle and score on each game’s Results page', '各ゲームの結果ページに名前・ユーザー名・スコアを表示します'],
+      ['Play', '遊ぶ'], ['Continue', '続ける'], ['View', '見る'], ['Results', '結果'], ['Retry', '再試行'],
+      ['There’s no TWIRDLE', 'TWIRDLE：'],
+      ['for that day', '指定した日付の問題はありません'], ['today', '今日の問題はありません'],
+      ['. A new one opens at midnight ET.', '。新しい問題は米国東部時間の午前0時に公開されます。'],
+      ['How to play', '遊び方'], ['How to play TWIRDLE', 'TWIRDLEの遊び方'], ['Close how to play', '遊び方を閉じる'],
+      ['Guess the hidden word', '隠れた単語を当てましょう'], ['Examples', '例'], ['Each word must be a valid', '入力するのは実在する単語です。文字数は'],
+      ['-letter word.', '文字です。'], ['After each guess, the eggs change to show how close you are.', '回答すると卵が変化し、正解にどれだけ近いかを示します。'],
+      ['W is hatched: it’s in the word, in the right spot.', 'Wは孵化：文字と位置の両方が正解です。'],
+      ['E is cracked: it’s in the word, but in another spot.', 'Eはひび割れ：文字は正解ですが、位置が違います。'],
+      ['K stays a plain egg: it isn’t in the word at all.', 'Kは卵のまま：正解の単語には含まれません。'],
+      ['A new TWIRDLE opens every day at midnight ET. Solve it each day to build your streak; a missed or unsolved day ends it.', 'TWIRDLEは毎日、米国東部時間の午前0時に更新されます。毎日正解して連続記録を伸ばしましょう。参加しなかった日や正解できなかった日があると記録は途切れます。'],
+      ['Got it', 'わかりました'], ['Couldn’t load TWIRDLE. Try again.', 'TWIRDLEを読み込めませんでした。もう一度お試しください。'],
+      ['Not enough letters.', '文字数が足りません。'], ['Not in the word list.', '単語リストにない単語です。'],
+      ['You’ve already finished this puzzle.', 'この問題はすでに終了しています。'],
+      ['Today’s puzzle was replaced with a new one. Your word is kept and no attempt was used.', '今日の問題が差し替えられました。入力した単語は保持され、回答回数は消費されていません。'],
+      ['This puzzle has closed.', 'この問題は終了しました。'], ['This puzzle isn’t available any more.', 'この問題は利用できなくなりました。'],
+      ['Too many guesses at once. Wait a moment, then try again.', '回答が集中しています。少し待ってからお試しください。'],
+      ['Couldn’t send your guess. Your word is kept and no attempt was used. Try again.', '回答を送信できませんでした。入力と回答回数は保持されています。もう一度お試しください。'],
+      ['Checking whether your guess went through…', '回答が送信されたか確認中…'],
+      ['Your guess didn’t go through. Your word is kept; try again.', '回答は送信されていません。入力は保持されています。もう一度お試しください。'],
+      ['Couldn’t check whether your guess went through. Reopen the puzzle before trying again.', '回答が送信されたか確認できませんでした。問題を開き直してからお試しください。'],
+      ['Not this time. The answer is revealed after midnight ET.', '今回は残念。正解は米国東部時間の午前0時以降に公開されます。'],
+      ['Share your result', '結果を共有'], ['Results page only', '結果ページのみ'], ['Post to my followers', 'フォロワーへ投稿'],
+      ['Marked shared on your row of today’s Results page, which only you see. It won’t appear in anyone’s feed.', '今日の結果ページの自分の行に共有済みと表示します。この表示は自分だけに見え、誰かのタイムラインに投稿されることはありません。'],
+      ['Your own post, with a card they can play from. Several at once fold into one row.', '遊べるカードを添えて、自分のツイートとして投稿します。複数の結果は1つの行にまとめられます。'],
+      ['Only today’s puzzle can be posted.', '投稿できるのは今日の問題だけです。'], ['Not now', '今はしない'],
+      ['Sharing…', '共有中…'], ['Share', '共有'], ['You’ve already posted this result.', 'この結果はすでに投稿しています。'],
+      ['Posting to followers isn’t available for this puzzle.', 'この問題の結果はフォロワーへ投稿できません。'],
+      ['Finish the puzzle to share your result.', '問題を終えると結果を共有できます。'],
+      ['Couldn’t reach Tweet. Try again.', 'Tweetに接続できませんでした。もう一度お試しください。'], ['Couldn’t share that. Try again.', '共有できませんでした。もう一度お試しください。'],
+      ['Couldn’t check whether that went through. Reopen the puzzle before trying again.', '処理が完了したか確認できませんでした。問題を開き直してからお試しください。'],
+      ['Posted to your followers.', 'フォロワーへ投稿しました。'], ['Shared on the Results page.', '結果ページで共有しました。'], ['View post', 'ツイートを見る'],
+      ['See results', '結果を見る'], ['See today’s results', '今日の結果を見る'], ['Play today’s TWIRDLE', '今日のTWIRDLEで遊ぶ'],
+      ['Keyboard', 'キーボード'], ['Delete letter', '文字を削除'], ['Enter', '回答する'], ['Leaderboard', 'ランキング'],
+      ['People I follow', 'フォロー中のユーザー'], ['Everyone', 'すべてのユーザー'], ['Your stats', 'あなたの成績'],
+      ['Played', 'プレイ回数'], ['Hatched', '正解率'], ['Streak', '連続正解'], ['Best', '最長記録'],
+      ['Guess distribution', '正解までの回答回数'], ['Hatched puzzles by number of guesses', '正解までの回答回数別の問題数'],
+      ['You haven’t played this one yet.', 'この問題はまだプレイしていません。'], ['You didn’t play this one.', 'この問題には参加しませんでした。'],
+      ['You’re still playing. Finish to get a rank.', 'プレイ中です。終了すると順位が表示されます。'],
+      ['Not this time. Only hatched eggs are ranked.', '今回は残念。正解した場合のみランキングに表示されます。'],
+      ['No one you follow has hatched this one yet.', 'フォロー中のユーザーはまだ誰も正解していません。'], ['No one has hatched this one yet.', 'まだ誰も正解していません。'],
+      ['Not this time', '今回は残念'], ['Couldn’t load results.', '結果を読み込めませんでした。'], ['The answer', '正解'], ['The word was', '正解の単語'],
+      ['Games page', 'ゲームページ'], ['Ranked by guesses, then time from your first guess. Turn off “Appear on leaderboards” on the', '回答回数が少ない順、同じ場合は最初の回答からの所要時間順に表示します。自分を非表示にするには、'],
+      ['to hide yourself.', 'で「ランキングに表示する」をオフにしてください。']
+    ]);
+    // Most timeline nodes are user text. Reject non-game strings before any
+    // structural queries so the new module does not add a page scan per word.
+    if (!words.has(text) && !/^(?:Guess |Hatched in |[1-9]\d?(?: of |[0-9]{0,3}-day streak)|You hatched |TWIRDLE|You’re ranked |Not this time\. The word was |Play TWIRDLE|Continue TWIRDLE|View TWIRDLE|Letter |[A-Z], |enter$|[\s\S]+ shared (?:games|TWIRDLE|today’s (?:games|TWIRDLE))$)/.test(text)) return null;
+    const context = nativeLocalizationGameContext(el);
+    if (!context) return null;
+    if (context.kind === 'rollup') {
+      // Display names are supplied by Tweet. Preserve the complete captured
+      // name; parse only the generated suffix inside this exact native row.
+      let actor;
+      if ((actor = /^([\s\S]{1,200}) and (\d+) others? shared (games|TWIRDLE)$/.exec(text))) return `${actor[1]}さんと、ほか${actor[2]}人が${actor[3] === 'games' ? 'ゲーム' : actor[3]}の結果を共有しました`;
+      if ((actor = /^(\d+) people shared (games|TWIRDLE)$/.exec(text))) return `${actor[1]}人が${actor[2] === 'games' ? 'ゲーム' : actor[2]}の結果を共有しました`;
+      if ((actor = /^([\s\S]{1,200}) and (\d+) others? you follow shared today’s (games|TWIRDLE)$/.exec(text))) return `フォロー中の${actor[1]}さんと、ほか${actor[2]}人が今日の${actor[3] === 'games' ? 'ゲーム' : actor[3]}の結果を共有しました`;
+      return null;
+    }
+    // Truncation is used for leaderboard identities. Never reinterpret names
+    // as a static label, even when their text happens to match the dictionary.
+    const title = el.matches('h2.truncate') && el.parentElement?.parentElement?.matches('div.sticky') &&
+      /^TWIRDLE(?: \d+)?(?: results|の結果)?$/.test(clean(el.textContent));
+    if (el.closest('.truncate') && !title || el.closest('dd') || !attr && el.closest('[role="img"],.tw-egg') || el.matches('input,textarea,select,option')) return null;
+    if (words.has(text)) return words.get(text);
+    let match;
+    if ((match = /^Guess the ([1-9]\d?)-letter word in ([1-9]\d?) tries$/.exec(text))) return `${match[2]}回以内に${match[1]}文字の単語を当てましょう`;
+    if ((match = /^Hatched in ([1-9]\d?)(!)?$/.exec(text))) return `${match[1]}回で正解${match[2] ? '！' : ''}`;
+    if ((match = /^([1-9]\d?) of ([1-9]\d?) guesses$/.exec(text))) return `${match[2]}回中${match[1]}回答済み`;
+    if ((match = /^([1-9]\d{0,4})-day streak$/.exec(text))) return `${match[1]}日連続正解`;
+    if ((match = /^You hatched (TWIRDLE(?: \d+)?) in ([1-9]\d?)$/.exec(text))) return `${match[1]}に${match[2]}回で正解`;
+    if ((match = /^(TWIRDLE(?: \d+)?): not this time$/.exec(text))) return `${match[1]}：今回は残念`;
+    if ((match = /^You’re ranked (\d+) (among people you follow|of everyone)\.( Only you can see your rank\.)?$/.exec(text))) return `${match[2] === 'of everyone' ? '全体' : 'フォロー中のユーザー'}で${match[1]}位です。${match[3] ? '順位は自分だけに表示されます。' : ''}`;
+    if (/^You hatched it\.(?: Only you can see your rank\.)?$/.test(text)) return `正解しました。${text.endsWith(' Only you can see your rank.') ? '順位は自分だけに表示されます。' : ''}`;
+    if ((match = /^Not this time\. The word was ([A-Z]{1,25})\.$/.exec(text))) return `今回は残念。正解は${match[1]}でした。`;
+    if ((match = /^(TWIRDLE(?: \d+)?) results$/.exec(text))) return `${match[1]}の結果`;
+    if (el.matches('button.tw-key') && text === 'enter') return '回答';
+    if (!attr) return null;
+    if ((match = /^(TWIRDLE(?: \d+)?) (board|results)$/.exec(text))) return `${match[1]}の${match[2] === 'board' ? '盤面' : '結果'}`;
+    if ((match = /^Guess ([1-9]\d?)(, typing)?$/.exec(text))) return `${match[1]}回目の回答${match[2] ? '、入力中' : ''}`;
+    if ((match = /^(Play|Continue|View) (TWIRDLE(?: \d+)?)(: (not played yet|in progress, ([1-9]\d?) of ([1-9]\d?) guesses|Hatched in ([1-9]\d?)|not this time))?$/.exec(text))) {
+      const action = `${match[2]}を${{ Play: '遊ぶ', Continue: '続ける', View: '見る' }[match[1]]}`;
+      return action + (!match[3] ? '' : match[4] === 'not played yet' ? '、未プレイ' : match[5] ? `、${match[6]}回中${match[5]}回答済み` : match[7] ? `、${match[7]}回で正解` : '、今回は残念');
+    }
+    if ((match = /^Letter ([1-9]\d?), (empty|([A-Z])(?:, (hatched, right spot|cracked, in the word but in another spot|not in the word))?)$/.exec(text))) {
+      const state = { 'hatched, right spot': '文字と位置が正解', 'cracked, in the word but in another spot': '文字は正解、位置が違います', 'not in the word': '単語に含まれません' }[match[4]];
+      return `${match[1]}文字目、${match[2] === 'empty' ? '空欄' : match[3]}${state ? '、' + state : ''}`;
+    }
+    if ((match = /^([A-Z]), (hatched|cracked|not in the word)$/.exec(text))) return `${match[1]}、${{ hatched: '文字と位置が正解', cracked: '文字は正解、位置が違います', 'not in the word': '単語に含まれません' }[match[2]]}`;
+    return null;
+  }
+
+  function patchNativeGamesUI(root = document) {
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const selector = 'button[aria-label],div[role="group"][aria-label],div[role="tablist"][aria-label],section[aria-label],ol[aria-label],.tw-egg[role="img"][aria-label],button[data-testid="games-rollup-row"] > span.truncate[title],section[aria-labelledby="tw-share-title"] > p[aria-label]';
+    const elements = host instanceof Element && host.matches(selector) ? [host] : [];
+    host?.querySelectorAll?.(selector).forEach(el => elements.push(el));
+    for (const el of elements) {
+      for (const attr of ['aria-label', 'title']) {
+        const value = el.getAttribute(attr);
+        const out = nativeGameJapaneseText(el, value, attr);
+        if (out && value !== out) ctRememberLocalization(el, attr, out);
+      }
+    }
+  }
+
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
     if (el.closest(
       'textarea,input,select,option,script,style,code,pre,kbd,samp,svg,' +
       '[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,' +
       '[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],' +
+      '[aria-label="Post preview"],[aria-label="投稿プレビュー"],' +
       '.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
@@ -1614,8 +1794,10 @@ if (/^just\s+now$/i.test(t)) {
         }
         return !heading.closest('article');
       }) && !el.closest('article');
+    const gameRollup = el.matches('span.truncate') && el.parentElement?.matches('button[data-testid="games-rollup-row"]') && nativeGameJapaneseText(el, clean(el.textContent));
+    const gameTitle = el.matches('h2.truncate') && nativeLocalizationGameContext(el) && /^TWIRDLE(?: \d+)?(?: results|の結果)$/.test(clean(el.textContent));
     const unknownDevice = el.matches('span.truncate') && clean(el.textContent) === 'Unknown device' && nativeLocalizationSessionContext(el)?.row;
-    return !!el.closest('.truncate') && !unknownDevice && !nativeLocalizationAccountMenu(el) && !nativeLocalizationBlockMenu(el) && !isNativeNotificationTimestamp(el) && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle;
+    return !!el.closest('.truncate') && !unknownDevice && !nativeLocalizationAccountMenu(el) && !nativeLocalizationBlockMenu(el) && !isNativeNotificationTimestamp(el) && !isNativeSettingsNavigation(el) && !isNativeSettingsValue(el) && !pageTitle && !gameTitle && !gameRollup;
   }
 
   function localizationNotificationRow(el) {
@@ -1715,6 +1897,7 @@ if (/^just\s+now$/i.test(t)) {
     const el = node?.parentElement;
     if (isProtectedLocalizationElement(el)) return false;
     if (nativePinJapaneseText(el, clean(node.nodeValue))) return true;
+    if (nativeGameJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeMediaUploadJapaneseText(el, node.nodeValue)) return true;
     if (nativeLocalizationBlockMenu(el) || nativeLocalizationBlockDialog(el)) return true;
     const blockedProfile = nativeLocalizationBlockProfile(el);
@@ -1739,11 +1922,15 @@ if (/^just\s+now$/i.test(t)) {
     if (nativeLocalizationSessionContext(el) && nativeSessionJapaneseText(el, clean(node.nodeValue))) return true;
     if (isNativeTweetCount(el)) return true;
     const text = clean(node.nodeValue);
+    if (text === 'Games') {
+      const navigation = el.closest('nav button,[role="navigation"] button');
+      return !!navigation?.querySelector(':scope > svg') && !navigation.querySelector('img');
+    }
     const link = el.closest('a[href]');
     if (link) {
       let url;
       try { url = new URL(link.getAttribute('href'), location.href); } catch { return false; }
-      if (url.origin !== location.origin || !/^\/(?:feed|explore|notifications|settings|profile|compose|bookmarks)\/?$/.test(url.pathname)) return false;
+      if (url.origin !== location.origin || !/^\/(?:feed|explore|notifications|settings|profile|compose|bookmarks|games)\/?$/.test(url.pathname)) return false;
       return !link.querySelector('img') && !!el.closest('nav,[role="navigation"],header,aside');
     }
     // A reply target is UI, but its handle must remain byte-for-byte unchanged.
@@ -1897,6 +2084,7 @@ if (/^just\s+now$/i.test(t)) {
       const photo = nativePhotoUI(el);
       const pin = nativeLocalizationPinContext(el);
       if (!photo && isOwnedLocalizationElement(el) ||
+          el.closest('[aria-label="Post preview"],[aria-label="投稿プレビュー"]') ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
           el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || !photo && !pin && el.querySelector('img')) continue;
       if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
@@ -1947,7 +2135,7 @@ if (/^just\s+now$/i.test(t)) {
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
     const parentPoll = nativeLocalizationParentPostPreview(el) && el.matches('p.mt-1.text-tl-app-text-muted') && text.match(/^Poll · ([2-5]) choices$/);
-    let out = nativePinJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+    let out = nativePinJapaneseText(el, text) || nativeGameJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
       (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
@@ -1970,6 +2158,7 @@ if (/^just\s+now$/i.test(t)) {
   function patchUI(root = document) {
     ctSyncLocalizationAppearance(root);
     patchNativePollAndAccountUI(root);
+    patchNativeGamesUI(root);
     localizationScopeNodes(root).forEach(translateTextNode);
     patchUIAttributes(root);
   }

@@ -49,6 +49,7 @@ function fixture(language, html, route = '/feed') {
     'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
     'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia',
     'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError',
+    'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
     'notificationTextNodes', 'patchNotificationGrammar', 'patchNotificationConnectors',
     'patchNotificationParticles', 'patchNotificationFollowGrammar', 'patchReplyingTo',
@@ -1443,5 +1444,146 @@ test('en: Tweet 2.3.0 blocked-account settings restore native text when classic 
   assert.equal(f.text('english-block-name'), 'Blocked accounts');
   f.dom.window.qaClassic = false; f.qa.ctSyncLocalizationAppearance(); f.run();
   assert.equal(help.textContent, native); assert.equal(help.firstChild, textNode);
+  f.dom.window.close();
+});
+
+for (const language of ['ja', 'en']) test(`${language}: Tweet 2.5 games summaries and result cards preserve native controls and post content`, () => {
+  const f = fixture(language, `<nav><button id="nav-games"><svg></svg><span>Games</span></button></nav><main>
+    <section aria-labelledby="feed-games-title" data-testid="todays-games-card"><h2 id="feed-games-title">Today’s games</h2>
+      <ul><li><span><span>TWIRDLE 1</span><span id="description">Guess the 5-letter word in 6 tries</span></span>
+      <button type="button" id="play" aria-label="Play TWIRDLE 1: not played yet">Play</button></li></ul></section>
+    <section aria-labelledby="explore-games"><h2 id="explore-games">Today’s games</h2><button id="all-games">All games</button></section>
+    <article><p class="tl-user-text whitespace-pre-wrap break-words" id="game-post">Play TWIRDLE 1: not played yet https://app.tweet.app/games/twirdle</p>
+      <div data-testid="game-result-card"><span class="tw-egg" aria-hidden="true"></span><span><span>TWIRDLE 1</span><span id="card-description">Today’s puzzle · new one at midnight ET</span></span>
+      <button type="button" id="card-play" aria-label="Play TWIRDLE 1">Play</button></div></article></main>`);
+  const button = f.document.getElementById('play'); let clicks = 0; button.onclick = () => clicks++;
+  f.run();
+  assert.equal(f.text('nav-games'), language === 'ja' ? 'ゲーム' : 'Games');
+  assert.equal(f.text('feed-games-title'), language === 'ja' ? '今日のゲーム' : 'Today’s games');
+  assert.equal(f.text('description'), language === 'ja' ? '6回以内に5文字の単語を当てましょう' : 'Guess the 5-letter word in 6 tries');
+  assert.equal(button.getAttribute('aria-label'), language === 'ja' ? 'TWIRDLE 1を遊ぶ、未プレイ' : 'Play TWIRDLE 1: not played yet');
+  assert.equal(f.text('all-games'), language === 'ja' ? 'すべてのゲーム' : 'All games');
+  assert.equal(f.text('card-description'), language === 'ja' ? '今日の問題 · 米国東部時間の午前0時に更新' : 'Today’s puzzle · new one at midnight ET');
+  assert.equal(f.text('card-play'), language === 'ja' ? '遊ぶ' : 'Play');
+  assert.equal(f.text('game-post'), 'Play TWIRDLE 1: not played yet https://app.tweet.app/games/twirdle');
+  assert.equal(f.document.getElementById('play'), button); button.click(); assert.equal(clicks, 1);
+  f.run(); f.dom.window.qaClassic = false; f.run(); assert.equal(button.getAttribute('aria-label'), language === 'ja' ? 'TWIRDLE 1を遊ぶ、未プレイ' : 'Play TWIRDLE 1: not played yet');
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.5 game board and share labels retain letters, native selection, previews and handlers', () => {
+  const f = fixture('ja', `<main><div class="animate-fadeIn"><div class="tw-play">
+    <div class="tw-board" role="group" aria-label="TWIRDLE 1 board"><div class="tw-row" role="group" aria-label="Guess 1, typing">
+      <div class="tw-egg" role="img" data-state="correct" aria-label="Letter 1, A, hatched, right spot"><span aria-hidden="true" id="letter">A</span></div></div></div>
+    <p id="message" role="alert">Not enough letters.</p>
+    <section aria-labelledby="tw-share-title"><h2 id="tw-share-title">Share your result</h2><div role="radiogroup" aria-labelledby="tw-share-title">
+      <label><input type="radio" name="tw-share-audience" value="followers" checked><span id="audience">Post to my followers</span></label></div>
+      <p aria-label="Post preview" id="preview">TWIRDLE 1 3/6\nToday’s games\n🟩🟩🟩🟩🟩<span id="preview-user-text">Post preview</span><button type="button" aria-label="Results" id="preview-child">Share</button></p>
+      <p id="preview-word">Post preview</p><button type="button" id="share">Share</button></section>
+      <p aria-label="Post preview" id="unknown-preview">Share</p><p class="tl-user-text" id="user-preview-word">Post preview</p>
+    <div role="group" aria-label="Keyboard"><button type="button" class="tw-key" aria-label="A, hatched" id="key">a</button>
+      <button type="button" class="tw-key" aria-label="Enter" id="enter">enter</button></div></div></div></main>`, '/games/twirdle');
+  const letter = f.document.getElementById('letter'), radio = f.document.querySelector('input'), share = f.document.getElementById('share');
+  const preview = f.text('preview'), previewElement = f.document.getElementById('preview'), body = previewElement.innerHTML;
+  let shares = 0; share.onclick = () => shares++;
+  f.run();
+  assert.equal(f.text('message'), '文字数が足りません。'); assert.equal(f.text('tw-share-title'), '結果を共有'); assert.equal(f.text('audience'), 'フォロワーへ投稿');
+  assert.equal(f.text('preview'), preview); assert.equal(f.text('letter'), 'A'); assert.equal(f.text('key'), 'a');
+  assert.equal(previewElement.getAttribute('aria-label'), '投稿プレビュー'); assert.equal(previewElement.innerHTML, body);
+  assert.equal(f.document.getElementById('preview-child').getAttribute('aria-label'), 'Results');
+  for (const id of ['preview-user-text', 'preview-word', 'user-preview-word']) assert.equal(f.text(id), 'Post preview');
+  assert.equal(f.document.getElementById('unknown-preview').getAttribute('aria-label'), 'Post preview'); assert.equal(f.text('unknown-preview'), 'Share');
+  const previewRecord = { node: previewElement, attribute: 'aria-label', original: 'Post preview' };
+  assert.equal(f.qa.ctLocalizationNativeRecordException(previewRecord), true);
+  assert.equal(f.qa.ctLocalizationRecordAllowed(previewRecord), true);
+  assert.equal(f.qa.ctLocalizationRecordAllowed({ node: previewElement.firstChild, attribute: null }), false);
+  assert.equal(f.qa.ctLocalizationRecordAllowed({ node: f.document.getElementById('preview-child'), attribute: 'aria-label' }), false);
+  assert.equal(f.document.querySelector('.tw-egg').getAttribute('aria-label'), '1文字目、A、文字と位置が正解');
+  assert.equal(f.document.querySelector('.tw-board').getAttribute('aria-label'), 'TWIRDLE 1の盤面');
+  assert.equal(f.text('enter'), '回答'); assert.equal(f.document.getElementById('enter').getAttribute('aria-label'), '回答する');
+  assert.equal(radio.checked, true); assert.equal(radio.value, 'followers'); assert.equal(f.document.getElementById('letter'), letter);
+  share.click(); assert.equal(shares, 1); assert.equal(f.document.querySelectorAll('button').length, 4);
+  f.document.getElementById('message').firstChild.nodeValue = 'Hatched in 3!'; f.run(); assert.equal(f.text('message'), '3回で正解！');
+  for (const classic of [true, false, true]) {
+    f.dom.window.qaClassic = classic; f.run();
+    assert.equal(previewElement.getAttribute('aria-label'), '投稿プレビュー'); assert.equal(previewElement.innerHTML, body);
+    assert.equal(f.document.getElementById('preview-child').getAttribute('aria-label'), 'Results');
+    assert.equal(f.document.getElementById('unknown-preview').getAttribute('aria-label'), 'Post preview');
+  }
+  previewElement.setAttribute('aria-label', 'Post preview'); f.run(previewElement);
+  assert.equal(previewElement.getAttribute('aria-label'), '投稿プレビュー'); assert.equal(previewElement.innerHTML, body);
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.5 game help keeps split React text nodes and example letters', () => {
+  const f = fixture('ja', `<div role="dialog" aria-modal="true" aria-labelledby="tw-howto-title"><div><h2 id="tw-howto-title">How to play</h2><button type="button" aria-label="Close how to play"></button></div>
+    <ul><li id="length">Each word must be a valid <span id="word-length">5</span>-letter word.</li></ul>
+    <div role="group" aria-label="Example: WEARY"><div class="tw-egg" role="img" aria-label="Letter 1, W, hatched, right spot"><span aria-hidden="true" id="example">W</span></div></div>
+    <p id="caption">W is hatched: it’s in the word, in the right spot.</p><button type="button">Got it</button></div>`);
+  const length = f.document.getElementById('word-length'), before = f.document.getElementById('length').firstChild, after = length.nextSibling;
+  f.run();
+  assert.equal(f.text('tw-howto-title'), '遊び方'); assert.equal(f.text('length'), '入力するのは実在する単語です。文字数は 5文字です。');
+  assert.equal(f.document.getElementById('length').firstChild, before); assert.equal(length.nextSibling, after); assert.equal(f.text('example'), 'W');
+  length.firstChild.nodeValue = '6'; f.run(); assert.equal(f.text('word-length'), '6');
+  assert.equal(f.document.querySelector('button').getAttribute('aria-label'), '遊び方を閉じる'); f.dom.window.close();
+});
+
+test('ja: Tweet 2.5 leaderboard/stats preserve matching player names, handle, answer and stat values', () => {
+  const f = fixture('ja', `<main><div class="animate-fadeIn"><div class="sticky"><button aria-label="Back"><svg></svg></button><div><h2 class="truncate" id="result-title">TWIRDLE 1 results</h2></div></div>
+    <section aria-label="The answer"><p id="answer-label">The word was</p><div role="img" aria-label="BEST"><span id="answer">BEST</span></div></section>
+    <div role="tablist" aria-label="Leaderboard"><button role="tab" id="scope">People I follow</button></div>
+    <section aria-busy="false"><p id="rank">You’re ranked 2 of everyone. Only you can see your rank.</p><ol><li><button><span class="truncate" id="player">Best</span><span class="truncate" id="handle">@Play</span></button><span>3/6</span></li></ol></section>
+    <section aria-labelledby="twirdle-stats"><h2 id="twirdle-stats">Your stats</h2><dl><div><dt id="played">Played</dt><dd id="value">42</dd></div><div><dt id="best">Best</dt><dd>3</dd></div></dl><h3 id="distribution">Guess distribution</h3></section>
+    </div></main>`, '/games/twirdle/results');
+  f.run();
+  assert.equal(f.text('result-title'), 'TWIRDLE 1の結果'); assert.equal(f.text('scope'), 'フォロー中のユーザー'); assert.equal(f.text('rank'), '全体で2位です。順位は自分だけに表示されます。');
+  assert.equal(f.text('played'), 'プレイ回数'); assert.equal(f.text('best'), '最長記録'); assert.equal(f.text('value'), '42'); assert.equal(f.text('player'), 'Best'); assert.equal(f.text('handle'), '@Play'); assert.equal(f.text('answer'), 'BEST');
+  assert.equal(f.text('answer-label'), '正解の単語'); assert.equal(f.text('distribution'), '正解までの回答回数');
+  f.dom.window.qaClassic = false; f.run(); assert.equal(f.text('result-title'), 'TWIRDLE 1の結果');
+  f.document.getElementById('result-title').firstChild.nodeValue = 'TWIRDLE 2 results'; f.run(); assert.equal(f.text('result-title'), 'TWIRDLE 2の結果'); f.dom.window.close();
+});
+
+test('ja: unknown game lookalikes and editable/profile text do not authorize game localization', () => {
+  const f = fixture('ja', `<main><p id="plain">Today’s games</p><h2 class="truncate" id="name">Games</h2><div data-testid="profile-bio" id="bio">Guess the 5-letter word in 6 tries</div>
+    <article><p class="tl-user-text" id="post">Share your result</p></article><div data-testid="game-result-card"><span id="fake">Today’s puzzle · new one at midnight ET</span></div>
+    <section aria-labelledby="games-today"><p id="fake-section">No puzzle today</p></section><div contenteditable="true" id="draft">Play</div></main>`, '/games');
+  const original = Object.fromEntries(['plain','name','bio','post','fake','fake-section','draft'].map(id=>[id,f.text(id)]));
+  f.run(); for (const [id, value] of Object.entries(original)) assert.equal(f.text(id), value, id); f.dom.window.close();
+});
+
+test('ja: Tweet 2.5 game rollup localizes generated suffixes while preserving actor names and the native row', () => {
+  const name = 'Play and Best';
+  const f = fixture('ja', `<main><button type="button" data-testid="games-rollup-row" class="w-full flex items-center" id="rollup" aria-label="${name} and 2 others you follow shared today’s TWIRDLE">
+    <span><svg></svg></span><span class="truncate" id="rollup-text" title="${name} and 2 others you follow shared today’s TWIRDLE">${name} and 2 others shared TWIRDLE</span><svg></svg></button>
+    <article><p class="tl-user-text" id="body">${name} and 2 others shared TWIRDLE</p></article>
+    <button data-testid="games-rollup-row"><span class="truncate" id="fake-rollup">Play and Best and 2 others shared TWIRDLE</span></button></main>`);
+  const row = f.document.getElementById('rollup'), text = f.document.getElementById('rollup-text'), node = text.firstChild; let opened = 0; row.onclick = () => opened++;
+  f.run();
+  assert.equal(text.textContent, `${name}さんと、ほか2人がTWIRDLEの結果を共有しました`);
+  assert.equal(row.getAttribute('aria-label'), `フォロー中の${name}さんと、ほか2人が今日のTWIRDLEの結果を共有しました`);
+  assert.equal(text.title, row.getAttribute('aria-label')); assert.equal(text.firstChild, node); assert.equal(f.text('body'), `${name} and 2 others shared TWIRDLE`);
+  assert.equal(f.text('fake-rollup'), `${name} and 2 others shared TWIRDLE`); row.click(); assert.equal(opened, 1);
+  f.dom.window.qaClassic = false; f.run(); assert.equal(text.textContent, `${name}さんと、ほか2人がTWIRDLEの結果を共有しました`);
+  node.nodeValue = '3 people shared games'; text.title = '3 people shared games'; f.run(); assert.equal(text.textContent, '3人がゲームの結果を共有しました');
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.5 empty puzzle sentence keeps three adjacent React nodes and natural Japanese after a date update', () => {
+  const f = fixture('ja', `<main><div class="animate-fadeIn"><div class="sticky"><button aria-label="Back"><svg></svg></button><div><h2 class="truncate">TWIRDLE</h2></div></div>
+    <p class="p-6 text-center text-tl-app-text-muted" id="empty-puzzle"></p><p id="generic-prefix">There’s no</p></div></main>`, '/games/twirdle');
+  const paragraph = f.document.getElementById('empty-puzzle');
+  const prefix = f.document.createTextNode('There’s no TWIRDLE ');
+  const day = f.document.createTextNode('today');
+  const suffix = f.document.createTextNode('. A new one opens at midnight ET.');
+  paragraph.append(prefix, day, suffix);
+  f.run();
+  assert.equal(paragraph.textContent, 'TWIRDLE： 今日の問題はありません。新しい問題は米国東部時間の午前0時に公開されます。');
+  assert.deepEqual([...paragraph.childNodes], [prefix, day, suffix]);
+  assert.equal(f.text('generic-prefix'), 'There’s no', 'a generic prefix does not authorize inferred translation');
+  day.nodeValue = 'for that day'; f.run(day);
+  assert.equal(paragraph.textContent, 'TWIRDLE： 指定した日付の問題はありません。新しい問題は米国東部時間の午前0時に公開されます。');
+  assert.deepEqual([...paragraph.childNodes], [prefix, day, suffix]);
+  f.dom.window.qaClassic = false; f.run();
+  assert.equal(paragraph.textContent, 'TWIRDLE： 指定した日付の問題はありません。新しい問題は米国東部時間の午前0時に公開されます。');
   f.dom.window.close();
 });

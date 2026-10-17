@@ -49,6 +49,7 @@ const localizationNames = [
   'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber',
   'nativeTimestampJapaneseText', 'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
     'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
+  'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
   'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText', 'nativeMediaUploadJapaneseText',
   'nativeLocalizationMediaUpload', 'nativeLocalizationGIFMedia', 'nativeLocalizationBlockMenu',
   'nativeLocalizationBlockDialog', 'nativeLocalizationBlockProfile', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError'

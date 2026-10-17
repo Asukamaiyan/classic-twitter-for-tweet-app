@@ -1,5 +1,11 @@
 # Changelog
 
+## All distributions v6.28.0 — 2026-10-17
+
+Update for verified Tweet **2.5.0 / build 1792185878**. Localize the new Games/TWIRDLE surfaces only where native UI structure identifies them. Preserve game answers, keyboard letters, names, original posts, native result cards and handlers. Keep ordinary URL cards for other links, native reply notifications, polls, profile pins, uploads and session management. No new game API, authentication mechanism, manager grant or dependency is added. English editions retain native game wording.
+
+Keep all six edition identities, data and concise platform-specific installation/update guides. Automated checks, controlled browser acceptance and publication status are recorded separately in VALIDATION.md. Physical Safari/Stay and Android operation are not established by desktop checks.
+
 ## All distributions v6.27.0 — 2026-10-16
 
 Support the current profile-pinning UI: translate only verified Japanese pin actions, ordering labels, expansion, replacement dialogs, Undo/Retry messages and the native hint. Keep original post text, names, replacement choice text, timestamps and native handlers. Translate official Shop navigation and the Child Safety heading; English editions retain native English labels.
