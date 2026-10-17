@@ -1547,3 +1547,23 @@ test('ja: Tweet 2.5 game rollup localizes generated suffixes while preserving ac
   node.nodeValue = '3 people shared games'; text.title = '3 people shared games'; f.run(); assert.equal(text.textContent, '3人がゲームの結果を共有しました');
   f.dom.window.close();
 });
+
+test('ja: Tweet 2.5 empty puzzle sentence keeps three adjacent React nodes and natural Japanese after a date update', () => {
+  const f = fixture('ja', `<main><div class="animate-fadeIn"><div class="sticky"><button aria-label="Back"><svg></svg></button><div><h2 class="truncate">TWIRDLE</h2></div></div>
+    <p class="p-6 text-center text-tl-app-text-muted" id="empty-puzzle"></p><p id="generic-prefix">There’s no</p></div></main>`, '/games/twirdle');
+  const paragraph = f.document.getElementById('empty-puzzle');
+  const prefix = f.document.createTextNode('There’s no TWIRDLE ');
+  const day = f.document.createTextNode('today');
+  const suffix = f.document.createTextNode('. A new one opens at midnight ET.');
+  paragraph.append(prefix, day, suffix);
+  f.run();
+  assert.equal(paragraph.textContent, 'TWIRDLE： 今日の問題はありません。新しい問題は米国東部時間の午前0時に公開されます。');
+  assert.deepEqual([...paragraph.childNodes], [prefix, day, suffix]);
+  assert.equal(f.text('generic-prefix'), 'There’s no', 'a generic prefix does not authorize inferred translation');
+  day.nodeValue = 'for that day'; f.run(day);
+  assert.equal(paragraph.textContent, 'TWIRDLE： 指定した日付の問題はありません。新しい問題は米国東部時間の午前0時に公開されます。');
+  assert.deepEqual([...paragraph.childNodes], [prefix, day, suffix]);
+  f.dom.window.qaClassic = false; f.run();
+  assert.equal(paragraph.textContent, 'TWIRDLE： 指定した日付の問題はありません。新しい問題は米国東部時間の午前0時に公開されます。');
+  f.dom.window.close();
+});
