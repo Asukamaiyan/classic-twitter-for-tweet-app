@@ -231,7 +231,19 @@ test('saving and disabling keywords affects existing and newly mounted posts', a
   assert.equal(document.querySelectorAll('.ct-keyword-collapsed').length, 1);
   assert.deepEqual(JSON.parse(window.localStorage.getItem(KEY)).keywords, ['spoilers']);
   document.querySelector('main').insertAdjacentHTML('beforeend', post('b', 'spoilers here'));
-  await new Promise(resolve => window.setTimeout(resolve, 110));
+  // Wait for the observable result, rather than racing a fixed delay against
+  // MutationObserver delivery when other suites occupy the test runner.
+  await new Promise((resolve, reject) => {
+    let timeout;
+    const observer = new window.MutationObserver(() => {
+      if (document.querySelectorAll('.ct-keyword-collapsed').length !== 2) return;
+      observer.disconnect(); window.clearTimeout(timeout); resolve();
+    });
+    observer.observe(document.querySelector('main'), { subtree: true, attributes: true });
+    timeout = window.setTimeout(() => {
+      observer.disconnect(); reject(new Error('Newly mounted keyword match did not collapse within the bounded wait'));
+    }, 1000);
+  });
   assert.equal(document.querySelectorAll('.ct-keyword-collapsed').length, 2);
   document.getElementById('ct-local-filter-enabled').checked = false;
   submit(window, words);

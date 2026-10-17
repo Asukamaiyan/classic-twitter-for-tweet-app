@@ -1,3 +1,13 @@
+## 6.28.0: Tweet 2.5.0 compatibility (2026-10-17)
+
+The [official app](https://app.tweet.app/) serves [index-CeF6NpvR.js](https://app.tweet.app/assets/index-CeF6NpvR.js), **2.5.0 / build 1792185878**, 1,728,503 bytes, SHA256 `f636aaff86c858f513be3c63e401d69949c362e887923fd53d0a4da2c3e674f5`. The signed-in Chrome footer reports the same version and build. The observed addition is Games/TWIRDLE with a feed game card, results, statistics, settings and result sharing. The public configuration enables games. New game routes are first-party capabilities, not a confirmed third-party API.
+
+The optional post `game` object is rendered by the official `game-result-card`. Its read fields are `game` (`twirdle`), `puzzleDate` (`YYYY-MM-DD`) and optional `number`. The active date uses America/New_York. Official game cards must not be replaced by generic URL previews. These cards do not establish native Open Graph previews for arbitrary URLs, so the existing complementary URL-card feature remains.
+
+A bounded comparison with 2.4.1 found no change to likes/reposts, replies, notification reads, profile pins, authentication or [media limits](https://api.tweet.app/api/media/config). The new game surface stays native; the script localizes verified static UI and accessibility labels, retaining answers, board characters, content and handlers. No extra game requests or duplicate controls are introduced. External native-app authentication and physical Safari/Stay/Android acceptance remain unverified.
+
+---
+
 ## 6.27.0: Tweet 2.4 series compatibility (2026-10-16)
 
 The current [official app](https://app.tweet.app/) HTML serves [index-PeFpXU1d.js](https://app.tweet.app/assets/index-PeFpXU1d.js), 1,676,239 bytes, SHA-256 `4490c1b37fa7d917cbaac2e1995c97332537ef9b4cbe6f14cbc6961be5828ec4`. The public client constant and ordinary signed-in Chrome UI both report **2.4.1 / build 1792115636**. The requested 2.4.2 has not been established; do not label it verified from the request alone.
