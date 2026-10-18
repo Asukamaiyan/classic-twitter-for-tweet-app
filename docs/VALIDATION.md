@@ -11,7 +11,11 @@
 
 標準の返信通知、投票、アップロード、画像スライド、ブロック、固定、ゲームは以前から標準へ委ねています。一般URLカード、プロフィール写真／お気に入り、日本ニュース等に置き換わる標準実装は今回の公開コード比較では見つからず保持しました。依存・grant・connect・アカウント識別キーは追加していません。
 
-証拠はリポジトリ外 `outputs/tweet-update-2026-10-18-260/` の `extension-final-validation.json`、`extension-npm-check.log`、`contract/contract-research.json`、`browser/acceptance.json` とスクリーンショットへ保存。途中793件の結果も保存しています。GitHub／Greasy Fork公開の結果は後段へ追記します。
+- **独立レビュー:** 実装head `b087bb86` にP1/P2の指摘なし。別実行の原文保護・翻訳・runtime・日本語化109件が成功。文書と全6案内も生成結果へ一致し、有料プラン条件・手動端末内翻訳・公開待ちの説明を確認しました。
+- **GitHub:** [PR #29](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/29)のpush／PR CIが2件成功し、GitHubの自動レビューも同じheadで指摘なし。`1f3e607`でmainへマージ済み。マージ後と最終記録commitのCI結果はリポジトリ外`ci-main.json`へ保存します。
+- **Greasy Fork:** 通常の6コードURL＋6案内URL（12GET）は全HTTP200。公開コードは全6版とも**6.26.0**で、6.29.0との一致検証は未反映を示す失敗です。6.29.0のコード・案内は準備済みですが、前回のファイル選択がChrome「ChatGPT」拡張の「ファイルのURLへのアクセスを許可する」不足を報告しているため、設定変更の回答待ちです。公開完了とは扱わず、別経路で迂回していません。
+
+証拠はリポジトリ外 `outputs/tweet-update-2026-10-18-260/` の `extension-final-validation.json`、`extension-npm-check.log`、`contract/contract-research.json`、`contract/independent-release260-review.json`、`browser/acceptance.json`、`github-merged.json`、`public-code-guide-checks-before-publication.json` とスクリーンショットへ保存。途中793件の結果も保存しています。
 
 ---
 
