@@ -28,10 +28,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const translators = new Map();
   const cache = new Map();
   const records = new Map();
-  const queue = new Map();
+  const queue = new Set();
   let detector = null;
   let busy = false;
-  let current = null;
   let preparing = false;
   let generation = 0;
   let style = null;
@@ -65,7 +64,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (results[0].status === 'fulfilled') detector = results[0].value;
       if (results[1].status === 'fulfilled') translators.set(source, results[1].value);
       if (results.some(result => result.status === 'rejected')) { say(copy.failed); return false; }
-      for (const record of records.values()) record.attempted = false;
       say(`${copy.ready} (${source} → ${target})`);
       onComplete?.();
       return true;
@@ -77,13 +75,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (style?.isConnected) return;
     style = document.createElement('style');
     style.dataset.ctOwned = 'true';
-    style.textContent = `.ct-device-translation{margin:8px 0;color:inherit;font:inherit}.ct-device-translation button{color:var(--color-tl-app-primary,#1688d4);background:none;border:0;padding:6px 0;cursor:pointer;font:inherit;font-size:.8125rem}.ct-device-translation button:focus-visible{outline:2px solid currentColor;outline-offset:2px}.ct-device-translation p{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}.ct-device-translation[hidden],.ct-device-translation [hidden]{display:none!important}`;
+    style.textContent = `.ct-device-translation{margin:8px 0;color:inherit;font:inherit}.ct-device-translation button{color:var(--color-tl-app-primary,#1688d4);background:none;border:0;min-height:44px;padding:8px 4px;cursor:pointer;font:inherit;font-size:.8125rem}.ct-device-translation button:focus-visible{outline:2px solid currentColor;outline-offset:2px}.ct-device-translation p{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}.ct-device-translation[hidden],.ct-device-translation [hidden]{display:none!important}`;
     document.head.append(style);
   }
 
   function stillValid(record, token) {
     return generation === token && isActive() && record.section.isConnected &&
-      getContext(record.native)?.text === record.text && !record.dismissed && !isManual(record.article);
+      records.get(record.article) === record && getContext(record.native)?.text === record.text && !record.dismissed && !isManual(record.article);
   }
 
   async function process() {
@@ -91,14 +89,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     busy = true;
     let processed = false;
     while (queue.size) {
-      const [record, automatic] = queue.entries().next().value;
+      const record = queue.values().next().value;
       queue.delete(record);
       if (!record.section.isConnected || !isActive() || record.dismissed ||
           getContext(record.native)?.text !== record.text) continue;
-      if (automatic && record.attempted) continue;
       processed = true;
-      record.attempted = true;
-      current = record;
       const token = generation;
       record.button.disabled = true;
       record.button.textContent = copy.working;
@@ -132,7 +127,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           record.output.hidden = false;
         }
       } finally {
-        current = null;
         record.button.disabled = false;
         record.button.textContent = record.shown ? copy.hide : copy.translate;
       }
@@ -141,17 +135,17 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (processed) onComplete?.();
   }
 
-  function patch(root = document, automatic = false) {
+  function patch(root = document) {
     if (!supported || !isActive()) return;
     ensureStyle();
     for (const [article, record] of records) {
-      if (!article.isConnected || !record.section.isConnected || getContext(record.native)?.text !== record.text) {
+      if (!article.isConnected || !record.section.isConnected || isManual(article) || getContext(record.native)?.text !== record.text) {
         record.section.remove(); queue.delete(record); records.delete(article);
       }
     }
     for (const native of ctTranslationControls(root)) {
       const context = getContext(native);
-      if (!context || isManual(context.article) || !native.closest('[aria-live="polite"]') || ctTranslationDisabled(native)) continue;
+      if (!context || isManual(context.article) || ctTranslationDisabled(native)) continue;
       let record = records.get(context.article);
       if (!record) {
         const section = document.createElement('div');
@@ -165,18 +159,20 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         section.append(button, output);
         section.addEventListener('click', event => event.stopPropagation());
         context.body.insertAdjacentElement('afterend', section);
-        record = { ...context, native, section, button, output, attempted: false, dismissed: false, shown: false };
+        record = { ...context, native, section, button, output, dismissed: false, shown: false };
         records.set(context.article, record);
         button.addEventListener('click', () => {
           if (record.shown) {
             record.output.hidden = true; record.shown = false; record.dismissed = true;
             record.button.textContent = copy.translate;
           } else {
-            record.dismissed = false; queue.set(record, false); void process();
+            if (!isActive() || isManual(record.article) || getContext(record.native)?.text !== record.text) {
+              patch(record.article); return;
+            }
+            record.dismissed = false; queue.add(record); void process();
           }
         });
       }
-      if (automatic && detector && !record.attempted && !record.dismissed && queue.size < 40) queue.set(record, true);
     }
     void process();
   }
@@ -184,26 +180,18 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function cancel() {
     generation++;
     queue.clear();
-    // A hidden-tab or settings cancellation invalidates the pending result,
-    // but has not completed this post's automatic attempt. Let the next active
-    // scan resume it. process() remains sequential, so a scan before the old
-    // request settles queues work rather than starting a second request. A late
-    // successful translation can then be reused from cache.
-    if (current && !current.shown && !current.dismissed && !isManual(current.article)) {
-      current.attempted = false;
-    }
   }
   function hide(article) {
     const record = records.get(article);
     if (!record) return;
-    record.dismissed = true; record.output.hidden = true; record.shown = false;
-    record.button.textContent = copy.translate; queue.delete(record);
+    record.dismissed = true; record.section.remove();
+    queue.delete(record); records.delete(article);
   }
   function clear() {
-    if (!records.size) return;
     cancel();
     for (const record of records.values()) record.section.remove();
     records.clear();
+    style?.remove(); style = null;
   }
   return { supported, prepare, patch, cancel, clear, hide };
 }

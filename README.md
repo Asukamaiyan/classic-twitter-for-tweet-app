@@ -1,10 +1,14 @@
 # Classic Twitter for tweet.app
 
-**6.28.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.29.0** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**Tweet 2.5.0への対応:** 公式配信 **2.5.0 / build 1792185878**（2026-10-17）を確認。新しいGames／TWIRDLEのUI・遊び方・結果の案内を日本語化し、標準ゲームカードと操作を保持します。Chrome／Safari／Android、日本語／英語の全6版を更新。通常のURLカード・写真／お気に入り・ニュース・固定ツイートも維持します。Safari＋StayとAndroidの実機確認は未実施です。
+**Tweet 2.6.0への対応:** 公式配信 **2.6.0 / build 1792299140**（2026-10-18）を確認。自動翻訳はTweet標準へ一本化し、拡張の自動クリック・待ち行列・翻訳方法の切り替えを削除しました。新しい言語設定、翻訳アイコン、個別アカウントの投稿通知を日本語化し、元のボタン・設定値・本文を保持します。全6版を更新しています。
 
-**配布状況（2026-10-18）:** GitHubは6.28.0へ更新済み。Greasy Forkへの反映は準備中のため、同サイトではまだ6.26.0が配布されます。
+**自動翻訳：** Tweetの **「設定」→「言語」** で設定してください。標準の自動翻訳はFounder・Fighter・Centurionプラン向けです。手動の翻訳アイコンは標準機能を使います。対応PC版Chromeでは「便利ツール」の **「端末内翻訳」** をオンにしてモデルを準備すると、追加の手動ボタンで端末内だけの翻訳も使えます。以前の拡張の自動翻訳設定から、標準設定を勝手にオンにすることはありません。
+
+**投稿通知：** フォロー中のプロフィールのベルからオンにでき、「設定」→「投稿通知するアカウント」で確認・解除できます。標準機能をそのまま使い、拡張独自の購読ボタンや通知取得処理は追加しません。
+
+**配布状況（2026-10-18）:** 6.29.0のコードと導入案内を準備しています。GitHub／Greasy Forkへの反映結果は検証記録へ追記します。Safari＋StayとAndroidの今回の実機確認は未実施です。
 
 ## URLカード
 
@@ -77,7 +81,7 @@
 - 投稿と確認できた返信の経過時間を更新し、詳細・写真動画・お気に入りに投稿日時を表示。ブラウザの時間帯を使い、編集日時や親投稿の日時を混ぜません。日時不明や曖昧な返信は推測しません。
 - 通知の種類フィルター、通知アイコンごとのプロフィール移動、鮮明なバッジ。標準の返信通知・投票・フォローバック操作を使います。
 - 写真の複数選択とタイムラインのスライドはTweet標準を使用。プロフィールの写真・動画／お気に入り欄を補完。拡大写真は画面中央に表示し、動画の全画面操作は同じプレーヤー・再生位置・音量を維持します。Safari版は写真・動画の長押しで配信ファイル情報を表示します。
-- 保存した検索・投稿リンク、任意のキーワードで折りたたみ、日本／世界ニュース、手動・任意の自動翻訳。自動翻訳は初期状態でオフです。
+- 保存した検索・投稿リンク、任意のキーワードで折りたたみ、日本／世界ニュース、Tweet標準の翻訳と、対応Chromeでの任意の端末内手動翻訳。
 
 便利ツールの「クラシック表示」をオフにすると、ハート・いいね表記・元の色や形に戻ります。日本語化と便利機能は引き続き利用できます。
 
@@ -89,7 +93,7 @@
 
 お気に入りはミュート・ブロック一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。自動同期はなく、サイトデータを消すと失われます。
 
-画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。今回の6.27.0では実機操作を行っていません。過去のStayの6.23.1更新は実機確認済み。6.23.0のニュース選択・再読み込み後の保持・プロフィール写真の左右スワイプも確認済みですが、6.23.1の画質表示と閉じるボタンは実機テストのタップ判定で止まり、最終確認待ちです。
+画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。今回の6.29.0では実機操作を行っていません。過去のStayの6.23.1更新は実機確認済み。6.23.0のニュース選択・再読み込み後の保持・プロフィール写真の左右スワイプも確認済みですが、6.23.1の画質表示と閉じるボタンは実機テストのタップ判定で止まり、最終確認待ちです。
 
 **6.22.0での実機記録：** iPhone 17 Pro Max＋Stay 2.9.24で更新、Yahoo!・NHKのニュース、写真の中央配置・前後切替、左右スワイプ、約2倍のピンチ拡大を確認しました。日刊スポーツは追加許可待ち、ITmediaは実機未確認。縮小の直前にXCTestの内部エラーが発生し、ピンチ縮小は未確認です。Safari再起動で通常倍率へ復元済み。長時間操作、Android＋Tampermonkeyは未検証です。
 
@@ -127,7 +131,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.27.0 supports the inspected Tweet 2.4.1 client (build 1792115636, 2026-10-16); the requested 2.4.2 has not been observed in the official delivery. Native profile pinning remains authoritative. The Japanese edition translates its controls, status messages and Shop labels while keeping post bodies and replacement choices intact. It reuses the native device ID for authenticated API reads and preserves native session-management actions. Japanese session labels and reply-parent timestamps now follow the updated native UI. All six editions are updated together; physical Safari/Stay and Android acceptance remains unverified. URL cards add public titles, descriptions and static thumbnails with Open, Copy, Share, manual loading and retry. Tools → Automatically load URL previews controls direct anonymous HTTPS reads; Tools → Show only posts with links on Home reports loaded coverage. Destination/image-site permission may be required. Physical Safari/Stay and Android acceptance was not performed for this release; device checks below are historical. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
+Version 6.29.0 supports verified Tweet 2.6.0 (build 1792299140, 2026-10-18). Automatic translation now belongs entirely to Tweet: the extension’s native-button queue, automatic device queue and engine selector have been removed. Use Settings → Language; native auto-translate is available with Founder, Fighter and Centurion plans. Optional on-device translation in supported desktop Chrome is manual only. The Japanese edition localizes verified language settings, icon translation states and per-account post notifications while preserving names, post text, target language values and native handlers. English editions keep native English. Profile bells and Settings → Notified accounts remain native; no subscription or translation-write API is added. New translation states preserve only independently verified original URL cards and Favorites, and never infer precise reply timestamps from translated text. All six edition identities and saved data remain. URL cards add public titles, descriptions and static thumbnails with Open, Copy, Share, manual loading and retry. Tools → Automatically load URL previews controls direct anonymous HTTPS reads; Tools → Show only posts with links on Home reports loaded coverage. Destination/image-site permission may be required. Physical Safari/Stay and Android acceptance was not performed for this release; device checks below are historical. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
 
 Optional browser alerts remain off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported.
 

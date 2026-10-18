@@ -17,6 +17,9 @@ function reply(id, parent = 'parent-a', text = 'My reply', age = '2h') {
 function post(id = 'reply-a', changes = {}) {
   return { id, authorUsername: 'alice', text: 'My reply', createdAt, parentId: 'parent-a', ...changes };
 }
+function native26Control(mode = 'idle') {
+  return `<span class="inline-flex items-center"><button type="button" data-translate-mode="${mode}" aria-label="Translate post" aria-pressed="${mode === 'active'}" ${mode === 'busy' ? 'aria-busy="true" aria-disabled="true"' : ''}><svg aria-hidden="true"></svg></button><span data-translate-status role="status" aria-live="polite" class="sr-only"></span></span>`;
+}
 function detail(html) {
   return `<div class="animate-fadeIn flex flex-col"><div class="shrink-0"><div class="sticky"><button aria-label="Back"><svg width="18" height="18"></svg></button></div></div>
     <div class="min-h-0 flex-1 overflow-y-auto">${html.replace(/^<div id="inline-replies-[^"]+">/, '').replace(/<\/div>$/, '')}</div>
@@ -107,6 +110,42 @@ test('translated, unsupported-date, quote, hidden and offscreen cards are left a
     f => f.hidden(true), f => f.w.qa.active(false)
   ]) {
     const f = harness(t); change(f); await f.patch(); assert.equal(f.calls.length, 0); assert.equal(f.source(), '');
+  }
+});
+
+test('Tweet 2.6 reply translation icon modes reject inferred clocks until the original is visible', async t => {
+  for (const mode of ['active', 'busy', 'future-state', '', 'idle', 'original']) {
+    const f = harness(t); f.doc.querySelector('article > div').insertAdjacentHTML('beforeend', native26Control(mode));
+    await f.patch(); const original = ['idle', 'original'].includes(mode);
+    assert.equal(f.source(), original ? createdAt : '', mode); assert.equal(f.calls.length, original ? 1 : 0, mode);
+  }
+  const f = harness(t), body = f.doc.querySelector('p');
+  f.doc.querySelector('article > div').insertAdjacentHTML('beforeend', native26Control('idle'));
+  body.insertAdjacentHTML('beforebegin', '<div class="mt-1"><p role="alert" class="text-[0.8125rem] text-tl-app-text-muted">Couldn’t translate. Try again.</p></div>');
+  await f.patch(); assert.equal(f.source(), createdAt);
+});
+
+test('Tweet 2.6 native translation state changes discard pending and previously bound reply clocks', async t => {
+  for (const mode of ['active', 'busy', 'future-state']) {
+    const f = harness(t); f.doc.querySelector('article > div').insertAdjacentHTML('beforeend', native26Control('idle'));
+    let resolve; f.respond = () => new Promise(done => { resolve = done; });
+    const pending = f.patch(); await turn(); assert.equal(f.calls.length, 1);
+    f.doc.querySelector('[data-translate-mode]').setAttribute('data-translate-mode', mode);
+    resolve(f.json); await pending; assert.equal(f.source(), '', mode);
+    const bound = harness(t); bound.doc.querySelector('article > div').insertAdjacentHTML('beforeend', native26Control('original'));
+    await bound.patch(); assert.equal(bound.source(), createdAt);
+    bound.doc.querySelector('[data-translate-mode]').setAttribute('data-translate-mode', mode);
+    assert.equal(bound.source(), '', mode);
+  }
+});
+
+test('Tweet 2.6 quote translation controls stay independent while missing or conflicting native state stays unresolved', async t => {
+  const f = harness(t); f.doc.querySelector('article').insertAdjacentHTML('beforeend', `<blockquote>${native26Control('active')}</blockquote><article>${native26Control('busy')}</article>`);
+  await f.patch(); assert.equal(f.source(), createdAt);
+  for (const html of [native26Control('idle') + native26Control('active'),
+    '<div class="mt-1"><p class="text-[0.8125rem] text-tl-app-text-muted">Translated from English</p></div>']) {
+    const unknown = harness(t); unknown.doc.querySelector('p').insertAdjacentHTML('beforebegin', html);
+    await unknown.patch(); assert.equal(unknown.source(), ''); assert.equal(unknown.calls.length, 0);
   }
 });
 

@@ -1,5 +1,5 @@
 /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getLinkPreviews, setLinkPreviews, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getLinkPreviews, setLinkPreviews, getDeviceTranslation, setDeviceTranslation, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -24,10 +24,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     storageConflict: '別のタブで保存内容が変更されました。上書きを防ぐため保存を中止しました。入力中の内容を控えてから再読み込みしてください。',
     readError: '保存済み設定を読み込めませんでした。初期設定で開始しました。',
     searchError: '自動検索を開始できませんでした。検索画面で次の検索語を入力してください：',
-    automatic: '投稿を自動翻訳する', autoHelp: '選択した方法で投稿を順番に翻訳します。サイトの翻訳でエラーが出た場合は5分間休止します。',
-    autoError: '自動翻訳の設定を保存できませんでした。',
-    translationEngine: '翻訳方法', nativeEngine: 'サイトの翻訳', deviceEngine: '端末内の翻訳',
-    deviceHelp: '対応するデスクトップChrome用。翻訳モデルをダウンロードし、投稿本文は端末内で処理します。サイトの翻訳回数を消費しません。モデルは言語ごとに準備してください。',
+    deviceEnabled: '端末内翻訳ボタンを表示する', nativeTranslationHelp: '自動翻訳はTweetの「設定 → 言語」で設定できます。',
+    deviceError: '端末内翻訳の設定を保存できませんでした。',
+    deviceTranslation: '端末内の翻訳',
+    deviceHelp: '対応するPC版Chrome用。モデルを準備し、各投稿の「端末内で翻訳」を押して使います。本文は端末内で処理します。Tweetの訳文が表示されている投稿には追加しません。',
     deviceUnsupported: 'このブラウザでは端末内翻訳を利用できません。Safari／Stayとスマートフォンではサイトの翻訳をご利用ください。',
     sourceLanguage: '翻訳する投稿の言語', prepareModel: 'モデルを準備', preparingModel: '準備中…',
     translationStatus: '翻訳の状態',
@@ -70,10 +70,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     storageConflict: 'Saved data changed in another tab. Nothing was overwritten. Keep a copy of your edits, then reload before saving.',
     readError: 'Could not read saved settings. Started with the defaults.',
     searchError: 'Could not start the search automatically. Enter this query in Explore:',
-    automatic: 'Automatically translate posts', autoHelp: 'Translates posts one at a time with the selected engine. Site errors pause automatic requests for 5 minutes.',
-    autoError: 'Could not save the automatic translation setting.',
-    translationEngine: 'Translation engine', nativeEngine: 'Site translation', deviceEngine: 'On-device translation',
-    deviceHelp: 'For supported desktop Chrome browsers. Downloads models and translates post text on your device without using the site’s translation allowance. Prepare each source language separately.',
+    deviceEnabled: 'Show on-device translation buttons', nativeTranslationHelp: 'Manage automatic translation in Tweet’s Settings → Language.',
+    deviceError: 'Could not save the on-device translation setting.',
+    deviceTranslation: 'On-device translation',
+    deviceHelp: 'For supported desktop Chrome. Prepare a model, then press Translate on device on each post. Text is processed locally. No extra output is added while Tweet displays a translation.',
     deviceUnsupported: 'On-device translation is unavailable here. Use site translation in Safari/Stay and on mobile.',
     sourceLanguage: 'Language of posts to translate', prepareModel: 'Prepare model', preparingModel: 'Preparing…',
     translationStatus: 'Translation status',
@@ -319,64 +319,45 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   body.append(linksSection);
 
   let refreshTranslation = () => {};
-  if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {
-    const automatic = element('section');
+  const translationSection = element('section');
+  translationSection.append(element('p', copy.nativeTranslationHelp, { class:'ct-local-note' }));
+  if (typeof getDeviceTranslation === 'function' && typeof setDeviceTranslation === 'function') {
+    translationSection.prepend(element('h3', copy.deviceTranslation));
     const label = element('label');
-    const input = element('input', undefined, { type: 'checkbox', id: 'ct-local-auto-translate' });
-    try { input.checked = !!getAutoTranslate(); } catch { input.checked = false; }
-    label.append(input, document.createTextNode(copy.automatic));
-    automatic.append(label, element('p', copy.autoHelp, { class: 'ct-local-note' }));
+    const input = element('input', undefined, { type:'checkbox', id:'ct-local-device-translation' });
+    input.disabled = !deviceTranslationSupported;
+    label.append(input, document.createTextNode(copy.deviceEnabled));
+    translationSection.append(label, element('p', deviceTranslationSupported ? copy.deviceHelp : copy.deviceUnsupported, { class:'ct-local-note' }));
+    const source = element('select', undefined, { id:'ct-local-translation-source' });
+    source.style.cssText = 'width:100%;min-height:44px;font:inherit;color:inherit;background:var(--color-tl-app-card,#fff);border:1px solid var(--color-tl-app-border,#b8c5d1);border-radius:8px;padding:6px';
+    const languages = [['en','English'],['ja','日本語'],['ko','한국어'],['zh','中文'],['zh-Hant','繁體中文'],['fr','Français'],['es','Español'],['de','Deutsch'],['pt','Português'],['it','Italiano'],['ru','Русский'],['ar','العربية'],['hi','हिन्दी'],['id','Bahasa Indonesia'],['th','ไทย'],['vi','Tiếng Việt']];
+    for (const [value, name] of languages) source.append(element('option', name, { value }));
+    source.value = (navigator.language || locale).startsWith('en') ? 'ja' : 'en';
+    const prepare = element('button', copy.prepareModel, { type:'button', id:'ct-local-translation-prepare' });
+    source.disabled = prepare.disabled = !deviceTranslationSupported;
+    const status = element('p', '', { id:'ct-local-translation-status', role:'status', 'aria-live':'polite', 'aria-label':copy.translationStatus, class:'ct-local-note' });
+    refreshTranslation = () => {
+      try { input.checked = getDeviceTranslation() === true; } catch { input.checked = false; }
+      const message = getTranslationStatus?.() || '';
+      if (status.textContent !== message) status.textContent = message;
+    };
     input.addEventListener('change', () => {
-      const requested = input.checked;
       try {
-        if (setAutoTranslate(requested) === false || !!getAutoTranslate() !== requested) throw new Error('Setting was not saved');
+        if (setDeviceTranslation(input.checked) === false || getDeviceTranslation() !== input.checked) throw new Error('Setting was not saved');
         announce(copy.saved);
-      } catch {
-        try { input.checked = !!getAutoTranslate(); } catch { input.checked = !requested; }
-        announce(copy.autoError, true);
-      }
-    });
-    if (typeof getTranslationEngine === 'function' && typeof setTranslationEngine === 'function') {
-      const engine = element('select', undefined, { id: 'ct-local-translation-engine' });
-      engine.style.cssText = 'width:100%;min-height:44px;font:inherit;color:inherit;background:var(--color-tl-app-card,#fff);border:1px solid var(--color-tl-app-border,#b8c5d1);border-radius:8px;padding:6px';
-      engine.append(element('option', copy.nativeEngine, { value: 'native' }), element('option', copy.deviceEngine, { value: 'device' }));
-      engine.options[1].disabled = !deviceTranslationSupported;
-      engine.value = getTranslationEngine();
-      const device = element('div');
-      device.append(element('p', deviceTranslationSupported ? copy.deviceHelp : copy.deviceUnsupported, { class: 'ct-local-note' }));
-      const source = element('select', undefined, { id: 'ct-local-translation-source' });
-      source.style.cssText = engine.style.cssText;
-      const languages = [['en', 'English'], ['ja', '日本語'], ['ko', '한국어'], ['zh', '中文'], ['zh-Hant', '繁體中文'], ['fr', 'Français'], ['es', 'Español'], ['de', 'Deutsch'], ['pt', 'Português'], ['it', 'Italiano'], ['ru', 'Русский'], ['ar', 'العربية'], ['hi', 'हिन्दी'], ['id', 'Bahasa Indonesia'], ['th', 'ไทย'], ['vi', 'Tiếng Việt']];
-      for (const [value, label] of languages) source.append(element('option', label, { value }));
-      source.value = (navigator.language || locale).startsWith('en') ? 'ja' : 'en';
-      const prepare = element('button', copy.prepareModel, { type: 'button', id: 'ct-local-translation-prepare' });
-      source.disabled = prepare.disabled = !deviceTranslationSupported;
-      device.append(element('label', copy.sourceLanguage, { for: source.id }), source, prepare);
-      const translationStatus = element('p', '', { id: 'ct-local-translation-status', role: 'status', 'aria-live': 'polite', 'aria-label': copy.translationStatus, class: 'ct-local-note' });
-      refreshTranslation = () => {
-        const message = getTranslationStatus?.() || '';
-        if (translationStatus.textContent !== message) translationStatus.textContent = message;
-        device.hidden = engine.value !== 'device';
-      };
-      engine.addEventListener('change', () => {
-        try {
-          if (setTranslationEngine(engine.value) === false || getTranslationEngine() !== engine.value) throw new Error('Setting was not saved');
-          announce(copy.saved);
-        } catch { engine.value = getTranslationEngine(); announce(copy.autoError, true); }
-        refreshTranslation();
-      });
-      prepare.addEventListener('click', async () => {
-        prepare.disabled = true; source.disabled = true; prepare.textContent = copy.preparingModel;
-        try { await prepareDeviceTranslation?.(source.value); }
-        catch { announce(copy.autoError, true); }
-        finally { prepare.disabled = source.disabled = !deviceTranslationSupported; prepare.textContent = copy.prepareModel; refreshTranslation(); }
-      });
-      automatic.append(element('label', copy.translationEngine, { for: engine.id }), engine,
-        ...(!deviceTranslationSupported ? [element('p', copy.deviceUnsupported, { class: 'ct-local-note' })] : []), device, translationStatus);
+      } catch { announce(copy.deviceError, true); }
       refreshTranslation();
-    }
-    body.append(automatic);
+    });
+    prepare.addEventListener('click', async () => {
+      prepare.disabled = true; source.disabled = true; prepare.textContent = copy.preparingModel;
+      try { await prepareDeviceTranslation?.(source.value); }
+      catch { announce(copy.deviceError, true); }
+      finally { prepare.disabled = source.disabled = !deviceTranslationSupported; prepare.textContent = copy.prepareModel; refreshTranslation(); }
+    });
+    translationSection.append(element('label', copy.sourceLanguage, { for:source.id }), source, prepare, status);
+    refreshTranslation();
   }
+  body.append(translationSection);
 
   let refreshFavoriteHistory = () => {};
   if (typeof getFavoriteHistoryStatus === 'function' && typeof runFavoriteHistory === 'function' &&

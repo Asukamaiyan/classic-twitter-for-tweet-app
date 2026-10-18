@@ -1,3 +1,20 @@
+## 6.29.0: Tweet 2.6.0 compatibility (2026-10-18)
+
+The [official app](https://app.tweet.app/) serves [index-DFVeeabz.js](https://app.tweet.app/assets/index-DFVeeabz.js), **2.6.0 / build 1792299140**, 1,753,586 bytes, SHA256 `beead439a000f921ea4fde01ac18a6c0cd5988ac15cac8a0bd1014e76f332a99`. The signed-in Chrome footer agrees. Public configuration and media configuration are byte-identical to 2.5.0. Normalized API route families increase from 193 to 197, with no removed family in the public bundle comparison.
+
+| Native addition | Observed contract | Extension action |
+| --- | --- | --- |
+| Automatic translation | `GET/PUT /api/user-settings/translation`: `eligible`, `autoTranslate`, `targetLang`; `POST /api/translate/batch`: `{postIds,targetLang}`. Founder/Fighter/Centurion eligibility; native batching, retry/error state and limits remain authoritative. | Remove the old native-button automatic queue, cooldown/observer and engine selector. Keep manual-only Chrome on-device translation as an optional local capability. Never write native settings or call translation endpoints. |
+| Translation icon | `button[data-translate-mode]`: idle/busy/active/original, native pressed/busy/disabled state and a dedicated live-status span. Source/error block appears between header and reused body. | Localize confirmed chrome; preserve original content, poll choices and handlers. Treat translated/busy/unknown content separately from verified originals when retaining cards, Favorites and reply identities. |
+| Profile post subscriptions | `POST/DELETE /api/users/{userId}/post-notifications`; `GET /api/users/post-notifications` cursor list. Requires following; maximum 25 in current UI. Profile bell has `data-icon=bell/bell-ring` and `aria-pressed`. | Keep native bell, list, errors and limits; add no subscription API or duplicate polling. Localize Japanese labels. |
+| New-post notifications | `type: new_post`, same actor/post/preview/time fields. Native grouped expansion and individual post navigation. | Localize only action fragments and relative metadata, keep names/previews and native actions. Preserve existing profile links for notification avatars, which still have no individual native profile action in the inspected grouped row. |
+
+The old extension automatic preference is left stored but no longer triggers any native control. No plan or service limit is bypassed. Supported Chrome users may explicitly use offline model preparation and a manual device button; automatic device work is removed too. Standard automatic translation settings are never silently enabled or migrated.
+
+No replacement was found for the extension’s general HTTPS URL cards, Japan news sources, profile Media/Favorites, saved searches/bookmarks, keyword tools or delivered-media information. Native uploads, photo slide controls, reply notifications, polls, blocking, profile pins and games were already authoritative. The page-open generic browser alert is not a new-post subscription or background push and remains opt-in. Public-client inspection does not establish a complete backend changelog or supported third-party login. Authentication/media contracts remain unchanged in this bounded comparison; native app limitations remain in [API_APP_FEASIBILITY.md](API_APP_FEASIBILITY.md).
+
+---
+
 ## 6.28.0: Tweet 2.5.0 compatibility (2026-10-17)
 
 The [official app](https://app.tweet.app/) serves [index-CeF6NpvR.js](https://app.tweet.app/assets/index-CeF6NpvR.js), **2.5.0 / build 1792185878**, 1,728,503 bytes, SHA256 `f636aaff86c858f513be3c63e401d69949c362e887923fd53d0a4da2c3e674f5`. The signed-in Chrome footer reports the same version and build. The observed addition is Games/TWIRDLE with a feed game card, results, statistics, settings and result sharing. The public configuration enables games. New game routes are first-party capabilities, not a confirmed third-party API.

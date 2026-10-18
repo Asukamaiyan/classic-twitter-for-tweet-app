@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.28.0
+// @version      6.29.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -479,6 +479,11 @@
     ['Language', '言語'],
     ['Languages', '言語'],
     ['Language settings', '言語設定'],
+    ['Notified accounts', '投稿通知するアカウント'],
+    ['Nothing to see here yet. Likes, reposts, replies, quotes, mentions, follows, and posts from accounts you get notifications for will show up here.', '通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォロー、通知を設定したアカウントのツイートがここに表示されます。'],
+    ['Auto-translate posts that aren’t in your language.', '他の言語のツイートを自動翻訳します。'],
+    ['See and turn off the accounts you get post notifications from.', '投稿通知するアカウントの確認と解除ができます。'],
+    ['Back to settings', '設定に戻る'],
     ['English', '英語'],
     ['Japanese', '日本語'],
 
@@ -582,6 +587,7 @@
       ['お気に入りはまだありません。', 'いいねはまだありません。'],
       ['通知はまだありません。お気に入り、リツイート、フォローの通知がここに表示されます。', '通知はまだありません。いいね、リツイート、フォローの通知がここに表示されます。'],
       ['通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。', '通知はまだありません。いいね、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。'],
+      ['通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォロー、通知を設定したアカウントのツイートがここに表示されます。', '通知はまだありません。いいね、リツイート、返信、引用、@ツイート、フォロー、通知を設定したアカウントのツイートがここに表示されます。'],
       ['あなたのツイートをお気に入りに登録しました', 'あなたのツイートにいいねしました'],
       ['あなたの返信をお気に入りに登録しました', 'あなたの返信にいいねしました'],
       ['相手はあなたのフォロー、ツイートへの返信、引用、リツイート、お気に入りができなくなります。お互いのツイートや通知も表示されません。相互のフォロー関係は解除され、ブロックを解除しても元には戻りません。', '相手はあなたのフォロー、ツイートへの返信、引用、リツイート、いいねができなくなります。お互いのツイートや通知も表示されません。相互のフォロー関係は解除され、ブロックを解除しても元には戻りません。']
@@ -1266,6 +1272,14 @@ if (/^just\s+now$/i.test(t)) {
     const author = header?.firstElementChild;
     const separatorIndex = [...(header?.children || [])].indexOf(separator);
     const decorations = [...(header?.children || [])].slice(1, separatorIndex);
+    let body = header?.nextElementSibling;
+    // 2.6 inserts its source/error metadata before an inline reply's body.
+    // Localize the native relative age without inventing a precise timestamp.
+    if (body?.matches('div.mt-1') && body.children.length > 0 && body.children.length <= 2 &&
+        [...body.children].every(line => line.matches('p.text-tl-app-text-muted') &&
+          line.classList.contains('text-[0.8125rem]') && !line.children.length &&
+          (!line.hasAttribute('role') || line.getAttribute('role') === 'alert')) &&
+        header.querySelector('button[data-translate-mode]')) body = body.nextElementSibling;
     return !!header?.matches('div.flex.items-center.gap-1.min-w-0') &&
       separatorIndex >= 1 && decorations.every(marker =>
         marker.matches('span.ct-official-badges[data-ct-owned][role="img"]') && marker.children.length &&
@@ -1276,7 +1290,7 @@ if (/^just\s+now$/i.test(t)) {
       !!author?.matches('button.font-bold.truncate.hover\\:underline') &&
       !!separator?.matches('span.text-tl-app-text-muted') && clean(separator.textContent) === '·' &&
       !!header.querySelector(':scope > div.flex.items-center.shrink-0.ml-auto') &&
-      !!header.nextElementSibling?.matches('p.tl-user-text.whitespace-pre-wrap');
+      !!body?.matches('p.tl-user-text.whitespace-pre-wrap');
   }
 
   function isNativeReplyOptionsButton(el) {
@@ -1317,6 +1331,162 @@ if (/^just\s+now$/i.test(t)) {
     return el === time.firstElementChild && time.children.length === 1 &&
       /^\/post\/[A-Za-z0-9_-]{1,160}$/.test(el.getAttribute('href') || '') &&
       [ `Open the post by ${handle} that this replies to`, `${handle}への返信元のツイートを開く` ].includes(el.getAttribute('aria-label'));
+  }
+
+  // Tweet 2.6 owns remote translation and profile post subscriptions.
+  // Read only verified native chrome; names, previews, options and handlers stay native.
+  function nativeLocalization26Context(el) {
+    if (!el || isOwnedLocalizationElement(el) || el.closest('article .tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],textarea,input,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,blockquote,[aria-label^="Quoted post"]')) return null;
+    if (/^\/settings\/?$/.test(location.pathname)) {
+      const section = el.closest('main section.flex.flex-col.flex-1.min-w-0');
+      const panel = section?.querySelector(':scope > div.p-5 > div.flex.flex-col.gap-5');
+      const heading = panel?.querySelector(':scope > div:first-child > h4.font-extrabold');
+      const title = clean(heading?.textContent);
+      if (heading && /^(?:Language|言語|Notified accounts|投稿通知するアカウント)$/.test(title)) {
+        const header = heading.parentElement;
+        const kind = /^(?:Language|言語)$/.test(title) ? 'language' : 'notified';
+        if (el === heading || el === header.querySelector(':scope > p.leading-relaxed') ||
+            el === section.querySelector(':scope > div.sm\\:hidden > span.font-extrabold')) return { kind, section, panel, header };
+        if (kind === 'language') {
+          const toggle = panel.querySelector('button[role="switch"][aria-labelledby][aria-describedby]');
+          const label = toggle && section.ownerDocument.getElementById(toggle.getAttribute('aria-labelledby'));
+          const hint = toggle && section.ownerDocument.getElementById(toggle.getAttribute('aria-describedby'));
+          const select = panel.querySelector('select');
+          const target = select?.id && [...panel.querySelectorAll('label[for]')].find(label => label.htmlFor === select.id);
+          if (toggle && label?.parentElement === hint?.parentElement && label?.parentElement?.nextElementSibling === toggle && panel.contains(label) && panel.contains(hint) &&
+              (el === label || el === hint || el === target || el.matches('option') && el.parentElement === select)) return { kind, section, panel, header, select };
+          if (el.matches('p.leading-relaxed') && el.parentElement?.matches('div.flex.items-center.justify-between') &&
+              el.parentElement.querySelector(':scope > button')) return { kind, section, panel, header };
+          if (el.matches('button') && el.parentElement?.matches('div.flex.items-center.justify-between') &&
+              el.parentElement.querySelector(':scope > p.leading-relaxed')) return { kind, section, panel, header };
+        } else {
+          if (el.parentElement === panel && el.matches('p.text-xs.text-tl-app-text-muted.px-1')) return { kind, section, panel, header, count: true };
+          const button = el.matches('button') ? el : el.closest('button');
+          const row = button?.parentElement;
+          if (button && row?.matches('div.flex.items-center.gap-3.px-4') && row.lastElementChild === button &&
+              row.querySelector('button[aria-label^="View @"]') && panel.contains(row)) return { kind, section, panel, header, button };
+        }
+        if (el.matches('[role="status"],[role="alert"]') && panel.contains(el)) return { kind, section, panel, header };
+        if (el.matches('span.text-xs.font-semibold') && el.parentElement?.matches('div.flex.items-center.justify-center') &&
+            el.parentElement.querySelector(':scope > svg.animate-spin')) return { kind, section, panel, header };
+        if (el.matches('button') && el.parentElement === panel) return { kind, section, panel, header };
+      }
+    }
+    if (/^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) && el.closest('main') && !el.closest('article')) {
+      const button = el.matches('button[data-icon][aria-pressed]') ? el : null;
+      if (button && /^(?:bell|bell-ring)$/.test(button.dataset.icon) &&
+          button.matches('.min-w-10.min-h-10.rounded-full.border.p-2') &&
+          button.parentElement?.matches('div.pt-3.shrink-0.flex.items-center.gap-2')) return { kind: 'profile-bell', button };
+      if (el.matches('p.text-rose-500.leading-snug') && el.parentElement?.querySelector('div.pt-3 > button[data-icon][aria-pressed]')) return { kind: 'profile-error' };
+    }
+    if (el.closest('article')) {
+      const button = el.matches('button[data-translate-mode]') ? el : null;
+      const wrapper = (button || el).parentElement;
+      const control = button || wrapper?.querySelector(':scope > button[data-translate-mode]');
+      if (wrapper?.matches('span.inline-flex.items-center') && control?.matches('button.p-2.rounded-full[data-translate-mode][aria-pressed]') &&
+          wrapper.querySelector(':scope > span[data-translate-status][role="status"][aria-live="polite"]') &&
+          /^(?:idle|busy|active|original)$/.test(control.dataset.translateMode) && control.querySelector(':scope > svg[aria-hidden="true"]') &&
+          (el === control || el.matches('span[data-translate-status]'))) return { kind: 'translate-control', button: control };
+      if (el.matches('p.text-tl-app-text-muted') && el.parentElement?.matches('div.mt-0\\.5,div.mt-1') &&
+          !el.querySelector('*') && [...el.closest('article').querySelectorAll('button[data-translate-mode]')].some(control =>
+            control.closest('article') === el.closest('article') && nativeLocalization26Context(control)?.kind === 'translate-control')) return { kind: 'translation-message' };
+    }
+    if (/^\/notifications\/?$/.test(location.pathname) && el.closest('main')) {
+      const group = el.closest('div.border-b.border-tl-app-border');
+      const lead = group?.querySelector(':scope > button.w-full.flex.items-start.gap-3');
+      const icon = lead?.querySelector(':scope > div.mt-0\\.5.shrink-0 > svg.lucide-bell-ring[width="28"][height="28"]');
+      if (!icon) return null;
+      const paragraph = lead.querySelector(':scope > div.flex-1.min-w-0 > p.leading-snug');
+      if (paragraph?.querySelector(':scope > span.font-extrabold') && el.parentElement === paragraph && el.matches('span.text-tl-app-text-muted')) {
+        return { kind: el === paragraph.lastElementChild ? 'post-notification-time' : 'post-notification-action', group };
+      }
+      const detail = el.closest('button.w-full.flex.items-start.gap-3.py-2\\.5');
+      if (detail && detail.parentElement?.matches('div.pl-12.pr-4') && detail.parentElement.parentElement === group &&
+          el.matches('span.text-tl-app-text-muted') && el.parentElement?.querySelector(':scope > span.font-extrabold')) return { kind: 'post-notification-time', group };
+    }
+    return null;
+  }
+
+  function native26JapaneseText(el, text, attr = null) {
+    if (typeof text !== 'string' || text.length > 700) return null;
+    const context = nativeLocalization26Context(el);
+    if (!context) return null;
+    const languages = native26JapaneseText.languages ||= [
+      ['ar', 'Arabic', 'アラビア語'], ['bn', 'Bengali', 'ベンガル語'], ['de', 'German', 'ドイツ語'],
+      ['en', 'English', '英語'], ['es', 'Spanish', 'スペイン語'], ['fa', 'Persian', 'ペルシア語'],
+      ['fr', 'French', 'フランス語'], ['he', 'Hebrew', 'ヘブライ語'], ['hi', 'Hindi', 'ヒンディー語'],
+      ['id', 'Indonesian', 'インドネシア語'], ['it', 'Italian', 'イタリア語'], ['ja', 'Japanese', '日本語'],
+      ['ko', 'Korean', '韓国語'], ['ms', 'Malay', 'マレー語'], ['nl', 'Dutch', 'オランダ語'],
+      ['pl', 'Polish', 'ポーランド語'], ['pt', 'Portuguese', 'ポルトガル語'], ['ru', 'Russian', 'ロシア語'],
+      ['sv', 'Swedish', 'スウェーデン語'], ['sw', 'Swahili', 'スワヒリ語'], ['th', 'Thai', 'タイ語'],
+      ['tl', 'Filipino', 'フィリピノ語'], ['tr', 'Turkish', 'トルコ語'], ['uk', 'Ukrainian', 'ウクライナ語'],
+      ['ur', 'Urdu', 'ウルドゥー語'], ['vi', 'Vietnamese', 'ベトナム語'],
+      ['zh-CN', 'Chinese (Simplified)', '中国語（簡体字）'], ['zh-TW', 'Chinese (Traditional)', '中国語（繁体字）']
+    ];
+    if (context.kind === 'language' && el.matches('option') && el.value) return languages.find(entry => entry[0] === el.value)?.[2] || null;
+    const words = native26JapaneseText.words ||= new Map([
+      ['Language', '言語'], ['Notified accounts', '投稿通知するアカウント'],
+      ['Choose how posts in other languages appear.', '他の言語のツイートの表示方法を設定します。'],
+      ['Auto-translate', '自動翻訳'], ['Translate into', '翻訳先の言語'],
+      ['Posts and replies that aren’t in your language show translated, marked “Translated from …”. Tap the translate icon on a post to see the original.', '他の言語のツイートと返信を自動翻訳し、翻訳元の言語を表示します。翻訳アイコンを押すと原文に戻せます。'],
+      ['Auto-translate is included with Founder, Fighter and Centurion plans. You can still translate any post with the translate icon.', '自動翻訳はFounder・Fighter・Centurionプランで利用できます。手動の翻訳アイコンは引き続き使えます。'],
+      ['See plans', 'プランを見る'], ['Couldn’t load your language settings. Try again later.', '言語設定を読み込めませんでした。しばらくしてから再度お試しください。'],
+      ['Couldn’t save. Try again.', '保存できませんでした。もう一度お試しください。'], ['Saved.', '保存しました。'],
+      ['Translated', '翻訳済み'], ['Translate post', 'ツイートを翻訳'], ['Show original', '原文を表示'], ['Show translation', '翻訳を表示'],
+      ['Translating post…', 'ツイートを翻訳中…'], ['This post is already in your language.', 'このツイートは翻訳先と同じ言語です。'],
+      ['Showing the original post.', '原文を表示しています。'], ['Showing the translation.', '訳文を表示しています。'],
+      ['Couldn’t translate. Try again.', '翻訳できませんでした。もう一度お試しください。'],
+      ['Turn on post notifications', '投稿通知をオンにする'], ['Turn off post notifications', '投稿通知をオフにする'],
+      ['Could not update post notifications. Try again.', '投稿通知を変更できませんでした。もう一度お試しください。'],
+      ['Follow this account to turn on post notifications.', '投稿通知をオンにするには、このアカウントをフォローしてください。'],
+      ['You can get post notifications from up to 25 accounts. Turn one off in Settings → Notified accounts to add another.', '投稿通知は25アカウントまで設定できます。別のアカウントを追加するには、「設定」→「投稿通知するアカウント」で通知をオフにしてください。'],
+      ["You haven't turned on post notifications for anyone.", '投稿通知をオンにしているアカウントはありません。'],
+      ['Something went wrong loading the accounts you get notifications from.', '投稿通知するアカウントを読み込めませんでした。'],
+      ['Loading notified accounts...', '投稿通知するアカウントを読み込み中…'], ['Loading more notified accounts', '投稿通知するアカウントをさらに読み込み中…'],
+      ['Turn off', 'オフにする'], ['Load more', 'さらに読み込む'],
+      ['Chinese (Simplified)', '中国語（簡体字）'], ['Chinese (Traditional)', '中国語（繁体字）']
+    ]);
+    if (context.kind === 'post-notification-action') return text === 'posted' ? 'ツイートしました' : null;
+    if (context.kind === 'post-notification-time') {
+      const relative = text.match(/^(\d+)([smhd])$/);
+      if (relative) return relative[1] + { s: '秒前', m: '分前', h: '時間前', d: '日前' }[relative[2]];
+      if (text === 'Just now') return 'たった今';
+      const date = text.match(/^([A-Za-z]+\.?) (\d{1,2})$/);
+      const month = date && nativeLocalizationMonthNumber(date[1]);
+      return month && +date[2] >= 1 && +date[2] <= 31 ? `${month}月${+date[2]}日` : null;
+    }
+    if (context.kind === 'notified' && context.count && !el.children.length && /^\d+ (?:of|\/) \d+ (?:used|アカウントを設定中)$/.test(clean(el.textContent))) {
+      return text === 'of' ? '/' : text === 'used' ? 'アカウントを設定中' : null;
+    }
+    let match;
+    if (context.kind === 'translation-message' && (match = text.match(/^Translated from (.{1,80})$/))) return `${languages.find(entry => entry[1] === match[1])?.[2] || JP.get(match[1]) || match[1]}から翻訳`;
+    if (context.kind === 'language' && el.matches('option[value=""]') && (match = text.match(/^Browser language \((.{1,80})\)$/))) return `ブラウザの言語（${languages.find(entry => entry[1] === match[1])?.[2] || JP.get(match[1]) || match[1]}）`;
+    if (context.kind === 'notified' && el === context.header.querySelector(':scope > p') &&
+        (match = text.match(/^You get a notification when these accounts post\. Turn it on from the bell on a profile you follow, for up to (\d{1,5}) accounts\.$/))) return `このアカウントがツイートすると通知します。フォロー中のプロフィールのベルから、最大${match[1]}アカウントまで設定できます。`;
+    if (context.kind === 'notified' && attr === 'aria-label' &&
+        (match = text.match(/^(Turning off|Turn off) post notifications for (@[A-Za-z0-9_.-]{1,80})$/))) return `${match[2]}の投稿通知を${match[1] === 'Turning off' ? 'オフにしています…' : 'オフにする'}`;
+    if (context.kind === 'notified' && el.matches('[role="status"],[role="alert"]') &&
+        (match = text.match(/^Could not turn off post notifications for (@[A-Za-z0-9_.-]{1,80})\. Please try again\.$/))) return `${match[1]}の投稿通知をオフにできませんでした。もう一度お試しください。`;
+    return words.get(text) || (context.kind === 'language' && el.matches('option') ? JP.get(text) : null) || null;
+  }
+
+  function patchNative26UI(root = document) {
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const selector = 'button[data-translate-mode],button[data-icon][aria-pressed],main section button[aria-label],main section select > option';
+    const elements = host instanceof Element && host.matches(selector) ? [host] : [];
+    host?.querySelectorAll?.(selector).forEach(el => elements.push(el));
+    for (const el of elements) {
+      if (!nativeLocalization26Context(el)) continue;
+      if (el.matches('option')) {
+        for (const node of el.childNodes) if (node.nodeType === Node.TEXT_NODE) {
+          const value = native26JapaneseText(el, clean(node.nodeValue));
+          if (value) replaceLocalizationText(node, value);
+        }
+      } else for (const attr of ['aria-label', 'title']) {
+        const value = el.getAttribute(attr), out = native26JapaneseText(el, value, attr);
+        if (out && out !== value) ctRememberLocalization(el, attr, out);
+      }
+    }
   }
 
   function isNativeTranslationMetadata(el) {
@@ -1829,7 +1999,7 @@ if (/^just\s+now$/i.test(t)) {
     if (el.closest('.font-extrabold,.font-bold,a')) return null;
     if (!(el === paragraph || el.parentElement === paragraph)) return null;
     const text = clean(node.nodeValue);
-    if (!/^(?:(?:liked|favorited|reposted|retweeted|quoted) your (?:post|tweet|reply)|followed you|mentioned you(?: in a (?:post|tweet))?|replied to (?:your (?:post|tweet)|you)|flagged your post for review|awarded you a badge|interacted with you|(?:さん)?が?あなた(?:の(?:ツイート|返信)(?:を(?:お気に入りに登録|リツイート|引用)|に(?:いいね|返信))|を(?:フォロー|@ツイート)|宛てにツイート|に(?:返信|バッジを贈り))しました)$/i.test(text)) return null;
+    if (!/^(?:(?:liked|favorited|reposted|retweeted|quoted) your (?:post|tweet|reply)|posted|(?:さん)?が?ツイートしました|followed you|mentioned you(?: in a (?:post|tweet))?|replied to (?:your (?:post|tweet)|you)|flagged your post for review|awarded you a badge|interacted with you|(?:さん)?が?あなた(?:の(?:ツイート|返信)(?:を(?:お気に入りに登録|リツイート|引用)|に(?:いいね|返信))|を(?:フォロー|@ツイート)|宛てにツイート|に(?:返信|バッジを贈り))しました)$/i.test(text)) return null;
     return { row, paragraph, element: el };
   }
 
@@ -1896,6 +2066,7 @@ if (/^just\s+now$/i.test(t)) {
   function isLocalizationUI(node) {
     const el = node?.parentElement;
     if (isProtectedLocalizationElement(el)) return false;
+    if (native26JapaneseText(el, clean(node.nodeValue))) return true;
     if (nativePinJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeGameJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeMediaUploadJapaneseText(el, node.nodeValue)) return true;
@@ -2135,7 +2306,7 @@ if (/^just\s+now$/i.test(t)) {
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
     const parentPoll = nativeLocalizationParentPostPreview(el) && el.matches('p.mt-1.text-tl-app-text-muted') && text.match(/^Poll · ([2-5]) choices$/);
-    let out = nativePinJapaneseText(el, text) || nativeGameJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+    let out = native26JapaneseText(el, text) || nativePinJapaneseText(el, text) || nativeGameJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
       (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
@@ -2159,6 +2330,7 @@ if (/^just\s+now$/i.test(t)) {
     ctSyncLocalizationAppearance(root);
     patchNativePollAndAccountUI(root);
     patchNativeGamesUI(root);
+    patchNative26UI(root);
     localizationScopeNodes(root).forEach(translateTextNode);
     patchUIAttributes(root);
   }
@@ -2185,7 +2357,7 @@ if (/^just\s+now$/i.test(t)) {
       // Mentions/quotes have a separate action paragraph and need no actor
       // particles. Never reach into a previous notification to find an actor.
       if (context.element === paragraph) continue;
-      if (!/^(?:さん)?が?あなた/.test(clean(action.nodeValue))) continue;
+      if (!/^(?:さん)?が?(?:あなた|ツイートしました$)/.test(clean(action.nodeValue))) continue;
       const actorElements = [...paragraph.children].filter(el => el.matches('span.font-extrabold'));
       if (!actorElements.length) continue;
       const siblings = [...paragraph.childNodes];
@@ -2222,8 +2394,8 @@ if (/^just\s+now$/i.test(t)) {
           if (otherWord) next.nodeValue = '';
         }
       }
-      const actionText = clean(action.nodeValue).replace(/^(?:さん)?が?(?=あなた)/, '');
-      if (!/^あなた/.test(actionText)) continue;
+      const actionText = clean(action.nodeValue).replace(/^(?:さん)?が?(?=あなた|ツイートしました$)/, '');
+      if (!/^(?:あなた|ツイートしました$)/.test(actionText)) continue;
       const previous = before.slice().reverse().find(node => clean(node.textContent));
       if (!previous) continue;
       const prefix = previous.nodeType === Node.TEXT_NODE && /そのほか\d+人$/.test(clean(previous.nodeValue)) ? 'が' : 'さんが';
@@ -2731,72 +2903,13 @@ if (/^just\s+now$/i.test(t)) {
   }
 
 
-  function ctTranslationButtonText(el) {
-    return clean(el?.textContent || el?.getAttribute?.('aria-label') || el?.getAttribute?.('title') || '');
-  }
-
   function ctTranslationControls(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const out = [];
-    const selector = 'button,[role="button"],a';
-    if (scope instanceof Element && scope.matches(selector)) out.push(scope);
-    scope.querySelectorAll?.(selector).forEach(el => out.push(el));
-    return out.filter(el => /^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(el)));
+    const controls = new Set(root.querySelectorAll?.('button[data-translate-mode]') || []);
+    if (root.matches?.('button[data-translate-mode]')) controls.add(root);
+    const article = root.closest?.('article');
+    if (article) for (const button of article.querySelectorAll('button[data-translate-mode]')) controls.add(button);
+    return [...controls];
   }
-
-  function ctDeclaredLanguage(container) {
-    if (!container) return '';
-    const nodes = [container, ...(container.querySelectorAll?.('[lang],[data-lang],[data-language]') || [])];
-    for (const el of nodes) {
-      const raw = clean(el.getAttribute?.('lang') || el.getAttribute?.('data-lang') || el.getAttribute?.('data-language') || '').toLowerCase();
-      const lang = raw.split(/[-_]/)[0];
-      if (/^[a-z]{2,3}$/.test(lang)) return lang;
-    }
-    return '';
-  }
-
-  function ctPostTextForTranslation(control) {
-    const article = control?.closest?.('article');
-    if (!article) return '';
-    let box = control.parentElement;
-    for (let depth = 0; box && box !== article && depth < 6; depth++, box = box.parentElement) {
-      const candidates = [...box.querySelectorAll('p,[dir="auto"],[data-testid*="text" i]')]
-        .filter(el => !el.closest('button,[role="button"]'))
-        .map(el => clean(el.textContent))
-        .filter(t => t && !/^(?:Show translation|Translate|翻訳を表示|Show original|原文を表示)$/i.test(t));
-      const text = candidates.sort((a,b) => b.length - a.length)[0] || '';
-      if (text.length >= 2) return text;
-    }
-    if (typeof articleText === 'function') return clean(articleText(article));
-    return clean(article.textContent);
-  }
-
-  function ctLikelyLanguage(text, container) {
-    const declared = ctDeclaredLanguage(container);
-    if (declared) return declared;
-    const s = clean(text).replace(/https?:\/\/\S+/gi,' ').replace(/@[A-Za-z0-9_.-]+/g,' ').replace(/#[^\s]+/g,' ');
-    if (!s) return 'unknown';
-    if (/[\u3040-\u30ff]/u.test(s)) return 'ja';
-    if (/[\uac00-\ud7af]/u.test(s)) return 'ko';
-    if (/[\u4e00-\u9fff]/u.test(s)) return 'zh';
-    if (/[\u0400-\u04ff]/u.test(s)) return 'ru';
-    if (/[\u0600-\u06ff]/u.test(s)) return 'ar';
-    if (/[\u0590-\u05ff]/u.test(s)) return 'he';
-    if (/[\u0900-\u097f]/u.test(s)) return 'hi';
-    if (/[\u0e00-\u0e7f]/u.test(s)) return 'th';
-    const lowered = ` ${s.toLowerCase()} `;
-    const words = s.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) || [];
-    if (!words.length) return 'unknown';
-    const other = ['bonjour','merci','salut','avec','pour','dans','une','des','est','mais','vous','nous','hola','gracias','para','con','una','que','los','las','por','pero','como','muy','ciao','grazie','per','che','gli','della','sono','molto','hallo','danke','und','der','die','das','ist','nicht','mit','für','ein','eine','olá','obrigado','obrigada','não','muito'];
-    if (other.some(w => lowered.includes(` ${w} `)) || /[À-ÖØ-öø-ÿ]/u.test(s)) return 'other';
-    const english = new Set(['a','an','and','are','as','at','be','been','but','by','can','could','did','do','does','for','from','had','has','have','he','her','here','his','how','i','if','in','is','it','just','me','more','my','no','not','of','on','one','or','our','out','she','so','some','than','that','the','their','them','there','they','this','to','too','up','us','was','we','were','what','when','where','which','who','why','will','with','would','you','your']);
-    const hits = words.reduce((n,w) => n + (english.has(w) ? 1 : 0), 0);
-    if (hits >= 2 || (words.length <= 4 && hits >= 1)) return 'en';
-    if (words.length <= 3 && /^[\x00-\x7F\s.,!?'"()\-:;]+$/u.test(s)) return 'en';
-    if (words.length >= 5 && hits / words.length >= 0.12) return 'en';
-    return 'other';
-  }
-
 
   function patchExactPostTime(root = document) {
     ctTimestampPatchExactPostTime(root);
@@ -2884,7 +2997,7 @@ if (/^just\s+now$/i.test(t)) {
       );
       patchComposeJapanese(root);
       patchNotificationFollowGrammar(root);
-      patchAutoTranslation(root, 'ja');
+      patchDeviceTranslation(root);
       ctReplyTimesEnhance(root);
       patchExactPostTime(root);
       patchInviteJoinedLabels(root);

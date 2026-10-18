@@ -7,6 +7,9 @@ const timestampSource = fs.readFileSync(require('node:path').join(__dirname, '..
 const mediaSource = fs.readFileSync(require('node:path').join(__dirname, '../src/media.js'), 'utf8');
 const {galleryMarkup}=require('./helpers/native-media.cjs');
 const date = '2026-09-30T07:00:00.000Z';
+function native26Control(mode = 'idle') {
+  return `<span class="inline-flex items-center"><button type="button" data-translate-mode="${mode}" aria-label="Translate post" aria-pressed="${mode === 'active'}" ${mode === 'busy' ? 'aria-busy="true" aria-disabled="true"' : ''}><svg aria-hidden="true"></svg></button><span data-translate-status role="status" aria-live="polite" class="sr-only"></span></span>`;
+}
 function harness(t) {
   const dom = new JSDOM(`<article><button class="truncate font-bold">Alice</button>
     <span class="text-tl-app-text-muted hover:underline" title="${date}">1m</span>
@@ -140,6 +143,49 @@ test('translated main card keeps exact author/ISO identity and saves API origina
   const f=harness(t);f.article.querySelector('p').textContent='翻訳文';
   f.article.insertAdjacentHTML('beforeend','<button>原文を表示</button>');f.response={posts:[f.post()]};
   assert.equal((await f.w.qa.ctResolveFavorite(f.candidate(),'account-a')).text,'My post');
+});
+test('Tweet 2.6 native icon modes protect Favorite originals without requiring English button text', async t => {
+  for (const mode of ['active', 'busy', 'future-state', '', 'idle', 'original']) {
+    const f = harness(t); f.article.insertAdjacentHTML('beforeend', native26Control(mode));
+    if (mode === 'active') f.article.querySelector('p').textContent = '翻訳文';
+    const candidate = f.candidate();
+    if (['busy', 'future-state', ''].includes(mode)) { assert.equal(candidate, null, mode); continue; }
+    assert.equal(candidate.translated, mode === 'active', mode); f.response = {posts:[f.post()]};
+    assert.equal((await f.w.qa.ctResolveFavorite(candidate, 'account-a')).text, 'My post', mode);
+  }
+});
+test('known Favorite permalinks cannot bypass native translated state or save the visible translation', async t => {
+  for (const changes of [null, {id:'other'}, {authorUsername:'bob'}, {createdAt:'2026-09-30T08:00:00Z'},
+    {text:null}, {status:'BLOCKED'}, {isDeleted:true}, {originalPostId:'reposted'}]) {
+    const f = harness(t); f.article.querySelector('p').textContent = '翻訳文';
+    f.article.insertAdjacentHTML('beforeend', native26Control('active'));
+    f.w.snapshotFavorite = () => ({id:'post-a', username:'alice', text:'翻訳文'});
+    f.response = {success:true, post:{...f.post(), ...(changes || {})}};
+    const candidate = f.candidate(); assert.equal(candidate.translated, true);
+    const item = await f.w.qa.ctResolveFavorite(candidate, 'account-a');
+    assert.equal(item?.text || null, changes ? null : 'My post');
+    assert.deepEqual(f.requests, ['https://api.tweet.app/api/posts/post-a']);
+  }
+  for (const mode of ['busy', 'future-state']) {
+    const f = harness(t); f.w.snapshotFavorite = () => ({id:'post-a', username:'alice', text:'My post'});
+    f.article.insertAdjacentHTML('beforeend', native26Control(mode)); assert.equal(f.candidate(), null, mode);
+  }
+});
+test('Tweet 2.6 translated or uncertain reply Favorites remain unresolved even with a known permalink', t => {
+  for (const mode of ['active', 'busy', 'future-state', 'idle', 'original']) {
+    const f = harness(t); replyFixture(f); f.article.insertAdjacentHTML('beforeend', native26Control(mode));
+    f.w.snapshotFavorite = () => ({id:'reply-a', username:'alice', text:'My reply'});
+    assert.equal(!!f.candidate(), ['idle', 'original'].includes(mode), mode);
+    assert.equal(f.requests.length, 0);
+  }
+});
+test('Favorite translation checks exclude quote and nested-post controls and reject orphan native source status', t => {
+  const f = harness(t); f.article.querySelector('[aria-label]').insertAdjacentHTML('beforeend', native26Control('active'));
+  f.article.insertAdjacentHTML('beforeend', `<article>${native26Control('busy')}</article>`);
+  assert.equal(f.candidate().translated, false);
+  const body = f.article.querySelector('p');
+  body.insertAdjacentHTML('beforebegin', '<div class="mt-0.5"><p class="text-[0.8125rem] text-tl-app-text-muted">Translated from English</p></div>');
+  assert.equal(f.candidate(), null);
 });
 test('explicit loaded-Favorites restoration saves only native liked cards and sends no engagement', async t => {
   const f=harness(t);const main=f.doc.createElement('main');f.article.before(main);main.append(f.article);

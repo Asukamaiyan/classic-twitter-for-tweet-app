@@ -185,3 +185,12 @@ Use native session management without duplicate controls. Japanese localization 
 
 
 Version 6.27.0 follows the observed Tweet 2.4.1 pin UI. Japanese pin labels are limited to the verified native menu, profile section, hint, replace dialog and status toast. Native buttons, order, Undo/Retry and server errors remain authoritative. Post content and radio choice summaries are never inferred as static UI. The official Shop anchor keeps its URL, new-tab behavior and event ownership. No pin API or duplicate manager is added.
+
+
+## 6.29.0 Tweet 2.6 native translation ownership
+
+The standard Language settings, automatic batch translation, translate icon and profile post-notification bell remain React-owned. Remove the extension’s remote automatic-click queue, cooldown/observer, automatic device queue and native/device engine selector. Existing browser-local preferences are retained without conversion to a native server setting; a former explicit device choice may retain only manual on-device buttons. The optional Chrome model preparation and manual result remain separate from native translated posts. Native busy/active/unknown states and source lines withdraw the device result, and late work cannot restore it.
+
+Japanese labels are limited to verified settings sections, label relationships, icon controls and new-post rows. Keep select/radio values, aria-checked/pressed/busy, handlers, names, original content and dynamic counter text nodes. New post notifications retain the standard grouped expansion and individual event actions. No subscription API, separate new-post polling or notification counter is added. The page-open generic alert remains distinct from profile subscription delivery and does not become background push.
+
+2.6 translated text uses the same body node and can insert a source/error block. Link previews retain only independently observed originals with unchanged author/creation/edit/context identity. Favorites with translated permalink content read and validate the exact post original; replies without precise timestamps are not identified from translated text. Relative labels may be localized without fabricating an absolute title. Keep the existing classic design, finite motion and reduced-motion behavior; this compatibility work uses current first-party UI structure and existing design references.

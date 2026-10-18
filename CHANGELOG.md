@@ -1,5 +1,12 @@
 # Changelog
 
+## All distributions v6.29.0 — 2026-10-18
+
+Support verified Tweet **2.6.0 / build 1792299140**. Remove the extension’s duplicate remote automatic-translation queue, automatic on-device queue and engine selector. Native Settings → Language owns automatic translation; supported Chrome retains optional manual-only on-device translation. Preserve prior storage without silently enabling another translator or changing native account settings.
+
+Localize the verified language screen, icon translation states, profile notification bell, notified-account settings and new-post notification metadata in Japanese. Preserve all original content, names, values, disabled states and native handlers. Handle 2.6 translation source blocks and mode attributes when retaining original URL previews, restoring Favorites and checking reply times; translated or uncertain content never becomes a guessed original. Keep complementary media/Favorites, news, URL cards and notification-avatar links because no equivalent replacement was verified. English editions keep the native English controls.
+
+
 ## All distributions v6.28.0 — 2026-10-17
 
 Update for verified Tweet **2.5.0 / build 1792185878**. Localize the new Games/TWIRDLE surfaces only where native UI structure identifies them. Preserve game answers, keyboard letters, names, original posts, native result cards and handlers. Keep ordinary URL cards for other links, native reply notifications, polls, profile pins, uploads and session management. No new game API, authentication mechanism, manager grant or dependency is added. English editions retain native game wording.

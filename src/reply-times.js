@@ -41,19 +41,25 @@
       (!!record.pending || !!record.posts && Date.now() - record.at < 60000);
   }
 
+  function ctReplyTimeBody(header) {
+    let body = header?.nextElementSibling;
+    // Native 2.6 places its translation source/error block before the body.
+    if (ctFavoriteTranslationMetadataBlock(body)) body = body.nextElementSibling;
+    return body;
+  }
+
   function ctReplyTimeCandidate(el, context) {
     if (!context) return null;
     const { article, container, panel, inline, parentId } = context;
     const header = el.parentElement;
     const author = header?.querySelector(':scope > button.font-bold.truncate');
     const separator = el.previousElementSibling;
-    const body = header?.nextElementSibling;
+    const body = ctReplyTimeBody(header);
     if (!article || !parentId || !ctReplyTimeAgeKey(el.textContent) || !header?.matches('div.flex.items-center.gap-1.min-w-0') ||
         !author || !separator?.matches('span.text-tl-app-text-muted') || separator.textContent.trim() !== '·' ||
         !header.querySelector('button > svg.lucide-ellipsis-vertical') ||
         !body?.matches('p.whitespace-pre-wrap.break-words') || body.closest('article') !== article ||
-        [...article.querySelectorAll('button')].some(button => button.closest('article') === article &&
-          /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()))) return null;
+        ctFavoriteTranslationState(article) !== 'original') return null;
     const native = ctFavoriteCandidate(article);
     if (!native || native.translated || native.parentId && native.parentId !== parentId ||
         typeof native.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(native.username) ||
@@ -71,12 +77,11 @@
           candidate.container.id !== 'inline-replies-' + candidate.parentId :
           ctTimestampDetailContext(candidate.article) !== candidate.panel ||
           candidate.panel?.querySelector(':scope > div.min-h-0.flex-1.overflow-y-auto') !== candidate.container) ||
-        candidate.el.parentElement?.nextElementSibling !== candidate.body ||
+        ctReplyTimeBody(candidate.el.parentElement) !== candidate.body ||
         candidate.body.textContent !== candidate.text || !candidate.author.isConnected ||
         (candidate.author.getAttribute('aria-label') || '') !== candidate.authorLabel ||
         candidate.author.textContent !== candidate.authorText ||
-        [...candidate.article.querySelectorAll('button')].some(button => button.closest('article') === candidate.article &&
-          /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()))) return false;
+        ctFavoriteTranslationState(candidate.article) !== 'original') return false;
     const expectedText = candidate.lastOwnText ?? candidate.initialText;
     if (checkText && candidate.el.textContent !== expectedText &&
         (!ctReplyTimeAgeKey(expectedText) || ctReplyTimeAgeKey(candidate.el.textContent) !== ctReplyTimeAgeKey(expectedText))) return false;

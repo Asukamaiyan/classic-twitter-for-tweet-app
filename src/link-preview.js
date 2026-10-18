@@ -203,6 +203,23 @@
     if (body) ctLinkPreviewState.originals.delete(body);
     return null;
   }
+  function ctLinkPreviewTranslationState(post, header, sourceLine) {
+    const controls = [...header.querySelectorAll('button')].filter(el => el.closest('article') === post &&
+      !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-ct-owned],[data-ct-local-ui],.tl-user-text,[data-user-content]'));
+    const native = controls.filter(el => el.hasAttribute('data-translate-mode'));
+    if (native.length) {
+      if (native.length !== 1) return 'unknown';
+      const control = native[0], mode = control.getAttribute('data-translate-mode');
+      if (!['idle', 'busy', 'active', 'original'].includes(mode)) return 'unknown';
+      if (mode === 'busy' || control.getAttribute('aria-busy') === 'true') return 'busy';
+      if (mode === 'active') return 'translated';
+      if (control.getAttribute('aria-pressed') === 'true' || sourceLine) return 'unknown';
+      return 'original';
+    }
+    if (sourceLine) return 'unknown';
+    return controls.some(el => [el.textContent, el.getAttribute('title'), el.getAttribute('aria-label')]
+      .some(value => /^(?:Show original|原文を表示)$/i.test((value || '').trim()))) ? 'translated' : 'original';
+  }
   function ctLinkPreviewSource(body) {
     if (!body?.isConnected || body.closest('[hidden],[aria-hidden="true"],[data-ct-profile-timeline-hidden],[data-ct-keyword-hidden],.ct-keyword-collapsed,.ct-links-filter-hidden')) return ctLinkPreviewRejectSource(body);
     const profile = body.matches('p.ct-profile-text[data-ct-link-preview-source="original"]') && body.closest('.ct-profile-row[data-ct-profile-post]');
@@ -216,7 +233,16 @@
     if (!body.matches('p.tl-user-text.whitespace-pre-wrap.break-words') || body.closest(ctLinkPreviewProtected)) return ctLinkPreviewRejectSource(body);
     const post = body.closest('article'), parent = body.parentElement;
     if (!post || !parent?.matches('div.min-w-0.flex-1') || parent.closest('article') !== post) return ctLinkPreviewRejectSource(body);
-    const header = body.previousElementSibling;
+    let header = body.previousElementSibling, sourceLine = false;
+    // The 2.6 source/error status is inserted between the stable header and
+    // original paragraph. It is not a second post body or a new identity.
+    if (header?.matches('div.mt-0\\.5,div.mt-1') && header.children.length > 0 && header.children.length <= 2 &&
+        [...header.children].every(el => el.matches('p.text-tl-app-text-muted') &&
+          el.classList.contains('text-[0.8125rem]') && !el.children.length &&
+          (!el.hasAttribute('role') || el.getAttribute('role') === 'alert'))) {
+      sourceLine = [...header.children].some(el => !el.hasAttribute('role'));
+      header = header.previousElementSibling;
+    }
     if (!header?.matches('div') || !header.querySelector('button.font-bold.truncate')) return ctLinkPreviewRejectSource(body);
     // A nested original body belongs to its own article. Poll labels, quoted
     // line-clamped snippets and live translation paragraphs do not qualify.
@@ -228,10 +254,10 @@
       if (candidate && !anchor.closest('button,[role="button"]')) { url = candidate; break; }
     }
     if (!url) return ctLinkPreviewRejectSource(body);
-    const translated = [...header.querySelectorAll('button')]
-      .some(button => /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()));
+    const translation = ctLinkPreviewTranslationState(post, header, sourceLine);
+    if (translation === 'unknown') return ctLinkPreviewRejectSource(body);
     const identity = ctLinkPreviewNativeIdentity(post, parent, header);
-    if (translated) {
+    if (translation !== 'original') {
       const original = ctLinkPreviewState.originals.get(body);
       if (!identity || !original || original.url !== url ||
           ['post', 'parent', 'header', 'author', 'authorText', 'creation', 'createdAt', 'context']
