@@ -8,7 +8,7 @@
 
 **投稿通知：** フォロー中のプロフィールのベルからオンにでき、「設定」→「投稿通知するアカウント」で確認・解除できます。標準機能をそのまま使い、拡張独自の購読ボタンや通知取得処理は追加しません。
 
-**配布状況（2026-10-18）:** 6.29.0の全6版を[PR #29](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/29)でGitHubのmainへ反映しました。Greasy Forkの公開版は全6版とも6.26.0で、Chrome拡張のファイルURLアクセス設定待ちです。6.29.0のコードと導入案内は準備済みです。Safari＋StayとAndroidの今回の実機確認は未実施です。
+**配布状況（2026-10-19）:** 6.29.0の全6版を[PR #29](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/29)でGitHubのmainへ反映し、Greasy Forkへも公開しました。通常の配布コード6本・導入案内6ページを匿名取得し、全HTTP200・生成結果との全文一致を確認済みです。既存の限定公開設定を保持しています。Safari＋StayとAndroidの今回の実機確認は未実施です。
 
 ## URLカード
 
