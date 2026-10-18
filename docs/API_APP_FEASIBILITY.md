@@ -1,3 +1,11 @@
+## 2026-10-18: Tweet 2.6.0 recheck
+
+The current first-party app is **2.6.0 / build1792299140** (`index-DFVeeabz.js`, SHA256 `beead439a000f921ea4fde01ac18a6c0cd5988ac15cac8a0bd1014e76f332a99`). It adds native automatic translation/settings and per-account post notifications. These are first-party contracts, not newly confirmed external-app authentication. No removed existing route, changed media limit or supported third-party sign-in/App Check registration was identified in the inspected delta.
+
+TweetNest 1.3.1 keeps the existing connection boundary and decodes `new_post` as a distinct new-post notification while preserving actor, post ID, preview and creation time. Subscription management and batch-translation settings are not implemented in the native app by this compatibility release. Build/simulator results do not demonstrate live authentication or accepted service writes. The userscript uses the standard Web translation/subscription UI and removes its duplicate automatic translation rather than reproducing those write APIs.
+
+---
+
 # Tweet 最新 API・重複機能・独立アプリ可否の確認
 
 初回確認日: 2026-10-07 JST。6.22.0では公開の公式HTML・JavaScript・CSS・Service Worker・media config・公式サイト/規約を調査。6.23.0ではユーザーの許可に基づき、ログイン済みの公式画面を操作して読み取り通信・consoleも確認した。以下では公開sourceと認証済み画面の観測を区別する。認証値・アカウント識別子・投稿本文を保存せず、投稿/アップロード/お気に入り/フォロー/通知権限の変更は行っていない。独立アプリの認証・書き込み受理テストではない。

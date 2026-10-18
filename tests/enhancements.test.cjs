@@ -531,14 +531,14 @@ test('storage.clear events warn and stale bookmark saves cannot resurrect delete
   assert.deepEqual([...document.querySelectorAll('#ct-local-bookmarks a')].map(link => link.getAttribute('href')), ['/post/existing-post']);
 });
 
-test('automatic translation hook preserves failed state and supports Japanese copy', t => {
+test('manual device translation hook preserves failed state and explains native automatic translation', t => {
   let enabled = false;
   let shouldFail = false;
   const { document, window } = setup(t, { options: {
-    locale: 'ja', getAutoTranslate: () => enabled,
-    setAutoTranslate: value => { if (shouldFail) return false; enabled = value; },
+    locale: 'ja', deviceTranslationSupported:true, getDeviceTranslation: () => enabled,
+    setDeviceTranslation: value => { if (shouldFail) return false; enabled = value; },
   } });
-  const checkbox = document.getElementById('ct-local-auto-translate');
+  const checkbox = document.getElementById('ct-local-device-translation');
   assert.equal(checkbox.checked, false);
   assert.equal(document.getElementById('ct-local-tools-toggle').textContent, '便利ツール');
   checkbox.checked = true;
@@ -671,36 +671,31 @@ test('invalid form values identify and focus the field, then clear invalid state
   }
 });
 
-test('device models are prepared only by an explicit button click and failure preserves controls', async t => {
-  let engine = 'native', preparations = 0, status = '';
-  const { document, window, controller } = setup(t, { options: {
-    getAutoTranslate: () => false, setAutoTranslate: () => {},
-    getTranslationEngine: () => engine, setTranslationEngine: value => { engine = value; },
-    deviceTranslationSupported: true,
-    prepareDeviceTranslation: async language => { preparations++; assert.equal(language, 'ja'); status = 'Model unavailable'; return false; },
-    getTranslationStatus: () => status,
+test('manual device models require explicit prepare and native engine controls are absent', async t => {
+  let enabled = true, preparations = 0, status = '';
+  const { document, controller } = setup(t, { options:{
+    getDeviceTranslation:()=>enabled, setDeviceTranslation:value=>{enabled=value;}, deviceTranslationSupported:true,
+    prepareDeviceTranslation:async language=>{preparations++;assert.equal(language,'ja');status='Model unavailable';return false;},
+    getTranslationStatus:()=>status,
   } });
-  const select = document.getElementById('ct-local-translation-engine');
-  select.value = 'device'; select.dispatchEvent(new window.Event('change'));
-  assert.equal(engine, 'device'); assert.equal(preparations, 0);
-  const button = document.getElementById('ct-local-translation-prepare');
-  button.click(); assert.equal(preparations, 1); assert.equal(button.disabled, true);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(button.disabled, false); assert.equal(button.textContent, 'Prepare model');
-  controller.refreshTranslation();
-  assert.equal(document.getElementById('ct-local-translation-status').textContent, 'Model unavailable');
+  assert.equal(document.getElementById('ct-local-translation-engine'),null);
+  assert.equal(document.getElementById('ct-local-auto-translate'),null);
+  assert.match(document.getElementById('ct-local-tools').textContent,/Settings → Language/);
+  const button=document.getElementById('ct-local-translation-prepare');assert.equal(preparations,0);
+  button.click();assert.equal(preparations,1);assert.equal(button.disabled,true);
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(button.disabled,false);assert.equal(button.textContent,'Prepare model');
+  controller.refreshTranslation();assert.equal(document.getElementById('ct-local-translation-status').textContent,'Model unavailable');
 });
 
-test('unsupported device translation is explained and disabled without changing saved engine', t => {
-  let engine = 'native';
-  const { document } = setup(t, { options: {
-    getAutoTranslate: () => false, setAutoTranslate: () => {},
-    getTranslationEngine: () => engine, setTranslationEngine: value => { engine = value; },
-    deviceTranslationSupported: false,
-  } });
-  assert.equal(document.querySelector('#ct-local-translation-engine option[value="device"]').disabled, true);
-  assert.equal(document.getElementById('ct-local-translation-prepare').disabled, true);
-  assert.equal(engine, 'native'); assert.match(document.getElementById('ct-local-tools').textContent, /Safari\/Stay/);
+test('unsupported device translation explains native settings and preserves its saved state',t=>{
+  let enabled=true, writes=0;
+  const {document}=setup(t,{options:{getDeviceTranslation:()=>enabled,setDeviceTranslation:()=>{writes++;},deviceTranslationSupported:false}});
+  const checkbox=document.getElementById('ct-local-device-translation');
+  assert.equal(checkbox.disabled,true);assert.equal(checkbox.checked,true);assert.equal(writes,0);
+  assert.equal(document.getElementById('ct-local-translation-prepare').disabled,true);
+  assert.equal(document.getElementById('ct-local-translation-engine'),null);
+  assert.match(document.getElementById('ct-local-tools').textContent,/Safari\/Stay/);
+  assert.match(document.getElementById('ct-local-tools').textContent,/Settings → Language/);
 });
 
 test('classic display toggle saves and restores without changing a draft or other local tools', t => {

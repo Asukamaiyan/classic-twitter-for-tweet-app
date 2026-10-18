@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.28.0
+// @version      6.29.0
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -871,72 +871,13 @@
   }
 
 
-  function ctTranslationButtonText(el) {
-    return clean(el?.textContent || el?.getAttribute?.('aria-label') || el?.getAttribute?.('title') || '');
-  }
-
   function ctTranslationControls(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const out = [];
-    const selector = 'button,[role="button"],a';
-    if (scope instanceof Element && scope.matches(selector)) out.push(scope);
-    scope.querySelectorAll?.(selector).forEach(el => out.push(el));
-    return out.filter(el => /^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(el)));
+    const controls = new Set(root.querySelectorAll?.('button[data-translate-mode]') || []);
+    if (root.matches?.('button[data-translate-mode]')) controls.add(root);
+    const article = root.closest?.('article');
+    if (article) for (const button of article.querySelectorAll('button[data-translate-mode]')) controls.add(button);
+    return [...controls];
   }
-
-  function ctDeclaredLanguage(container) {
-    if (!container) return '';
-    const nodes = [container, ...(container.querySelectorAll?.('[lang],[data-lang],[data-language]') || [])];
-    for (const el of nodes) {
-      const raw = clean(el.getAttribute?.('lang') || el.getAttribute?.('data-lang') || el.getAttribute?.('data-language') || '').toLowerCase();
-      const lang = raw.split(/[-_]/)[0];
-      if (/^[a-z]{2,3}$/.test(lang)) return lang;
-    }
-    return '';
-  }
-
-  function ctPostTextForTranslation(control) {
-    const article = control?.closest?.('article');
-    if (!article) return '';
-    let box = control.parentElement;
-    for (let depth = 0; box && box !== article && depth < 6; depth++, box = box.parentElement) {
-      const candidates = [...box.querySelectorAll('p,[dir="auto"],[data-testid*="text" i]')]
-        .filter(el => !el.closest('button,[role="button"]'))
-        .map(el => clean(el.textContent))
-        .filter(t => t && !/^(?:Show translation|Translate|翻訳を表示|Show original|原文を表示)$/i.test(t));
-      const text = candidates.sort((a,b) => b.length - a.length)[0] || '';
-      if (text.length >= 2) return text;
-    }
-    if (typeof articleText === 'function') return clean(articleText(article));
-    return clean(article.textContent);
-  }
-
-  function ctLikelyLanguage(text, container) {
-    const declared = ctDeclaredLanguage(container);
-    if (declared) return declared;
-    const s = clean(text).replace(/https?:\/\/\S+/gi,' ').replace(/@[A-Za-z0-9_.-]+/g,' ').replace(/#[^\s]+/g,' ');
-    if (!s) return 'unknown';
-    if (/[\u3040-\u30ff]/u.test(s)) return 'ja';
-    if (/[\uac00-\ud7af]/u.test(s)) return 'ko';
-    if (/[\u4e00-\u9fff]/u.test(s)) return 'zh';
-    if (/[\u0400-\u04ff]/u.test(s)) return 'ru';
-    if (/[\u0600-\u06ff]/u.test(s)) return 'ar';
-    if (/[\u0590-\u05ff]/u.test(s)) return 'he';
-    if (/[\u0900-\u097f]/u.test(s)) return 'hi';
-    if (/[\u0e00-\u0e7f]/u.test(s)) return 'th';
-    const lowered = ` ${s.toLowerCase()} `;
-    const words = s.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) || [];
-    if (!words.length) return 'unknown';
-    const other = ['bonjour','merci','salut','avec','pour','dans','une','des','est','mais','vous','nous','hola','gracias','para','con','una','que','los','las','por','pero','como','muy','ciao','grazie','per','che','gli','della','sono','molto','hallo','danke','und','der','die','das','ist','nicht','mit','für','ein','eine','olá','obrigado','obrigada','não','muito'];
-    if (other.some(w => lowered.includes(` ${w} `)) || /[À-ÖØ-öø-ÿ]/u.test(s)) return 'other';
-    const english = new Set(['a','an','and','are','as','at','be','been','but','by','can','could','did','do','does','for','from','had','has','have','he','her','here','his','how','i','if','in','is','it','just','me','more','my','no','not','of','on','one','or','our','out','she','so','some','than','that','the','their','them','there','they','this','to','too','up','us','was','we','were','what','when','where','which','who','why','will','with','would','you','your']);
-    const hits = words.reduce((n,w) => n + (english.has(w) ? 1 : 0), 0);
-    if (hits >= 2 || (words.length <= 4 && hits >= 1)) return 'en';
-    if (words.length <= 3 && /^[\x00-\x7F\s.,!?'"()\-:;]+$/u.test(s)) return 'en';
-    if (words.length >= 5 && hits / words.length >= 0.12) return 'en';
-    return 'other';
-  }
-
 
   function patchExactPostTime(root = document) {
     ctTimestampPatchExactPostTime(root);
@@ -957,7 +898,7 @@
       patchFavoriteButtons(root);
       patchFeed(root);
       patchRetweetRows(root);
-      patchAutoTranslation(root, 'en');
+      patchDeviceTranslation(root);
       ctReplyTimesEnhance(root);
       patchExactPostTime(root);
       patchProfileFounder();

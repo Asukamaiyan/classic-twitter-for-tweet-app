@@ -50,6 +50,7 @@ function fixture(language, html, route = '/feed') {
     'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia',
     'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError',
     'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
+    'nativeLocalization26Context', 'native26JapaneseText', 'patchNative26UI',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
     'notificationTextNodes', 'patchNotificationGrammar', 'patchNotificationConnectors',
     'patchNotificationParticles', 'patchNotificationFollowGrammar', 'patchReplyingTo',
@@ -1585,5 +1586,164 @@ test('ja: Tweet 2.5 empty puzzle sentence keeps three adjacent React nodes and n
   assert.deepEqual([...paragraph.childNodes], [prefix, day, suffix]);
   f.dom.window.qaClassic = false; f.run();
   assert.equal(paragraph.textContent, 'TWIRDLE： 指定した日付の問題はありません。新しい問題は米国東部時間の午前0時に公開されます。');
+  f.dom.window.close();
+});
+
+function native26Settings(title, description, content) {
+  return `<main><section class="flex sm:flex flex-col flex-1 min-w-0 self-stretch">
+    <div class="flex items-center gap-3 px-4 py-3 border-b border-tl-app-border sm:hidden"><button type="button" aria-label="Back to settings"></button><span class="text-sm font-extrabold text-tl-app-text" id="mobile-title">${title}</span></div>
+    <div class="p-5"><div class="flex flex-col gap-5"><div><h4 class="text-sm font-extrabold text-tl-app-text" id="heading">${title}</h4><p class="text-tl-app-text-muted mt-0.5 leading-relaxed" id="description">${description}</p></div>${content}</div></div>
+  </section></main>`;
+}
+
+function native26LanguageSettings() {
+  return native26Settings('Language', 'Choose how posts in other languages appear.', `<div class="rounded-2xl border border-tl-app-border">
+    <div class="flex items-start justify-between gap-3 px-4 py-3.5"><div class="flex flex-col min-w-0 flex-1"><span id="auto-label" class="font-bold text-tl-app-text-muted uppercase tracking-wide inline-flex">Auto-translate</span><span id="auto-hint" class="text-xs text-tl-app-text mt-0.5 leading-relaxed">Posts and replies that aren’t in your language show translated, marked “Translated from …”. Tap the translate icon on a post to see the original.</span></div><button type="button" role="switch" aria-checked="false" aria-labelledby="auto-label" aria-describedby="auto-hint" id="native-auto"></button></div>
+    <div><label for="target-lang" class="font-bold uppercase tracking-wide">Translate into</label><select id="target-lang"><option value="">Browser language (English)</option><option value="zh-CN">Chinese (Simplified)</option><option value="zh-TW">Chinese (Traditional)</option><option value="en" selected>English</option></select></div>
+    <div class="flex items-center justify-between gap-3 px-4 py-3.5"><p class="text-tl-app-text-muted leading-relaxed" id="locked">Auto-translate is included with Founder, Fighter and Centurion plans. You can still translate any post with the translate icon.</p><button type="button" id="plans">See plans</button></div></div>
+    <div aria-live="polite"><div role="status" aria-live="polite" id="save">Saved.</div></div>`);
+}
+
+test('ja: Tweet 2.6 language settings retain switch state, dynamic label relationships and target values', () => {
+  const f = fixture('ja', native26LanguageSettings(), '/settings');
+  const toggle = f.document.getElementById('native-auto'), select = f.document.getElementById('target-lang');
+  const options = [...select.options]; let changes = 0; toggle.onclick = () => changes++;
+  for (const classic of [true, false, true]) { f.dom.window.qaClassic = classic; f.run(); }
+  assert.equal(f.text('heading'), '言語'); assert.equal(f.text('mobile-title'), '言語');
+  assert.equal(f.text('description'), '他の言語のツイートの表示方法を設定します。');
+  assert.equal(f.text('auto-label'), '自動翻訳'); assert.match(f.text('auto-hint'), /翻訳アイコン/);
+  assert.match(f.text('locked'), /Founder・Fighter・Centurion/); assert.equal(f.text('plans'), 'プランを見る');
+  assert.equal(f.text('save'), '保存しました。'); assert.equal(toggle.getAttribute('aria-checked'), 'false');
+  assert.equal(toggle.getAttribute('aria-labelledby'), 'auto-label'); assert.equal(toggle.getAttribute('aria-describedby'), 'auto-hint');
+  assert.equal(select.value, 'en'); assert.deepEqual([...select.options], options);
+  assert.deepEqual([...select.options].map(o => o.value), ['', 'zh-CN', 'zh-TW', 'en']);
+  assert.deepEqual([...select.options].map(o => o.textContent), ['ブラウザの言語（英語）', '中国語（簡体字）', '中国語（繁体字）', '英語']);
+  assert.equal(changes, 0); toggle.click(); assert.equal(changes, 1);
+  assert.equal(f.document.querySelector('label[for="target-lang"]').textContent, '翻訳先の言語');
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.6 native language save errors and redraw preserve disabled state without enabling translation', () => {
+  const f = fixture('ja', native26LanguageSettings(), '/settings');
+  const toggle = f.document.getElementById('native-auto'); toggle.disabled = true; f.run();
+  for (const [source, expected] of [['Couldn’t save. Try again.', '保存できませんでした。もう一度お試しください。'], ['Couldn’t load your language settings. Try again later.', '言語設定を読み込めませんでした。しばらくしてから再度お試しください。']]) {
+    f.document.getElementById('save').firstChild.nodeValue = source; f.run(); assert.equal(f.text('save'), expected);
+  }
+  const label = f.document.getElementById('auto-label'); label.id = 'native-rerender-id'; label.firstChild.nodeValue = 'Auto-translate'; toggle.setAttribute('aria-labelledby', label.id);
+  f.run(); assert.equal(label.textContent, '自動翻訳'); assert.equal(toggle.disabled, true); assert.equal(toggle.getAttribute('aria-checked'), 'false');
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.6 notified accounts localizes chrome and split counters while retaining names and actions', () => {
+  const f = fixture('ja', native26Settings('Notified accounts', 'You get a notification when these accounts post. Turn it on from the bell on a profile you follow, for up to 25 accounts.', `<p class="text-xs text-tl-app-text-muted px-1" id="used"></p>
+    <div class="rounded-2xl border"><div class="flex items-center gap-3 px-4 py-3.5"><div class="relative group flex items-center gap-3 min-w-0 flex-1"><button type="button" class="text-xs font-bold truncate" aria-label="View @saved's profile" id="name">Saved.</button><span class="truncate" id="handle">@saved</span></div><button type="button" aria-label="Turn off post notifications for @saved" id="turn-off">Turn off</button></div></div>
+    <p class="text-xs text-tl-app-text-muted px-1 py-6 text-center" id="empty">You haven't turned on post notifications for anyone.</p>
+    <div role="status" aria-live="polite" id="failed">Could not turn off post notifications for @saved. Please try again.</div>`), '/settings');
+  const used = f.document.getElementById('used'); for (const t of ['1', ' of ', '25', ' used']) used.append(f.document.createTextNode(t));
+  const nodes = [...used.childNodes], button = f.document.getElementById('turn-off'); let off = 0; button.onclick = () => off++;
+  f.run(); f.run(); assert.equal(f.text('heading'), '投稿通知するアカウント'); assert.equal(f.text('mobile-title'), '投稿通知するアカウント');
+  assert.match(f.text('description'), /最大25アカウント/); assert.equal(f.text('used'), '1 / 25 アカウントを設定中'); assert.deepEqual([...used.childNodes], nodes);
+  assert.equal(f.text('name'), 'Saved.'); assert.equal(f.text('handle'), '@saved');
+  assert.equal(button.textContent, 'オフにする'); assert.equal(button.getAttribute('aria-label'), '@savedの投稿通知をオフにする'); assert.equal(off, 0);
+  assert.match(f.text('empty'), /オンにしているアカウントはありません/); assert.match(f.text('failed'), /^@savedの投稿通知をオフにできません/);
+  nodes[0].nodeValue = '2'; f.run(); assert.equal(f.text('used'), '2 / 25 アカウントを設定中');
+  button.setAttribute('aria-label', 'Turning off post notifications for @saved'); button.disabled = true; f.run();
+  assert.equal(button.getAttribute('aria-label'), '@savedの投稿通知をオフにしています…'); assert.equal(button.disabled, true);
+  button.disabled = false; button.click(); assert.equal(off, 1); f.dom.window.close();
+});
+
+function native26TranslationControl(mode = 'idle') {
+  return `<span class="inline-flex items-center"><button type="button" class="p-2 rounded-full" data-translate-mode="${mode}" aria-label="Translate post" aria-pressed="${mode === 'active'}" title="${mode === 'active' ? 'Show original' : 'Show translation'}" id="translate"><svg aria-hidden="true"></svg></button><span data-translate-status tabindex="-1" role="status" aria-live="polite" class="sr-only" id="announcement">${mode === 'active' ? 'Showing the translation.' : 'Showing the original post.'}</span></span>`;
+}
+
+test('ja: Tweet 2.6 icon translation states and source metadata preserve native handlers, body and state', () => {
+  const f = fixture('ja', `<article>${native26TranslationControl()}<div class="mt-0.5"><p class="text-tl-app-text-muted" id="source">Translated from English</p></div><p class="tl-user-text whitespace-pre-wrap break-words" id="body">Translate post\nSaved.</p><button class="font-bold truncate" id="author">Translated</button></article>`);
+  const button = f.document.getElementById('translate'), svg = button.firstElementChild; let clicks = 0; button.onclick = () => clicks++;
+  for (const [mode, title, announcement, expected] of [
+    ['idle', 'Show translation', 'This post is already in your language.', 'このツイートは翻訳先と同じ言語です。'],
+    ['busy', 'Translating post…', 'Translating post…', 'ツイートを翻訳中…'],
+    ['active', 'Show original', 'Showing the translation.', '訳文を表示しています。'],
+    ['original', 'Show translation', 'Showing the original post.', '原文を表示しています。']
+  ]) {
+    button.dataset.translateMode = mode; button.setAttribute('aria-label', 'Translate post'); button.title = title;
+    button.setAttribute('aria-pressed', String(mode === 'active')); button.setAttribute('aria-busy', String(mode === 'busy'));
+    f.document.getElementById('announcement').firstChild.nodeValue = announcement; f.run();
+    assert.equal(button.getAttribute('aria-label'), 'ツイートを翻訳'); assert.equal(button.getAttribute('aria-pressed'), String(mode === 'active'));
+    assert.equal(button.getAttribute('aria-busy'), String(mode === 'busy')); assert.equal(button.firstElementChild, svg);
+    assert.equal(f.text('announcement'), expected); assert.equal(clicks, 0);
+  }
+  assert.equal(f.text('source'), '英語から翻訳'); assert.equal(f.text('body'), 'Translate post\nSaved.'); assert.equal(f.text('author'), 'Translated');
+  button.click(); assert.equal(clicks, 1); f.dom.window.close();
+});
+
+test('ja: Tweet 2.6 profile bell on, off and busy retain native identity and subscription state', () => {
+  const f = fixture('ja', `<main><div><div class="pt-3 shrink-0 flex items-center gap-2"><button type="button" data-icon="bell" aria-label="Turn on post notifications" aria-pressed="false" title="Turn on post notifications" class="inline-flex items-center justify-center rounded-full border p-2 min-w-10 min-h-10" id="bell"><svg></svg></button><button>Follow</button></div><p class="text-rose-500 leading-snug" id="error">Could not update post notifications. Try again.</p></div><h2 id="name">Turn on post notifications</h2><p data-testid="profile-bio" id="bio">Turn off post notifications</p></main>`, '/user/alice');
+  const bell = f.document.getElementById('bell'); let clicks = 0; bell.onclick = () => clicks++;
+  for (const on of [false, true, false]) {
+    const text = on ? 'Turn off post notifications' : 'Turn on post notifications'; bell.dataset.icon = on ? 'bell-ring' : 'bell'; bell.setAttribute('aria-pressed', String(on)); bell.setAttribute('aria-label', text); bell.title = text; f.run();
+    assert.equal(bell.getAttribute('aria-label'), `投稿通知を${on ? 'オフ' : 'オン'}にする`); assert.equal(bell.getAttribute('aria-pressed'), String(on)); assert.equal(clicks, 0);
+  }
+  bell.disabled = true; bell.replaceChildren(f.document.createElement('svg')); f.run(); assert.equal(bell.disabled, true);
+  assert.match(f.text('error'), /投稿通知を変更できませんでした/); assert.equal(f.text('name'), 'Turn on post notifications'); assert.equal(f.text('bio'), 'Turn off post notifications');
+  bell.disabled = false; bell.click(); assert.equal(clicks, 1); f.dom.window.close();
+});
+
+function native26PostNotice(actors, time = '2h', details = '') {
+  return `<main><div class="border-b border-tl-app-border"><button type="button" class="w-full flex items-start gap-3 px-4 py-3.5 text-left" aria-expanded="false" id="notice"><div class="mt-0.5 shrink-0"><svg width="28" height="28" class="lucide lucide-bell-ring"></svg></div><div class="flex-1 min-w-0"><div class="flex items-center"></div><p class="text-tl-app-text leading-snug">${actors} <span class="text-tl-app-text-muted" id="posted">posted</span><span class="text-tl-app-text-muted" id="time"> · ${time}</span></p><p class="mt-1 text-tl-app-text-muted leading-snug line-clamp-2" id="preview">posted and Saved.</p></div></button>${details}</div></main>`;
+}
+
+test('ja: Tweet 2.6 grouped post notifications preserve actor names, preview and expansion while translating action/time', () => {
+  const f = fixture('ja', native26PostNotice('<span class="font-extrabold" id="actor">Saved.</span> and <span class="font-extrabold" id="actor2">posted</span>'), '/notifications');
+  // Match React: the separator and relative time are separate text nodes.
+  const time = f.document.getElementById('time'); time.textContent = ''; time.append(' · ', '2h');
+  const button = f.document.getElementById('notice'); let expands = 0; button.onclick = () => expands++;
+  f.run(); f.run(); assert.equal(f.text('actor'), 'Saved.'); assert.equal(f.text('actor2'), 'posted');
+  assert.equal(f.text('posted'), 'さんがツイートしました'); assert.equal(f.text('time'), ' · 2時間前'); assert.equal(f.text('preview'), 'posted and Saved.');
+  assert.equal(button.getAttribute('aria-expanded'), 'false'); assert.equal(expands, 0); button.click(); assert.equal(expands, 1);
+  assert.equal(f.document.querySelector('p.leading-snug').textContent, 'Saved.さんとpostedさんがツイートしました · 2時間前');
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.6 expanded post notification times keep user names and previews intact', () => {
+  const details = `<div class="pl-12 pr-4"><button class="w-full flex items-start gap-3 py-2.5"><div class="flex-1 min-w-0"><p class="text-tl-app-text leading-snug"><span class="font-extrabold" id="detail-name">October 18</span><span class="text-tl-app-text-muted" id="detail-time"></span></p><p class="text-tl-app-text-muted leading-snug line-clamp-2" id="detail-preview">Translated from English</p></div></button></div>`;
+  const f = fixture('ja', native26PostNotice('<span class="font-extrabold">Alice</span>', '1m', details), '/notifications');
+  f.document.getElementById('time').replaceChildren(' · ', '1m'); f.document.getElementById('detail-time').append(' · ', 'Oct 18');
+  f.run(); assert.equal(f.text('detail-time'), ' · 10月18日'); assert.equal(f.text('detail-name'), 'October 18'); assert.equal(f.text('detail-preview'), 'Translated from English');
+  f.dom.window.close();
+});
+
+test('ja: unverified 2.6 lookalikes, user text and arbitrary switches remain unchanged', () => {
+  const f = fixture('ja', `<article><p class="tl-user-text" id="body">Notified accounts Translate post</p><button data-translate-mode="active" aria-pressed="true" aria-label="Translate post" id="unknown"><svg></svg></button></article><main><section><h4>Language</h4><span class="text-xs leading-relaxed" id="hint">Auto-translate</span><button role="switch" aria-checked="true" id="switch"></button></section><p id="notice">posted</p></main>`);
+  f.run(); assert.equal(f.text('body'), 'Notified accounts Translate post'); assert.equal(f.text('hint'), 'Auto-translate');
+  assert.equal(f.document.getElementById('unknown').getAttribute('aria-label'), 'Translate post'); assert.equal(f.document.getElementById('switch').getAttribute('aria-checked'), 'true'); assert.equal(f.text('notice'), 'posted'); f.dom.window.close();
+});
+
+test('ja: Tweet 2.6 inline reply translation source and errors use native mt-1 metadata without touching reply text', () => {
+  const f = fixture('ja', `<article><div class="min-w-0 flex-1"><div class="flex items-center">${native26TranslationControl('active')}</div><p class="tl-user-text whitespace-pre-wrap break-words" id="reply-body">Couldn’t translate. Try again.</p><div class="mt-1"><p class="text-tl-app-text-muted" id="reply-source">Translated from English</p><p class="text-tl-app-text-muted" role="alert" id="reply-error">Couldn’t translate. Try again.</p></div></div></article>`);
+  f.run(); f.run(); assert.equal(f.text('reply-source'), '英語から翻訳'); assert.equal(f.text('reply-error'), '翻訳できませんでした。もう一度お試しください。');
+  assert.equal(f.text('reply-body'), 'Couldn’t translate. Try again.'); assert.equal(f.document.getElementById('translate').getAttribute('aria-pressed'), 'true');
+  f.dom.window.close();
+});
+
+test('ja: Tweet 2.6 translated inline reply keeps its native relative age Japanese without fabricating an exact time', () => {
+  const f = fixture('ja', `<article><div class="min-w-0 flex-1"><div class="flex items-center gap-1 min-w-0"><button class="font-bold truncate hover:underline" id="reply-name">Alice</button><span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted shrink-0" id="reply-age">2h</span><div class="flex items-center shrink-0 ml-auto">${native26TranslationControl('active')}<div><button><svg class="lucide-ellipsis-vertical"></svg></button></div></div></div><div class="mt-1"><p class="text-[0.8125rem] text-tl-app-text-muted">Translated from English</p></div><p class="tl-user-text whitespace-pre-wrap break-words" id="reply-text">翻訳された本文です。</p></div></article>`);
+  f.run(); f.run(); assert.equal(f.text('reply-age'), '2時間前'); assert.equal(f.document.getElementById('reply-age').hasAttribute('title'), false);
+  assert.equal(f.text('reply-name'), 'Alice'); assert.equal(f.text('reply-text'), '翻訳された本文です。'); f.dom.window.close();
+});
+
+test('ja: verified native translation languages use Japanese labels even with English browser names and preserve codes', () => {
+  const f = fixture('ja', native26LanguageSettings() + `<article>${native26TranslationControl('active')}<div class="mt-1"><p class="text-tl-app-text-muted" id="foreign-source">Translated from French</p></div><p class="tl-user-text" id="foreign-body">French / Arabic / German</p></article>`, '/settings');
+  const select = f.document.getElementById('target-lang');
+  const codes = ['ar','bn','de','en','es','fa','fr','he','hi','id','it','ja','ko','ms','nl','pl','pt','ru','sv','sw','th','tl','tr','uk','ur','vi','zh-CN','zh-TW'];
+  const names = ['Arabic','Bengali','German','English','Spanish','Persian','French','Hebrew','Hindi','Indonesian','Italian','Japanese','Korean','Malay','Dutch','Polish','Portuguese','Russian','Swedish','Swahili','Thai','Filipino','Turkish','Ukrainian','Urdu','Vietnamese','Chinese (Simplified)','Chinese (Traditional)'];
+  select.replaceChildren();
+  const browser = f.document.createElement('option'); browser.value = ''; browser.textContent = 'Browser language (German)'; select.append(browser);
+  codes.forEach((code, i) => { const option = f.document.createElement('option'); option.value = code; option.textContent = names[i]; select.append(option); });
+  select.value = 'de'; const originalOptions = [...select.options];
+  f.run(); f.run(); assert.deepEqual([...select.options], originalOptions); assert.equal(select.value, 'de');
+  assert.deepEqual([...select.options].map(o => o.value), ['', ...codes]);
+  assert.equal(browser.textContent, 'ブラウザの言語（ドイツ語）'); assert.equal(select.options[1].textContent, 'アラビア語');
+  assert.equal(select.options[3].textContent, 'ドイツ語'); assert.equal(select.options[28].textContent, '中国語（繁体字）');
+  assert.ok([...select.options].slice(1).every(o => /語/.test(o.textContent))); assert.equal(f.text('foreign-source'), 'フランス語から翻訳'); assert.equal(f.text('foreign-body'), 'French / Arabic / German');
   f.dom.window.close();
 });

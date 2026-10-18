@@ -70,12 +70,50 @@
           ? {isGIF:true} : {})})).filter(asset => asset.url);
   }
 
+  function ctFavoriteTranslationMetadataBlock(node) {
+    return !!node?.matches('div.mt-0\\.5,div.mt-1') && node.children.length > 0 && node.children.length <= 2 &&
+      [...node.children].every(el => el.matches('p.text-tl-app-text-muted') &&
+        el.classList.contains('text-[0.8125rem]') && !el.children.length &&
+        (!el.hasAttribute('role') || el.getAttribute('role') === 'alert'));
+  }
+
+  function ctFavoriteTranslationState(article) {
+    // Tweet 2.6 renders an icon instead of the old text toggle. Restrict the
+    // control to this post: a quoted/nested post's translation is independent.
+    const controls = [...article.querySelectorAll('button')].filter(el => el.closest('article') === article &&
+      !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-ct-owned],[data-ct-local-ui],.tl-user-text,[data-user-content]'));
+    const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')].find(el => el.closest('article') === article &&
+      !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-ct-owned],[data-ct-local-ui]'));
+    const metadata = body?.previousElementSibling;
+    const sourceLine = ctFavoriteTranslationMetadataBlock(metadata) &&
+      [...metadata.children].some(el => !el.hasAttribute('role'));
+    const native = controls.filter(el => el.hasAttribute('data-translate-mode'));
+    if (native.length) {
+      if (native.length !== 1) return 'unknown';
+      const control = native[0], mode = control.getAttribute('data-translate-mode');
+      if (!['idle', 'busy', 'active', 'original'].includes(mode)) return 'unknown';
+      if (mode === 'busy' || control.getAttribute('aria-busy') === 'true') return 'busy';
+      if (mode === 'active') return 'translated';
+      if (control.getAttribute('aria-pressed') === 'true' || sourceLine) return 'unknown';
+      return 'original';
+    }
+    if (sourceLine) return 'unknown';
+    return controls.some(el => [el.textContent, el.getAttribute('title'), el.getAttribute('aria-label')]
+      .some(value => /^(?:Show original|原文を表示)$/i.test((value || '').trim()))) ? 'translated' : 'original';
+  }
+
   function ctFavoriteCandidate(article) {
+    const translation = ctFavoriteTranslationState(article);
+    if (translation === 'busy' || translation === 'unknown') return null;
+    const translated = translation === 'translated';
     const timestamp = [...article.querySelectorAll('span.text-tl-app-text-muted.hover\\:underline[title]')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border') &&
       !!ctTimestampParse(el.title));
+    // A translated reply has no exact ISO time or original body in the DOM.
+    // Check this before a known permalink can bypass the original-text check.
+    if (!timestamp && translated) return null;
     const known = snapshotFavorite(article);
-    if (known) return { ...known, createdAt: timestamp?.title || '', media: ctFavoriteDOMMedia(article) };
+    if (known) return { ...known, translated, createdAt: timestamp?.title || '', media: ctFavoriteDOMMedia(article) };
     const username = validUser(articleAuthor(article));
     const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[aria-live]'));
@@ -85,11 +123,6 @@
       el.parentElement.querySelector('button > svg.lucide-ellipsis-vertical'));
     const parentId = ctFavoriteReplyParent(article);
     if (!username || !body || (!timestamp && !replyTime)) return null;
-    const translated = [...article.querySelectorAll('button')].some(el => el.closest('article') === article &&
-      /^(Show original|原文を表示)$/i.test(el.textContent.trim()));
-    // A translated reply has no exact ISO time or original body in the DOM.
-    // Do not infer its identity from the translated text.
-    if (!timestamp && translated) return null;
     const author = [...article.querySelectorAll('button.truncate.font-bold')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border'));
     return { username, name: author?.textContent || username, text: body.textContent,
@@ -155,12 +188,22 @@
     if (!candidate || !uid || (candidate.createdAt && !ctTimestampParse(candidate.createdAt))) return null;
     const auth = await getAuth();
     if (!auth?.token || auth.uid !== uid) return null;
-    if (candidate.id) return candidate;
-    const posts = candidate.relativeText && !candidate.createdAt ? await ctFavoriteReplyPosts(candidate, auth, deadline) :
+    if (candidate.id && !candidate.translated) return candidate;
+    let posts;
+    if (candidate.id) {
+      // A permalink establishes the post ID, not that the visible paragraph is
+      // its original. Read that exact post before storing a translated card.
+      if (!/^[A-Za-z0-9_-]{1,160}$/.test(candidate.id) || !candidate.createdAt ||
+          typeof candidate.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(candidate.username) || Date.now() >= deadline) return null;
+      const json = await requestJSON(API_ORIGIN + '/api/posts/' + encodeURIComponent(candidate.id),
+        { Authorization: `Bearer ${auth.token}` });
+      posts = json && json.success !== false && !json.error && json.post ? [json.post] : null;
+    } else posts = candidate.relativeText && !candidate.createdAt ? await ctFavoriteReplyPosts(candidate, auth, deadline) :
       await ctFavoriteAuthorPosts(candidate.username, auth, deadline);
     const current = await getAuth();
     if (current?.uid !== uid || !Array.isArray(posts)) return null;
     const matches = posts.filter(post => typeof post.id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(post.id) &&
+      (!candidate.id || post.id === candidate.id) &&
       !post.isDeleted && !post.originalPostId && !post.isRepost &&
       !['MUTED','BLOCKED'].includes(post.status) &&
       post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&

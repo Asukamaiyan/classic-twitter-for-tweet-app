@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const acorn = require('acorn');
 const { JSDOM } = require('jsdom');
+const { translationPost } = require('./helpers/native-translation.cjs');
 
 const translation = fs.readFileSync(path.join(__dirname, '../src/translation.js'), 'utf8');
 const runtime = fs.readFileSync(path.join(__dirname, '../src/runtime.js'), 'utf8');
@@ -14,7 +15,7 @@ const browserNotifications = fs.readFileSync(path.join(__dirname, '../src/browse
 const network = fs.readFileSync(path.join(__dirname, '../src/network.js'), 'utf8');
 const linkPreviews = fs.readFileSync(path.join(__dirname, '../src/link-preview.js'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../classic-twitter-ja.user.js'), 'utf8');
-const helperNames = new Set(['ctTranslationButtonText', 'ctTranslationControls', 'ctDeclaredLanguage', 'ctLikelyLanguage']);
+const helperNames = new Set(['ctTranslationControls']);
 const helpers = [];
 const shippedFunctions = new Map();
 const shippedDeclarations = new Map();
@@ -50,6 +51,7 @@ const localizationNames = [
   'nativeTimestampJapaneseText', 'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
     'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
   'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
+  'nativeLocalization26Context', 'native26JapaneseText', 'patchNative26UI',
   'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText', 'nativeMediaUploadJapaneseText',
   'nativeLocalizationMediaUpload', 'nativeLocalizationGIFMedia', 'nativeLocalizationBlockMenu',
   'nativeLocalizationBlockDialog', 'nativeLocalizationBlockProfile', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError'
@@ -64,9 +66,7 @@ const localizationSource = script.slice(jpMapStart, jpMapEnd) + localizationName
   return shippedFunctions.get(name);
 }).join('\n');
 
-function post(id, text = `This is a post in English. ${id}`,  language = 'en', label = 'Show translation') {
-  return `<article id="${id}"><p class="whitespace-pre-wrap" lang="${language}">${text}</p><p aria-live="polite"><button id="${id}-translate">${label}</button></p></article>`;
-}
+function post(id, text) { return translationPost(id, text); }
 
 function harness(t, html = '', options = {}) {
   const dom = new JSDOM(`<!doctype html><body>${html}</body>`, {
@@ -142,9 +142,9 @@ function harness(t, html = '', options = {}) {
     ${options.navigation ? navigation : ''}
     ${options.localization && !options.navigation ? localizationNavigationSource : ''}
     ${options.localization ? localizationSource : ''}
-    window.qa = { autoTranslationEnabled, patchAutoTranslation, ctOwnTranslationText,
+    window.qa = { deviceTranslationEnabled, patchDeviceTranslation, ctOwnTranslationText,
       ctRememberTranslationChoice, patchFavoriteButtons, articleId, start, ctRunScan, ctScheduleScan,
-      ctPrepareFavoritePresentation, pending: () => ctAutoPending.size,
+      ctPrepareFavoritePresentation,
       timestampPatch: typeof ctTimestampPatchExactPostTime === 'function' ? ctTimestampPatchExactPostTime : null,
       patchClassicMotion: typeof patchClassicMotion === 'function' ? patchClassicMotion : null,
       patchNavigation: typeof patchNavigation === 'function' ? patchNavigation : null,
@@ -187,24 +187,12 @@ function harness(t, html = '', options = {}) {
 
 function countClicks(f, id, complete = true) {
   let count = 0;
-  f.button(id).addEventListener('click', () => { count += 1; if (complete) f.button(id).textContent = 'Show original'; });
+  f.button(id).addEventListener('click', () => { count += 1; if (complete) { f.button(id).dataset.translateMode = 'active'; f.button(id).setAttribute('aria-pressed','true'); f.button(id).title='Show original'; } });
   return () => count;
 }
 
 for (const locale of ['ja', 'en']) {
-  test(`${locale}: auto translation defaults off even when the legacy preference was enabled`, async t => {
-    const f = harness(t, post('one'), { locale, values: { autoTranslate: true } });
-    const count = countClicks(f, 'one');
-    const button = f.button('one');
-    const before = button.outerHTML;
-    assert.equal(f.qa.autoTranslationEnabled(), false);
-    f.qa.patchAutoTranslation();
-    await f.advance(10000);
-    assert.equal(count(), 0);
-    assert.equal(button.outerHTML, before, 'the manual translator remains visible and unchanged');
-    button.click();
-    assert.equal(count(), 1, 'manual translation remains usable');
-  });
+
 
   test(`${locale}: native favorite classes remain authoritative after repeated label changes`, t => {
     const f = harness(t, '<button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 1,234 likes"></button>', { locale });
@@ -230,230 +218,25 @@ for (const locale of ['ja', 'en']) {
   });
 }
 
-test('opted-in translation is throttled, deduplicated and never hides manual controls', async t => {
-  const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
-  const one = countClicks(f, 'one'); const two = countClicks(f, 'two');
-  f.qa.patchAutoTranslation(); f.qa.patchAutoTranslation();
-  assert.equal(f.qa.pending(), 2);
-  await f.advance();
-  assert.equal(one(), 1); assert.equal(two(), 0);
-  await f.advance(1499); assert.equal(two(), 0);
-  await f.advance(1); assert.equal(two(), 1);
-  f.qa.patchAutoTranslation(); await f.advance(2000);
-  assert.equal(one(), 1); assert.equal(two(), 1);
-  assert.equal(f.button('one').style.display, '');
-  assert.equal(f.button('two').hidden, false);
-});
 
-test('native auto translation waits for initial auth, then preserves the resolved original link card', async t => {
-  const destination = 'https://example.org/original';
-  let idbRequest, opens = 0, intersectionObserver;
-  const requests = [];
-  const f = harness(t, `<main><article id="one"><div class="flex-1 min-w-0">
-    <div class="flex items-start justify-between gap-2"><div class="min-w-0 flex-1">
-      <div class="flex items-center gap-1 min-w-0 flex-wrap"><button class="font-bold truncate">Alice</button>
-        <span class="text-tl-app-text-muted">·</span><span class="text-tl-app-text-muted hover:underline" title="2026-10-10T00:00:00Z">1m</span></div>
-      <p aria-live="polite"><button id="one-translate">Show translation</button></p>
-    </div></div>
-    <p class="tl-user-text whitespace-pre-wrap break-words" lang="en">This is an original post. <a href="${destination}" target="_blank" rel="noopener noreferrer">${destination}</a></p>
-  </div></article></main>`, {
-    network: true, timestamps: true, linkPreviews: true, values: { 'autoTranslate.optInV2': true },
-    configureNetwork(window) {
-      window.localStorage.setItem('firebase:authUser:public_fixture_key:[DEFAULT]', JSON.stringify({
-        uid: 'fixture-viewer', apiKey: 'public_fixture_key',
-        stsTokenManager: { accessToken: 'fixture-token.'.repeat(6), expirationTime: 1000000 }
-      }));
-      window.IDBKeyRange = { bound() { return {}; } };
-      window.indexedDB = { open() { opens++; idbRequest = {}; return idbRequest; } };
-      window.IntersectionObserver = class {
-        constructor(callback) { this.callback = callback; this.targets = new Set(); intersectionObserver = this; }
-        observe(target) { this.targets.add(target); }
-        unobserve(target) { this.targets.delete(target); }
-        disconnect() { this.targets.clear(); }
-      };
-      window.GM_xmlhttpRequest = details => {
-        const call = { details, aborts: 0 }; requests.push(call);
-        return { abort() { call.aborts++; details.onabort({ status: 0 }); details.onloadend({ status: 0 }); } };
-      };
-    },
-    scan(root, qa) { qa.patchAutoTranslation(root); qa.linkPreviewsPatch(root); }
-  });
-  const body = f.document.querySelector('p.tl-user-text');
-  const originalText = body.textContent;
-  const show = () => intersectionObserver.callback([...intersectionObserver.targets]
-    .map(target => ({ target, isIntersecting: true, intersectionRatio: 1 })));
-  let clicks = 0, resolvedCard;
-  f.button('one').addEventListener('click', () => {
-    clicks++;
-    assert.equal(f.qa.networkState.authSettled, true);
-    assert.equal(f.qa.networkState.authUID, 'fixture-viewer');
-    assert.equal(f.qa.linkPreviewState.originals.get(body)?.context, '/feed\nfixture-viewer',
-      'the resolved-account scan captures original URL evidence before the zero-delay native click');
-    resolvedCard = f.document.querySelector('.ct-link-preview');
-    assert.ok(resolvedCard);
-    body.innerHTML = `翻訳された本文 <a href="${destination}" target="_blank" rel="noopener noreferrer">${destination}</a>`;
-    f.button('one').textContent = 'Show original';
-  });
-  f.qa.start(); show();
-  assert.equal(f.qa.networkState.authSettled, false);
-  await f.advance(100);
-  f.qa.patchAutoTranslation(); await f.flush();
-  assert.equal(opens, 1, 'all scans share the existing bounded persistence lookup');
-  assert.equal(clicks, 0);
-  assert.equal(f.qa.pending(), 0);
-  assert.equal(body.textContent, originalText);
-  assert.equal(requests.length, 1);
-  idbRequest.onerror();
-  await f.flush(); await f.flush(); await f.flush();
-  assert.equal(f.qa.networkState.authSettled, true);
-  assert.equal(clicks, 0, 'settlement schedules a scan rather than clicking from its promise');
-  await f.advance(100);
-  assert.equal(clicks, 1);
-  assert.equal(requests[0].aborts, 1, 'the initial unknown-account record is discarded');
-  assert.equal(f.document.querySelector('.ct-link-preview'), resolvedCard);
-  show();
-  assert.equal(requests.length, 2);
-  requests[1].details.onload({ status: 200, readyState: 4, finalUrl: destination,
-    responseHeaders: 'Content-Type: text/html', responseText: '<html><head><title>Original link</title></head></html>' });
-  await f.flush(); await f.advance(100);
-  assert.equal(f.document.querySelector('.ct-link-preview'), resolvedCard);
-  assert.equal(resolvedCard.querySelector('.ct-link-preview-title').textContent, 'Original link');
-  assert.equal(requests[1].aborts, 0);
-  assert.equal(requests.length, 2);
-});
 
-test('initial auth without a user, after read failure or at the deadline still resumes native automatic translation', async t => {
-  for (const mode of ['missing-user', 'read-failure', 'deadline']) {
-    const f = harness(t, post('one'), {
-      network: true, values: { 'autoTranslate.optInV2': true },
-      configureNetwork(window) {
-        if (mode === 'deadline') {
-          window.IDBKeyRange = { bound() { return {}; } };
-          window.indexedDB = { open() { return {}; } };
-        }
-      },
-      scan(root, qa) { qa.patchAutoTranslation(root); }
-    });
-    if (mode === 'read-failure') f.window.eval('ctReadIDBAuth = () => Promise.reject(new Error("fixture read failure"));');
-    const count = countClicks(f, 'one');
-    f.qa.start();
-    const pending = f.qa.getAuth();
-    assert.equal(count(), 0);
-    if (mode === 'deadline') {
-      await f.advance(2499);
-      assert.equal(count(), 0);
-      assert.equal(f.qa.networkState.authSettled, false);
-      await f.advance(1);
-    }
-    await pending;
-    assert.equal(f.qa.networkState.authSettled, true, mode);
-    assert.equal(f.qa.networkState.authUID, null, mode);
-    await f.advance(100);
-    assert.equal(count(), 1, mode);
-    await f.advance(2000);
-    assert.equal(count(), 1, 'null identity settlement does not loop or repeat automatic clicks');
-  }
-});
 
-test('initial auth lookup is not started by disabled, device, hidden or inactive auto translation', async t => {
-  for (const mode of ['off', 'device', 'hidden', 'inactive']) {
-    let opens = 0;
-    const f = harness(t, post('one'), {
-      network: true,
-      values: { 'autoTranslate.optInV2': mode !== 'off', 'autoTranslate.engine': mode === 'device' ? 'device' : 'native' },
-      configureNetwork(window) {
-        window.IDBKeyRange = { bound() { return {}; } };
-        window.indexedDB = { open() { opens++; return {}; } };
-      },
-      scan(root, qa) { if (mode !== 'inactive') qa.patchAutoTranslation(root); }
-    });
-    const count = countClicks(f, 'one');
-    if (mode === 'hidden') f.hidden(true);
-    f.qa.start();
-    if (mode === 'inactive') f.window.dispatchEvent(new f.window.Event('pagehide'));
-    f.qa.patchAutoTranslation(); await f.advance();
-    assert.equal(opens, 0, mode);
-    assert.equal(f.qa.networkState.authSettled, false, mode);
-    assert.equal(count(), 0, mode);
-  }
-});
 
-test('Show original is preserved and manual choice cancels delayed and replacement controls', async t => {
-  const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
-  const one = countClicks(f, 'one'); const two = countClicks(f, 'two');
-  f.qa.start();
-  f.qa.patchAutoTranslation();
-  await f.advance(); assert.equal(one(), 1);
-  f.button('one').textContent = 'Show original';
-  f.button('one').click();
-  f.button('one').textContent = 'Show translation';
-  f.button('two').click();
-  f.button('two').replaceWith(f.button('two').cloneNode(true));
-  const replacement = countClicks(f, 'two');
-  f.qa.patchAutoTranslation();
-  await f.advance(5000);
-  assert.equal(one(), 2, 'one automatic click and one explicit user click');
-  assert.equal(two(), 1, 'the queued second automatic click was canceled');
-  assert.equal(replacement(), 0, 'manual choice survives React replacing the button');
-  assert.equal(f.qa.pending(), 0);
-});
 
-test('already translated posts retain Show original without an automatic click', async t => {
-  const f = harness(t, post('one', 'This is translated text.', 'en', 'Show original'), { values: { 'autoTranslate.optInV2': true } });
-  const count = countClicks(f, 'one');
-  const before = f.button('one').outerHTML;
-  f.qa.patchAutoTranslation(); await f.advance(2000);
-  assert.equal(count(), 0); assert.equal(f.button('one').outerHTML, before);
-});
 
-test('language detection uses the own post body and native browser target language', async t => {
-  const f = harness(t, `
-    <article id="english"><div aria-label="Quoted post by Alice"><p class="whitespace-pre-wrap" lang="ja">こんにちは</p></div>
-      <p class="whitespace-pre-wrap" lang="en">This is English.</p><p aria-live="polite"><button id="english-translate">Show translation</button></p></article>
-    <article id="japanese"><blockquote><p class="whitespace-pre-wrap" lang="en">This is a quote.</p></blockquote>
-      <p class="whitespace-pre-wrap" lang="ja">こんにちは世界</p><p aria-live="polite"><button id="japanese-translate">Show translation</button></p></article>
-    <article><p class="whitespace-pre-wrap" lang="ja">これは親の本文です</p><div data-testid="quote-tweet">
-      <p class="whitespace-pre-wrap" lang="en">This is a quote.</p><p aria-live="polite"><button id="quote-translate">Show translation</button></p></div></article>
-  `, { browserLanguage: 'en-US', values: { 'autoTranslate.optInV2': true } });
-  const english = countClicks(f, 'english'); const japanese = countClicks(f, 'japanese'); const quote = countClicks(f, 'quote');
-  f.qa.patchAutoTranslation(); await f.advance(5000);
-  assert.equal(english(), 0); assert.equal(japanese(), 1); assert.equal(quote(), 0);
-});
 
-test('disable, backgrounding and leaving the page cancel queued translation', async t => {
-  for (const mode of ['disable', 'hidden', 'pagehide']) {
-    const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
-    const count = countClicks(f, 'two');
-    f.qa.start(); f.qa.patchAutoTranslation(); await f.advance();
-    if (mode === 'disable') f.settings.setAutoTranslate(false);
-    if (mode === 'hidden') f.hidden(true);
-    if (mode === 'pagehide') f.window.dispatchEvent(new f.window.Event('pagehide'));
-    assert.equal(f.qa.pending(), 0, mode);
-    await f.advance(5000); assert.equal(count(), 0, mode);
-  }
-});
 
-test('queued translation rechecks attachment, source text, disabled state and button action', async t => {
-  for (const mode of ['detached', 'text-changed', 'disabled', 'busy', 'show-original']) {
-    const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
-    const count = countClicks(f, 'two');
-    f.qa.patchAutoTranslation(); await f.advance();
-    const button = f.button('two');
-    if (mode === 'detached') button.remove();
-    if (mode === 'text-changed') f.document.querySelector('#two p').textContent = 'Changed while waiting.';
-    if (mode === 'disabled') button.setAttribute('aria-disabled', 'true');
-    if (mode === 'busy') button.setAttribute('aria-busy', 'true');
-    if (mode === 'show-original') button.textContent = 'Show original';
-    await f.advance(2000); assert.equal(count(), 0, mode);
-  }
-});
 
-test('storage failure does not silently enable automatic translation', t => {
-  const f = harness(t, post('one'), { storageFailure: true });
-  f.qa.start();
-  assert.throws(() => f.settings.setAutoTranslate(true), /Storage unavailable/);
-  assert.equal(f.qa.autoTranslationEnabled(), false);
-});
+
+
+
+
+
+
+
+
+
+
 
 test('own permalink wins over quote, nested article, content link and foreign URLs', t => {
   const f = harness(t, `<article id="parent">
@@ -546,17 +329,7 @@ test('URL preview lifecycle cancels on relevant storage, background and pagehide
   assert.equal(f.intervals.size, 0);
 });
 
-test('busy translation controls are reconsidered when native loading finishes', async t => {
-  const f = harness(t, post('one'), {
-    values: { 'autoTranslate.optInV2': true },
-    scan(document, qa) { qa.patchAutoTranslation(document); }
-  });
-  const count = countClicks(f, 'one');
-  f.button('one').setAttribute('aria-busy', 'true');
-  f.qa.start(); await f.advance(1000); assert.equal(count(), 0);
-  f.button('one').removeAttribute('aria-busy');
-  await f.advance(100); assert.equal(count(), 1);
-});
+
 
 test('pagehide stops observation and persisted pageshow restores it without notification polling', async t => {
   const f = harness(t, '<button>Home</button>');
@@ -574,79 +347,19 @@ test('pagehide stops observation and persisted pageshow restores it without noti
   assert.equal(f.intervals.size, 0, 'backgrounding and BFCache restores never restart retired reply polling');
 });
 
-test('native translation waits for completion before sending the next request', async t => {
-  const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
-  const one = countClicks(f, 'one', false), two = countClicks(f, 'two');
-  f.qa.patchAutoTranslation(); await f.advance();
-  f.button('one').setAttribute('aria-busy', 'true');
-  await f.advance(5000);
-  assert.equal(one(), 1); assert.equal(two(), 0);
-  f.button('one').removeAttribute('aria-busy'); f.button('one').textContent = 'Show original';
-  await f.advance(249); assert.equal(two(), 0);
-  await f.advance(1501); assert.equal(two(), 1);
-});
 
-test('native error cancels queued requests, survives backgrounding and permits manual retry', async t => {
-  const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
-  const one = countClicks(f, 'one', false), two = countClicks(f, 'two');
-  f.qa.start(); f.qa.patchAutoTranslation(); await f.advance();
-  f.hidden(true);
-  const alert = f.document.createElement('p'); alert.setAttribute('role', 'alert');
-  alert.textContent = '翻訳できませんでした。もう一度お試しください。';
-  f.button('one').parentElement.parentElement.append(alert);
-  await f.advance(250); f.hidden(false);
-  assert.equal(f.qa.pending(), 0); assert.match(f.settings.getTranslationStatus(), /5分/);
-  f.qa.patchAutoTranslation(); await f.advance(2000); assert.equal(two(), 0);
-  f.button('one').click(); assert.equal(one(), 2, 'manual control was not disabled or hidden');
-  alert.remove();
-  await f.advance(300000); f.qa.patchAutoTranslation(); await f.advance();
-  assert.equal(two(), 1, 'other posts can resume after cooldown');
-});
 
-test('native timeout pauses the queue instead of flooding more requests', async t => {
-  const f = harness(t, post('one') + post('two'), { values: { 'autoTranslate.optInV2': true } });
-  const one = countClicks(f, 'one', false), two = countClicks(f, 'two');
-  f.qa.start(); f.qa.patchAutoTranslation(); await f.advance(15000); await f.advance(15000);
-  assert.equal(one(), 1); assert.equal(two(), 0);
-  assert.match(f.settings.getTranslationStatus(), /5分/);
-});
 
-test('native attempts deduplicate React replacement by own permalink and original body', async t => {
-  const html = post('one').replace('<article id="one">', '<article id="one"><a href="/post/real-id"><time>now</time></a>');
-  const f = harness(t, html, { values: { 'autoTranslate.optInV2': true } });
-  const one = countClicks(f, 'one'); f.qa.patchAutoTranslation(); await f.advance(); assert.equal(one(), 1);
-  f.document.querySelector('article').outerHTML = html;
-  const replacement = countClicks(f, 'one'); f.qa.patchAutoTranslation(); await f.advance(2000);
-  assert.equal(replacement(), 0);
-  f.document.querySelector('.whitespace-pre-wrap').textContent = 'This post has been edited.';
-  f.qa.patchAutoTranslation(); await f.advance(); assert.equal(replacement(), 1);
-});
 
-test('feed cards without permalinks deduplicate exact text across remounts', async t => {
-  const f = harness(t, post('one'), { values: { 'autoTranslate.optInV2': true } });
-  const one = countClicks(f, 'one'); f.qa.patchAutoTranslation(); await f.advance(); assert.equal(one(), 1);
-  f.document.querySelector('article').outerHTML = post('one');
-  const replacement = countClicks(f, 'one'); f.qa.patchAutoTranslation(); await f.advance(2000);
-  assert.equal(replacement(), 0);
-  f.button('one').click(); assert.equal(replacement(), 1, 'dedupe does not disable manual translation');
-});
 
-test('native same-language response completes even when a fast busy state was not observed', async t => {
-  const f = harness(t, post('one') + post('two', 'This is another post.'), { values: { 'autoTranslate.optInV2': true } });
-  f.button('one').addEventListener('click', () => f.button('one').setAttribute('aria-disabled', 'true'));
-  const two = countClicks(f, 'two'); f.qa.patchAutoTranslation(); await f.advance(1500);
-  assert.equal(two(), 1);
-});
 
-test('unmounting an in-flight native translation pauses new requests instead of assuming completion', async t => {
-  const f = harness(t, post('one'), { values: { 'autoTranslate.optInV2': true } });
-  f.qa.start(); const one = countClicks(f, 'one', false);
-  f.qa.patchAutoTranslation(); await f.advance(); assert.equal(one(), 1);
-  f.document.querySelector('article').remove();
-  f.document.body.insertAdjacentHTML('beforeend', post('two'));
-  const two = countClicks(f, 'two'); f.qa.patchAutoTranslation(); await f.advance(2000);
-  assert.equal(two(), 0); assert.match(f.settings.getTranslationStatus(), /完了を確認できない/);
-});
+
+
+
+
+
+
+
 
 test('favorite vector preserves the native icon, click handler and count on React updates', t => {
   const f = harness(t, '<button data-testid="tweet-like-action" class="text-tl-app-text-muted" aria-label="Like, 14 likes"><svg class="lucide-heart"><path></path></svg></button>');
@@ -786,7 +499,8 @@ test('classic appearance defaults on and persists independently of existing sett
   assert.equal(f.settings.getClassicAppearance(), true);
   f.settings.setClassicAppearance(false);
   assert.equal(f.settings.getClassicAppearance(), false);
-  assert.equal(f.qa.autoTranslationEnabled(), true);
+  assert.equal(f.qa.deviceTranslationEnabled(), false);
+  assert.equal(f.values.get('autoTranslate.optInV2'), true, 'classic toggles preserve retired native preferences');
   f.settings.setClassicAppearance(true);
   assert.equal(f.settings.getClassicAppearance(), true);
 });
@@ -1387,4 +1101,79 @@ test('post content, draft suggestions and local panels cannot promote their sele
   await f.advance(1000); assert.equal(f.stats.scans, 3);
   assert.equal(f.document.getElementById('content-tab').textContent, 'Following');
   assert.equal(f.document.querySelector('textarea').value, 'Following draft');
+});
+
+function configureDeviceModels(window) {
+  const stats = { creates:0, translates:0 };
+  window.deviceStats = stats;
+  window.LanguageDetector = { availability:async () => 'available', create:async () => { stats.creates++;return { detect:async () => [{detectedLanguage:'en',confidence:0.99}] }; } };
+  window.Translator = { availability:async () => 'available', create:async () => { stats.creates++;return { translate:async () => {stats.translates++;return '手動の端末内訳文';} }; } };
+}
+
+for (const locale of ['ja','en']) {
+  test(`${locale}: every retired native opt-in stays inert, with native controls and stored preferences preserved`,async t=>{
+    const values={autoTranslate:true,'autoTranslate.optInV2':true,'autoTranslate.engine':'native','unrelated-archive':[{id:'old'}]};
+    const f=harness(t,post('one'),{locale,values,network:true,configureNetwork:configureDeviceModels});
+    let opens=0;f.window.indexedDB={open(){opens++;throw new Error('Retired translation must not request auth');}};
+    const count=countClicks(f,'one',false),button=f.button('one'),before=button.outerHTML;
+    f.qa.start();for(let i=0;i<3;i++){f.qa.patchDeviceTranslation();await f.advance(5000);}
+    assert.equal(count(),0);assert.equal(opens,0);assert.equal(f.window.deviceStats.creates,0);assert.equal(f.window.deviceStats.translates,0);
+    assert.equal(f.qa.deviceTranslationEnabled(),false);assert.equal(button.outerHTML,before);
+    assert.equal(f.document.querySelector('.ct-device-translation'),null);
+    assert.equal('setAutoTranslate' in f.settings,false);assert.equal('setTranslationEngine' in f.settings,false);
+    for(const[key,value]of Object.entries(values))assert.deepEqual(f.values.get(key),value);
+    button.click();assert.equal(count(),1,'the native manual control still belongs to Tweet');
+  });
+}
+
+test('former explicit device selection preserves only a manual button and never starts translation after prepare or scans',async t=>{
+  const f=harness(t,post('one'),{values:{'autoTranslate.engine':'device','autoTranslate.optInV2':true},configureNetwork:configureDeviceModels});
+  const count=countClicks(f,'one');f.qa.start();f.qa.patchDeviceTranslation();await f.advance();
+  assert.equal(f.settings.getDeviceTranslation(),true);assert.ok(f.document.querySelector('.ct-device-translation button'));
+  assert.equal(f.window.deviceStats.creates,0);assert.equal(await f.settings.prepareDeviceTranslation('en'),true);
+  for(let i=0;i<3;i++){f.qa.patchDeviceTranslation();await f.advance(1000);}
+  assert.equal(f.window.deviceStats.translates,0);assert.equal(count(),0);
+  f.document.querySelector('.ct-device-translation button').click();await f.flush();await f.flush();
+  assert.equal(f.window.deviceStats.translates,1);assert.equal(count(),0);
+});
+
+test('manual device toggle uses its own key and preserves legacy options, Favorites and unrelated settings',t=>{
+  const original={'autoTranslate.engine':'device','autoTranslate.optInV2':true,'autoTranslate.deviceEnabledV3':false,'favorites:uid:a':[{id:'old'}]};
+  const f=harness(t,post('one'),{values:original,configureNetwork:configureDeviceModels});f.qa.start();
+  assert.equal(f.settings.getDeviceTranslation(),false);f.settings.setDeviceTranslation(true);
+  assert.equal(f.settings.getDeviceTranslation(),true);assert.equal(f.values.get('autoTranslate.deviceEnabledV3'),true);
+  for(const key of ['autoTranslate.engine','autoTranslate.optInV2','favorites:uid:a'])assert.deepEqual(f.values.get(key),original[key]);
+  f.settings.setDeviceTranslation(false);assert.equal(f.settings.getDeviceTranslation(),false);
+});
+
+test('failed device preference writes leave manual translation disabled',t=>{
+  const f=harness(t,post('one'),{storageFailure:true,configureNetwork:configureDeviceModels});f.qa.start();
+  assert.throws(()=>f.settings.setDeviceTranslation(true),/Storage unavailable/);assert.equal(f.settings.getDeviceTranslation(),false);
+});
+
+test('verified 2.6 idle controls expose only their own original body; unknown and translated shapes fail closed',t=>{
+  const f=harness(t,post('one')+`<blockquote>${post('quote')}</blockquote>`);
+  assert.equal(f.qa.ctOwnTranslationText(f.button('one')).text,'This is a post in English.');
+  assert.equal(f.qa.ctOwnTranslationText(f.button('quote')),null);
+  for(const mode of ['busy','active','original','other']){f.button('one').dataset.translateMode=mode;assert.equal(f.qa.ctOwnTranslationText(f.button('one')),null,mode);}
+  f.button('one').dataset.translateMode='idle';f.document.querySelector('#one [data-translate-status]').remove();
+  assert.equal(f.qa.ctOwnTranslationText(f.button('one')),null);
+});
+
+test('native data-mode changes trigger one reconciliation that clears an already displayed device result',async t=>{
+  const f=harness(t,post('one'),{values:{'autoTranslate.deviceEnabledV3':true},configureNetwork:configureDeviceModels,
+    scan(root,qa){qa.patchDeviceTranslation(root);}});
+  f.qa.start();await f.settings.prepareDeviceTranslation('en');await f.advance(100);
+  f.document.querySelector('.ct-device-translation button').click();for(let i=0;i<5;i++)await f.flush();
+  assert.equal(f.document.querySelector('.ct-device-translation p').hidden,false);
+  const before=f.stats.scans;f.button('one').dataset.translateMode='active';await f.advance(100);
+  assert.equal(f.stats.scans,before+1);assert.equal(f.document.querySelector('.ct-device-translation'),null);
+  await f.advance(500);assert.equal(f.stats.scans,before+1,'owned cleanup cannot cause idle scan loops');
+});
+
+test('a native manual choice survives React control replacement without recreating a device output',async t=>{
+  const f=harness(t,post('one'),{values:{'autoTranslate.deviceEnabledV3':true},configureNetwork:configureDeviceModels});
+  f.qa.start();f.qa.patchDeviceTranslation();const native=f.button('one');native.click();
+  native.replaceWith(native.cloneNode(true));f.qa.patchDeviceTranslation();await f.advance(1000);
+  assert.equal(f.document.querySelector('.ct-device-translation'),null);assert.equal(f.window.deviceStats.translates,0);
 });

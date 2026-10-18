@@ -18,6 +18,15 @@ function translateNative(h, body = h.doc.querySelector('article p.tl-user-text')
   body.innerHTML = `翻訳された文章 <a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
   body.previousElementSibling.querySelector('.translation-toggle').textContent = 'Show original';
 }
+function native26Control(mode = 'idle') {
+  return `<span class="inline-flex items-center"><button type="button" data-translate-mode="${mode}" aria-label="Translate post" title="${mode === 'active' ? 'Show original' : mode === 'original' ? 'Show translation' : 'Translate post'}" aria-pressed="${mode === 'active'}" ${mode === 'busy' ? 'aria-busy="true" aria-disabled="true"' : ''}><svg aria-hidden="true"></svg></button><span data-translate-status role="status" aria-live="polite" class="sr-only"></span></span>`;
+}
+function native26(url = destination, mode = 'idle') {
+  return timestampedNative(url).replace('<p aria-live="polite"><button class="translation-toggle">Show translation</button></p>', native26Control(mode));
+}
+function status26(body, source = true) {
+  body.insertAdjacentHTML('beforebegin', `<div class="mt-0.5"><p class="text-[0.8125rem] text-tl-app-text-muted" ${source ? '' : 'role="alert"'}>${source ? 'Translated from English' : 'Couldn’t translate. Try again.'}</p></div>`);
+}
 function harness(t, options = {}) {
   const dom = new JSDOM(`<!doctype html><head></head><body><main>${options.html || native()}</main></body>`, {
     url: 'https://app.tweet.app/feed', runScripts: 'outside-only', pretendToBeVisual: true
@@ -148,6 +157,53 @@ test('verified original URL cards survive native translation during metadata and
   await flush(); assert.ok(card.querySelector('img')); assert.equal(card.querySelector('.ct-link-preview-title').textContent, 'Real title & details');
   const image = card.querySelector('img'); h.qa.patch(); assert.equal(card.querySelector('img'), image);
   assert.equal(card.querySelector('a').href, destination); assert.equal(body.textContent.includes('翻訳された文章'), true);
+});
+
+test('Tweet 2.6 icon translation states never establish an unobserved original URL', t => {
+  for (const mode of ['active', 'busy', 'future-state', '', 'idle', 'original']) {
+    const h = harness(t, { html: native26(destination, mode), timestamps: true });
+    const body = h.doc.querySelector('p.tl-user-text');
+    if (mode === 'active') { body.firstChild.nodeValue = '翻訳された文章 '; status26(body); }
+    h.qa.patch();
+    assert.equal(!!h.doc.querySelector('.ct-link-preview'), ['idle', 'original'].includes(mode), mode);
+    assert.equal(h.calls.length, 0, mode);
+  }
+  const missing = harness(t, { html: native26(), timestamps: true });
+  const body = missing.doc.querySelector('p.tl-user-text'); status26(body);
+  missing.doc.querySelector('button[data-translate-mode]').remove(); missing.qa.patch();
+  assert.equal(missing.doc.querySelector('.ct-link-preview'), null);
+  const contradictory = harness(t, { html: native26(), timestamps: true });
+  contradictory.doc.querySelector('[data-translate-mode]').setAttribute('aria-pressed', 'true'); contradictory.qa.patch();
+  assert.equal(contradictory.doc.querySelector('.ct-link-preview'), null);
+});
+
+test('Tweet 2.6 native source status preserves only the already verified original card through busy and active states', async t => {
+  const h = harness(t, { html: native26(), timestamps: true }); await h.ready();
+  const body = h.doc.querySelector('p.tl-user-text'), originalText = body.textContent;
+  const header = body.previousElementSibling, control = header.querySelector('[data-translate-mode]');
+  const card = h.doc.querySelector('.ct-link-preview');
+  control.setAttribute('data-translate-mode', 'busy'); control.setAttribute('aria-busy', 'true');
+  h.qa.patch(body); assert.equal(h.doc.querySelector('.ct-link-preview'), card);
+  body.firstChild.nodeValue = '翻訳された文章 '; control.setAttribute('data-translate-mode', 'active');
+  control.removeAttribute('aria-busy'); control.setAttribute('aria-pressed', 'true'); status26(body);
+  h.qa.patch(body); assert.equal(h.doc.querySelector('.ct-link-preview'), card);
+  assert.equal(h.qa.source(body).text, originalText); assert.equal(h.calls[0].aborted, 0);
+  h.respond(0); await flush(); assert.equal(card.querySelector('.ct-link-preview-title').textContent, 'Real title & details');
+  header.querySelector('button.font-bold').textContent = 'Bob'; h.qa.patch(body);
+  assert.equal(h.doc.querySelector('.ct-link-preview'), null);
+  assert.equal(h.qa.state.originals.has(body), false);
+});
+
+test('Tweet 2.6 unknown controls cannot reuse a baseline while quote controls and native error status stay scoped', t => {
+  const h = harness(t, { html: native26(), timestamps: true }); h.qa.patch();
+  const body = h.doc.querySelector('p.tl-user-text'), header = body.previousElementSibling;
+  const card = h.doc.querySelector('.ct-link-preview');
+  header.insertAdjacentHTML('beforeend', `<div aria-label="Quoted post by Bob">${native26Control('active')}</div>`);
+  status26(body, false); h.qa.patch(body); assert.equal(h.doc.querySelector('.ct-link-preview'), card);
+  const control = header.querySelector(':scope > div > span > button[data-translate-mode]') || header.querySelector('button[data-translate-mode]');
+  control.setAttribute('data-translate-mode', 'future-state'); h.qa.patch(body);
+  assert.equal(h.doc.querySelector('.ct-link-preview'), null);
+  assert.equal(h.qa.state.originals.has(body), false);
 });
 
 test('already translated, missing timestamp helpers, unknown creation and ambiguous native dates never establish original URL evidence', async t => {

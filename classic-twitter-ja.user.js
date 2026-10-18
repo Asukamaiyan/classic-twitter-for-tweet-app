@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.28.0
+// @version      6.29.0
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -671,7 +671,7 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
 }
 
   /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getLinkPreviews, setLinkPreviews, getAutoTranslate, setAutoTranslate, getTranslationEngine, setTranslationEngine, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getLinkPreviews, setLinkPreviews, getDeviceTranslation, setDeviceTranslation, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -696,10 +696,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     storageConflict: '別のタブで保存内容が変更されました。上書きを防ぐため保存を中止しました。入力中の内容を控えてから再読み込みしてください。',
     readError: '保存済み設定を読み込めませんでした。初期設定で開始しました。',
     searchError: '自動検索を開始できませんでした。検索画面で次の検索語を入力してください：',
-    automatic: '投稿を自動翻訳する', autoHelp: '選択した方法で投稿を順番に翻訳します。サイトの翻訳でエラーが出た場合は5分間休止します。',
-    autoError: '自動翻訳の設定を保存できませんでした。',
-    translationEngine: '翻訳方法', nativeEngine: 'サイトの翻訳', deviceEngine: '端末内の翻訳',
-    deviceHelp: '対応するデスクトップChrome用。翻訳モデルをダウンロードし、投稿本文は端末内で処理します。サイトの翻訳回数を消費しません。モデルは言語ごとに準備してください。',
+    deviceEnabled: '端末内翻訳ボタンを表示する', nativeTranslationHelp: '自動翻訳はTweetの「設定 → 言語」で設定できます。',
+    deviceError: '端末内翻訳の設定を保存できませんでした。',
+    deviceTranslation: '端末内の翻訳',
+    deviceHelp: '対応するPC版Chrome用。モデルを準備し、各投稿の「端末内で翻訳」を押して使います。本文は端末内で処理します。Tweetの訳文が表示されている投稿には追加しません。',
     deviceUnsupported: 'このブラウザでは端末内翻訳を利用できません。Safari／Stayとスマートフォンではサイトの翻訳をご利用ください。',
     sourceLanguage: '翻訳する投稿の言語', prepareModel: 'モデルを準備', preparingModel: '準備中…',
     translationStatus: '翻訳の状態',
@@ -742,10 +742,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     storageConflict: 'Saved data changed in another tab. Nothing was overwritten. Keep a copy of your edits, then reload before saving.',
     readError: 'Could not read saved settings. Started with the defaults.',
     searchError: 'Could not start the search automatically. Enter this query in Explore:',
-    automatic: 'Automatically translate posts', autoHelp: 'Translates posts one at a time with the selected engine. Site errors pause automatic requests for 5 minutes.',
-    autoError: 'Could not save the automatic translation setting.',
-    translationEngine: 'Translation engine', nativeEngine: 'Site translation', deviceEngine: 'On-device translation',
-    deviceHelp: 'For supported desktop Chrome browsers. Downloads models and translates post text on your device without using the site’s translation allowance. Prepare each source language separately.',
+    deviceEnabled: 'Show on-device translation buttons', nativeTranslationHelp: 'Manage automatic translation in Tweet’s Settings → Language.',
+    deviceError: 'Could not save the on-device translation setting.',
+    deviceTranslation: 'On-device translation',
+    deviceHelp: 'For supported desktop Chrome. Prepare a model, then press Translate on device on each post. Text is processed locally. No extra output is added while Tweet displays a translation.',
     deviceUnsupported: 'On-device translation is unavailable here. Use site translation in Safari/Stay and on mobile.',
     sourceLanguage: 'Language of posts to translate', prepareModel: 'Prepare model', preparingModel: 'Preparing…',
     translationStatus: 'Translation status',
@@ -991,64 +991,45 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   body.append(linksSection);
 
   let refreshTranslation = () => {};
-  if (typeof getAutoTranslate === 'function' && typeof setAutoTranslate === 'function') {
-    const automatic = element('section');
+  const translationSection = element('section');
+  translationSection.append(element('p', copy.nativeTranslationHelp, { class:'ct-local-note' }));
+  if (typeof getDeviceTranslation === 'function' && typeof setDeviceTranslation === 'function') {
+    translationSection.prepend(element('h3', copy.deviceTranslation));
     const label = element('label');
-    const input = element('input', undefined, { type: 'checkbox', id: 'ct-local-auto-translate' });
-    try { input.checked = !!getAutoTranslate(); } catch { input.checked = false; }
-    label.append(input, document.createTextNode(copy.automatic));
-    automatic.append(label, element('p', copy.autoHelp, { class: 'ct-local-note' }));
+    const input = element('input', undefined, { type:'checkbox', id:'ct-local-device-translation' });
+    input.disabled = !deviceTranslationSupported;
+    label.append(input, document.createTextNode(copy.deviceEnabled));
+    translationSection.append(label, element('p', deviceTranslationSupported ? copy.deviceHelp : copy.deviceUnsupported, { class:'ct-local-note' }));
+    const source = element('select', undefined, { id:'ct-local-translation-source' });
+    source.style.cssText = 'width:100%;min-height:44px;font:inherit;color:inherit;background:var(--color-tl-app-card,#fff);border:1px solid var(--color-tl-app-border,#b8c5d1);border-radius:8px;padding:6px';
+    const languages = [['en','English'],['ja','日本語'],['ko','한국어'],['zh','中文'],['zh-Hant','繁體中文'],['fr','Français'],['es','Español'],['de','Deutsch'],['pt','Português'],['it','Italiano'],['ru','Русский'],['ar','العربية'],['hi','हिन्दी'],['id','Bahasa Indonesia'],['th','ไทย'],['vi','Tiếng Việt']];
+    for (const [value, name] of languages) source.append(element('option', name, { value }));
+    source.value = (navigator.language || locale).startsWith('en') ? 'ja' : 'en';
+    const prepare = element('button', copy.prepareModel, { type:'button', id:'ct-local-translation-prepare' });
+    source.disabled = prepare.disabled = !deviceTranslationSupported;
+    const status = element('p', '', { id:'ct-local-translation-status', role:'status', 'aria-live':'polite', 'aria-label':copy.translationStatus, class:'ct-local-note' });
+    refreshTranslation = () => {
+      try { input.checked = getDeviceTranslation() === true; } catch { input.checked = false; }
+      const message = getTranslationStatus?.() || '';
+      if (status.textContent !== message) status.textContent = message;
+    };
     input.addEventListener('change', () => {
-      const requested = input.checked;
       try {
-        if (setAutoTranslate(requested) === false || !!getAutoTranslate() !== requested) throw new Error('Setting was not saved');
+        if (setDeviceTranslation(input.checked) === false || getDeviceTranslation() !== input.checked) throw new Error('Setting was not saved');
         announce(copy.saved);
-      } catch {
-        try { input.checked = !!getAutoTranslate(); } catch { input.checked = !requested; }
-        announce(copy.autoError, true);
-      }
-    });
-    if (typeof getTranslationEngine === 'function' && typeof setTranslationEngine === 'function') {
-      const engine = element('select', undefined, { id: 'ct-local-translation-engine' });
-      engine.style.cssText = 'width:100%;min-height:44px;font:inherit;color:inherit;background:var(--color-tl-app-card,#fff);border:1px solid var(--color-tl-app-border,#b8c5d1);border-radius:8px;padding:6px';
-      engine.append(element('option', copy.nativeEngine, { value: 'native' }), element('option', copy.deviceEngine, { value: 'device' }));
-      engine.options[1].disabled = !deviceTranslationSupported;
-      engine.value = getTranslationEngine();
-      const device = element('div');
-      device.append(element('p', deviceTranslationSupported ? copy.deviceHelp : copy.deviceUnsupported, { class: 'ct-local-note' }));
-      const source = element('select', undefined, { id: 'ct-local-translation-source' });
-      source.style.cssText = engine.style.cssText;
-      const languages = [['en', 'English'], ['ja', '日本語'], ['ko', '한국어'], ['zh', '中文'], ['zh-Hant', '繁體中文'], ['fr', 'Français'], ['es', 'Español'], ['de', 'Deutsch'], ['pt', 'Português'], ['it', 'Italiano'], ['ru', 'Русский'], ['ar', 'العربية'], ['hi', 'हिन्दी'], ['id', 'Bahasa Indonesia'], ['th', 'ไทย'], ['vi', 'Tiếng Việt']];
-      for (const [value, label] of languages) source.append(element('option', label, { value }));
-      source.value = (navigator.language || locale).startsWith('en') ? 'ja' : 'en';
-      const prepare = element('button', copy.prepareModel, { type: 'button', id: 'ct-local-translation-prepare' });
-      source.disabled = prepare.disabled = !deviceTranslationSupported;
-      device.append(element('label', copy.sourceLanguage, { for: source.id }), source, prepare);
-      const translationStatus = element('p', '', { id: 'ct-local-translation-status', role: 'status', 'aria-live': 'polite', 'aria-label': copy.translationStatus, class: 'ct-local-note' });
-      refreshTranslation = () => {
-        const message = getTranslationStatus?.() || '';
-        if (translationStatus.textContent !== message) translationStatus.textContent = message;
-        device.hidden = engine.value !== 'device';
-      };
-      engine.addEventListener('change', () => {
-        try {
-          if (setTranslationEngine(engine.value) === false || getTranslationEngine() !== engine.value) throw new Error('Setting was not saved');
-          announce(copy.saved);
-        } catch { engine.value = getTranslationEngine(); announce(copy.autoError, true); }
-        refreshTranslation();
-      });
-      prepare.addEventListener('click', async () => {
-        prepare.disabled = true; source.disabled = true; prepare.textContent = copy.preparingModel;
-        try { await prepareDeviceTranslation?.(source.value); }
-        catch { announce(copy.autoError, true); }
-        finally { prepare.disabled = source.disabled = !deviceTranslationSupported; prepare.textContent = copy.prepareModel; refreshTranslation(); }
-      });
-      automatic.append(element('label', copy.translationEngine, { for: engine.id }), engine,
-        ...(!deviceTranslationSupported ? [element('p', copy.deviceUnsupported, { class: 'ct-local-note' })] : []), device, translationStatus);
+      } catch { announce(copy.deviceError, true); }
       refreshTranslation();
-    }
-    body.append(automatic);
+    });
+    prepare.addEventListener('click', async () => {
+      prepare.disabled = true; source.disabled = true; prepare.textContent = copy.preparingModel;
+      try { await prepareDeviceTranslation?.(source.value); }
+      catch { announce(copy.deviceError, true); }
+      finally { prepare.disabled = source.disabled = !deviceTranslationSupported; prepare.textContent = copy.prepareModel; refreshTranslation(); }
+    });
+    translationSection.append(element('label', copy.sourceLanguage, { for:source.id }), source, prepare, status);
+    refreshTranslation();
   }
+  body.append(translationSection);
 
   let refreshFavoriteHistory = () => {};
   if (typeof getFavoriteHistoryStatus === 'function' && typeof runFavoriteHistory === 'function' &&
@@ -1536,10 +1517,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   const translators = new Map();
   const cache = new Map();
   const records = new Map();
-  const queue = new Map();
+  const queue = new Set();
   let detector = null;
   let busy = false;
-  let current = null;
   let preparing = false;
   let generation = 0;
   let style = null;
@@ -1573,7 +1553,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (results[0].status === 'fulfilled') detector = results[0].value;
       if (results[1].status === 'fulfilled') translators.set(source, results[1].value);
       if (results.some(result => result.status === 'rejected')) { say(copy.failed); return false; }
-      for (const record of records.values()) record.attempted = false;
       say(`${copy.ready} (${source} → ${target})`);
       onComplete?.();
       return true;
@@ -1585,13 +1564,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (style?.isConnected) return;
     style = document.createElement('style');
     style.dataset.ctOwned = 'true';
-    style.textContent = `.ct-device-translation{margin:8px 0;color:inherit;font:inherit}.ct-device-translation button{color:var(--color-tl-app-primary,#1688d4);background:none;border:0;padding:6px 0;cursor:pointer;font:inherit;font-size:.8125rem}.ct-device-translation button:focus-visible{outline:2px solid currentColor;outline-offset:2px}.ct-device-translation p{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}.ct-device-translation[hidden],.ct-device-translation [hidden]{display:none!important}`;
+    style.textContent = `.ct-device-translation{margin:8px 0;color:inherit;font:inherit}.ct-device-translation button{color:var(--color-tl-app-primary,#1688d4);background:none;border:0;min-height:44px;padding:8px 4px;cursor:pointer;font:inherit;font-size:.8125rem}.ct-device-translation button:focus-visible{outline:2px solid currentColor;outline-offset:2px}.ct-device-translation p{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}.ct-device-translation[hidden],.ct-device-translation [hidden]{display:none!important}`;
     document.head.append(style);
   }
 
   function stillValid(record, token) {
     return generation === token && isActive() && record.section.isConnected &&
-      getContext(record.native)?.text === record.text && !record.dismissed && !isManual(record.article);
+      records.get(record.article) === record && getContext(record.native)?.text === record.text && !record.dismissed && !isManual(record.article);
   }
 
   async function process() {
@@ -1599,14 +1578,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     busy = true;
     let processed = false;
     while (queue.size) {
-      const [record, automatic] = queue.entries().next().value;
+      const record = queue.values().next().value;
       queue.delete(record);
       if (!record.section.isConnected || !isActive() || record.dismissed ||
           getContext(record.native)?.text !== record.text) continue;
-      if (automatic && record.attempted) continue;
       processed = true;
-      record.attempted = true;
-      current = record;
       const token = generation;
       record.button.disabled = true;
       record.button.textContent = copy.working;
@@ -1640,7 +1616,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           record.output.hidden = false;
         }
       } finally {
-        current = null;
         record.button.disabled = false;
         record.button.textContent = record.shown ? copy.hide : copy.translate;
       }
@@ -1649,17 +1624,17 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (processed) onComplete?.();
   }
 
-  function patch(root = document, automatic = false) {
+  function patch(root = document) {
     if (!supported || !isActive()) return;
     ensureStyle();
     for (const [article, record] of records) {
-      if (!article.isConnected || !record.section.isConnected || getContext(record.native)?.text !== record.text) {
+      if (!article.isConnected || !record.section.isConnected || isManual(article) || getContext(record.native)?.text !== record.text) {
         record.section.remove(); queue.delete(record); records.delete(article);
       }
     }
     for (const native of ctTranslationControls(root)) {
       const context = getContext(native);
-      if (!context || isManual(context.article) || !native.closest('[aria-live="polite"]') || ctTranslationDisabled(native)) continue;
+      if (!context || isManual(context.article) || ctTranslationDisabled(native)) continue;
       let record = records.get(context.article);
       if (!record) {
         const section = document.createElement('div');
@@ -1673,18 +1648,20 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         section.append(button, output);
         section.addEventListener('click', event => event.stopPropagation());
         context.body.insertAdjacentElement('afterend', section);
-        record = { ...context, native, section, button, output, attempted: false, dismissed: false, shown: false };
+        record = { ...context, native, section, button, output, dismissed: false, shown: false };
         records.set(context.article, record);
         button.addEventListener('click', () => {
           if (record.shown) {
             record.output.hidden = true; record.shown = false; record.dismissed = true;
             record.button.textContent = copy.translate;
           } else {
-            record.dismissed = false; queue.set(record, false); void process();
+            if (!isActive() || isManual(record.article) || getContext(record.native)?.text !== record.text) {
+              patch(record.article); return;
+            }
+            record.dismissed = false; queue.add(record); void process();
           }
         });
       }
-      if (automatic && detector && !record.attempted && !record.dismissed && queue.size < 40) queue.set(record, true);
     }
     void process();
   }
@@ -1692,26 +1669,18 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function cancel() {
     generation++;
     queue.clear();
-    // A hidden-tab or settings cancellation invalidates the pending result,
-    // but has not completed this post's automatic attempt. Let the next active
-    // scan resume it. process() remains sequential, so a scan before the old
-    // request settles queues work rather than starting a second request. A late
-    // successful translation can then be reused from cache.
-    if (current && !current.shown && !current.dismissed && !isManual(current.article)) {
-      current.attempted = false;
-    }
   }
   function hide(article) {
     const record = records.get(article);
     if (!record) return;
-    record.dismissed = true; record.output.hidden = true; record.shown = false;
-    record.button.textContent = copy.translate; queue.delete(record);
+    record.dismissed = true; record.section.remove();
+    queue.delete(record); records.delete(article);
   }
   function clear() {
-    if (!records.size) return;
     cancel();
     for (const record of records.values()) record.section.remove();
     records.clear();
+    style?.remove(); style = null;
   }
   return { supported, prepare, patch, cancel, clear, hide };
 }
@@ -2314,29 +2283,22 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
   }
 
-    // Shared runtime; embedded at build time, never fetched remotely.
-  const ctAutoSeen = new WeakMap();
-  const ctAutoPending = new Map();
-  const ctAutoAttempted = new Set();
+    // Tweet owns all automatic translation. The optional device translator is
+  // manual only and never clicks native controls or calls a translation API.
   const ctManualTranslation = new WeakSet();
   const ctNativeLikeButtons = new WeakSet();
   const ctLikeLabels = new WeakMap();
   const ctFavoriteButtonClasses = new WeakMap();
   const ctFavoriteNativeTitles = new WeakMap();
-  let ctAutoClick = false;
-  let ctAutoTimer = null;
-  let ctAutoCurrent = null;
-  let ctAutoCooldownUntil = 0;
   let ctTranslationMessage = '';
   let ctDeviceTranslation = null;
 
-  function autoTranslationEnabled() {
-    // A separate opt-in key does not inherit the old enabled-by-default setting.
-    return loadJSON(KEY.autoTranslate + '.optInV2', false) === true;
-  }
-
-  function ctTranslationEngine() {
-    return loadJSON(KEY.autoTranslate + '.engine', 'native') === 'device' ? 'device' : 'native';
+  function deviceTranslationEnabled() {
+    const saved = loadJSON(KEY.autoTranslate + '.deviceEnabledV3', null);
+    if (typeof saved === 'boolean') return saved;
+    // A former explicit device selection keeps its manual button. A former
+    // native/automatic preference must never turn on another translator.
+    return loadJSON(KEY.autoTranslate + '.engine', 'native') === 'device';
   }
 
   function ctTranslationStatus(message) {
@@ -2344,148 +2306,55 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ctTools?.refreshTranslation?.();
   }
 
-  function ctCancelTranslations() {
-    clearTimeout(ctAutoTimer);
-    ctAutoTimer = null;
-    ctAutoPending.clear();
-    // The request is already owned by the site and cannot be canceled here.
-    // Keep its result monitor so a hidden-tab error still starts the cooldown.
-    ctDeviceTranslation?.cancel();
-  }
-
-  function ctOwnTranslationText(control) {
-    if (control.closest('blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"],[data-ct-owned]')) return null;
-    const article = control.closest('article');
-    if (!article) return null;
-    const body = [...article.querySelectorAll('p.whitespace-pre-wrap,[data-testid="tweet-text"],[data-testid="post-text"]')]
-      .find(el => el.closest('article') === article &&
-        !el.closest('[aria-live],button,[role="button"],blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"],[data-ct-owned]'));
-    const text = body?.textContent?.trim();
-    return text ? { article, body, text } : null;
-  }
+  function ctCancelTranslations() { ctDeviceTranslation?.cancel(); }
 
   function ctTranslationDisabled(control) {
-    return control.disabled || control.getAttribute('aria-disabled') === 'true' ||
+    return !control || control.disabled || control.getAttribute('aria-disabled') === 'true' ||
       control.getAttribute('aria-busy') === 'true';
   }
 
-  function ctNativeTranslationError(control) {
-    const region = control.closest('[aria-live="polite"]')?.parentElement;
-    return [...region?.querySelectorAll('[role="alert"]') || []]
-      .some(node => /Couldn.t translate|翻訳できませんでした/i.test(node.textContent));
+  function ctOwnTranslationText(control) {
+    if (!control?.matches('button[type="button"][data-translate-mode="idle"][aria-pressed="false"]') ||
+        ctTranslationDisabled(control) || control.closest('blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"],[data-ct-owned],[data-ct-local-ui],[contenteditable]')) return null;
+    const wrapper = control.parentElement;
+    const status = wrapper?.querySelector(':scope > span[data-translate-status][role="status"][aria-live="polite"]');
+    if (!wrapper?.matches('span.inline-flex.items-center') || !status ||
+        wrapper.querySelectorAll(':scope > button[data-translate-mode]').length !== 1) return null;
+    const article = control.closest('article');
+    if (!article) return null;
+    const bodies = [...article.querySelectorAll('p.tl-user-text.whitespace-pre-wrap.break-words')]
+      .filter(el => el.closest('article') === article &&
+        !el.closest('[aria-live],button,[role="button"],blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"],[data-ct-owned],[data-ct-local-ui]'));
+    if (bodies.length !== 1) return null;
+    const body = bodies[0], parent = body.parentElement;
+    if (!parent?.matches('div.min-w-0.flex-1') || !parent.contains(control)) return null;
+    // The native original and translation reuse one paragraph. Idle is the
+    // only unambiguous untouched original; active/busy/original are excluded.
+    // Also reject a source line if a partial React commit still presents it.
+    const translated = [...parent.children].some(node => node.matches('div') &&
+      [...node.children].some(line => line.matches('p.text-tl-app-text-muted') &&
+        line.classList.contains('text-[0.8125rem]') && line.getAttribute('role') !== 'alert' &&
+        /^(?:Translated(?: from .*)?|翻訳済み|翻訳文|.+から翻訳(?:しました)?)$/.test(line.textContent.trim())));
+    const text = body.textContent?.trim();
+    return !translated && text ? { article, body, text } : null;
   }
 
-  function ctTranslationAttemptKey(context, target) {
-    const id = articleId(context.article);
-    // Feed cards often have no permalink. Repeated identical text can reuse
-    // the session's attempted state; manual translation is always available.
-    return `${target}:${id || 'text'}:${context.text}`;
-  }
-
-  function ctFinishNativeTranslation(failed, uncertain = false) {
-    clearTimeout(ctAutoCurrent?.timer);
-    ctAutoCurrent = null;
-    if (failed) {
-      ctAutoCooldownUntil = Date.now() + 5 * 60 * 1000;
-      ctAutoPending.clear();
-      ctTranslationStatus(CT_LOCALE === 'ja'
-        ? `${uncertain ? '翻訳の完了を確認できないため' : 'サイトの翻訳でエラーが発生したため'}、自動翻訳を5分間休止しています。手動翻訳は引き続き使えます。`
-        : `Automatic site translation is paused for 5 minutes ${uncertain ? 'because completion could not be confirmed' : 'after an error'}. Manual translation is still available.`);
-    } else {
-      ctAutoTimer = setTimeout(ctRunNativeTranslation, 1500);
+  function patchDeviceTranslation(root = document) {
+    if (!deviceTranslationEnabled() || document.hidden || !ctPageActive) {
+      ctDeviceTranslation?.clear(); return;
     }
-  }
-
-  function ctMonitorNativeTranslation() {
-    const job = ctAutoCurrent;
-    if (!job) return;
-    if (!job.article.isConnected) { ctFinishNativeTranslation(true, true); return; }
-    const control = [...job.article.querySelectorAll('[aria-live="polite"] button')]
-      .find(button => button.closest('article') === job.article && !button.closest('blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"]'));
-    if (control && ctNativeTranslationError(control)) { ctFinishNativeTranslation(true); return; }
-    const action = ctTranslationButtonText(control);
-    if (/^(?:Show original|原文を表示)$/i.test(action) ||
-        (control && /^(?:Show translation|翻訳を表示)$/i.test(action) &&
-          control.getAttribute('aria-busy') !== 'true' && ctTranslationDisabled(control))) {
-      ctFinishNativeTranslation(false); return;
-    }
-    if (Date.now() - job.started >= 30000) { ctFinishNativeTranslation(true, true); return; }
-    job.timer = setTimeout(ctMonitorNativeTranslation, 250);
-  }
-
-  function ctRunNativeTranslation() {
-    ctAutoTimer = null;
-    if (ctAutoCurrent || ctAutoCooldownUntil > Date.now()) return;
-    if (!autoTranslationEnabled() || ctTranslationEngine() !== 'native' || document.hidden || !ctPageActive) {
-      ctAutoPending.clear(); return;
-    }
-    while (ctAutoPending.size) {
-      const [control, context] = ctAutoPending.entries().next().value;
-      ctAutoPending.delete(control);
-      const { article, text, key } = context;
-      if (key && ctAutoAttempted.has(key)) continue;
-      if (!control.isConnected || ctTranslationDisabled(control) || ctManualTranslation.has(article) ||
-          ctOwnTranslationText(control)?.text !== text ||
-          !/^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(control))) continue;
-      if (ctNativeTranslationError(control)) { ctFinishNativeTranslation(true); return; }
-      ctAutoSeen.set(article, text);
-      if (key) {
-        ctAutoAttempted.add(key);
-        if (ctAutoAttempted.size > 1000) ctAutoAttempted.delete(ctAutoAttempted.values().next().value);
-      }
-      ctAutoCurrent = { article, started: Date.now(), timer: null };
-      ctAutoClick = true;
-      try { control.click(); }
-      catch { ctFinishNativeTranslation(true); }
-      finally { ctAutoClick = false; }
-      if (ctAutoCurrent) ctMonitorNativeTranslation();
-      return;
-    }
-  }
-
-  function patchAutoTranslation(root = document, nativeLanguage = CT_LOCALE) {
-    const active = !document.hidden && ctPageActive;
-    if (ctTranslationEngine() === 'device') {
-      ctAutoPending.clear();
-      clearTimeout(ctAutoTimer); ctAutoTimer = null;
-      ctDeviceTranslation?.patch(root, active && autoTranslationEnabled());
-      return;
-    }
-    ctDeviceTranslation?.clear();
-    if (!autoTranslationEnabled() || !active) { ctCancelTranslations(); return; }
-    // Auth may still be resolving from Firebase's local persistence. Native
-    // translation must wait for the account-scoped original URL baseline;
-    // getAuth schedules a full scan after its first success or failure.
-    if (typeof ctNetworkState !== 'undefined' && ctNetworkState.authSettled === false &&
-        typeof getAuth === 'function') { getAuth(); return; }
-    if (ctAutoCooldownUntil > Date.now()) return;
-    if (ctAutoCooldownUntil) { ctAutoCooldownUntil = 0; ctTranslationStatus(''); }
-    // Tweet's native translator chooses navigator.language, not the userscript UI locale.
-    const targetLanguage = (navigator.language || nativeLanguage).toLowerCase().split(/[-_]/)[0];
-    for (const control of ctTranslationControls(root)) {
-      if (!control.isConnected || ctTranslationDisabled(control)) continue;
-      const context = ctOwnTranslationText(control);
-      if (!context || !control.closest('[aria-live="polite"]')) continue;
-      const { article, body, text } = context;
-      const lang = ctLikelyLanguage(text, body);
-      if (lang === 'unknown' || lang === targetLanguage || ctManualTranslation.has(article)) continue;
-      const key = ctTranslationAttemptKey(context, targetLanguage);
-      if (ctAutoSeen.get(article) === text || (key && ctAutoAttempted.has(key)) || ctAutoPending.has(control)) continue;
-      if (ctAutoPending.size >= 40) break;
-      ctAutoPending.set(control, { ...context, key });
-    }
-    if (!ctAutoCurrent && ctAutoTimer === null && ctAutoPending.size) ctAutoTimer = setTimeout(ctRunNativeTranslation, 0);
+    ctDeviceTranslation?.patch(root);
   }
 
   function ctRememberTranslationChoice(event) {
-    if (ctAutoClick) return;
-    const control = event.target?.closest?.('button,[role="button"],a');
-    if (!control?.closest('[aria-live="polite"]') || !/^(?:Show original|Show translation|Translate|原文を表示|翻訳を表示)$/i.test(ctTranslationButtonText(control))) return;
+    const control = event.target?.closest?.('button[data-translate-mode]');
+    if (!control || control.closest('[data-ct-owned],[data-ct-local-ui]') ||
+        !control.parentElement?.matches('span.inline-flex.items-center') ||
+        !control.parentElement.querySelector(':scope > span[data-translate-status][role="status"][aria-live="polite"]')) return;
     const article = control.closest('article');
     if (!article) return;
     ctManualTranslation.add(article);
     ctDeviceTranslation?.hide(article);
-    for (const [queued, context] of ctAutoPending) if (context.article === article) ctAutoPending.delete(queued);
   }
 
   function ctIsLiked(button) {
@@ -2848,7 +2717,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   let ctScanConversationPanels = new WeakSet();
   let ctScanConversationPath = location.pathname;
   const ctScanOwnedSelector = '[data-ct-owned],[data-ct-local-ui],#ct-local-tools,#ct-favorites-panel';
-  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-selected', 'aria-current', 'role', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'href', 'data-app-theme'];
+  const ctObservedAttributes = ['aria-pressed', 'aria-checked', 'aria-selected', 'aria-current', 'role', 'aria-label', 'aria-disabled', 'aria-busy', 'aria-hidden', 'hidden', 'placeholder', 'title', 'datetime', 'class', 'src', 'href', 'data-app-theme', 'data-translate-mode'];
 
   function ctScanElement(node) {
     return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
@@ -3029,13 +2898,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.28.0';
+    document.documentElement.dataset.ctActiveVersion = '6.29.0';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
     ctDeviceTranslation = createDeviceTranslation({
       locale: CT_LOCALE, getContext: ctOwnTranslationText, isManual: article => ctManualTranslation.has(article),
-      isActive: () => ctPageActive && !document.hidden && ctTranslationEngine() === 'device',
+      isActive: () => ctPageActive && !document.hidden && deviceTranslationEnabled(),
       onStatus: ctTranslationStatus, onComplete: ctScheduleScan
     });
     ctTools = installLocalEnhancements({
@@ -3063,21 +2932,14 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         patchFavoriteButtons(document);
         ctScheduleScan();
       },
-      getAutoTranslate: autoTranslationEnabled,
-      getTranslationEngine: ctTranslationEngine,
-      setTranslationEngine: engine => {
-        if (!['native', 'device'].includes(engine) ||
-            !saveJSON(KEY.autoTranslate + '.engine', engine)) throw new Error('Storage unavailable');
-        ctCancelTranslations(); ctScheduleScan();
+      getDeviceTranslation: deviceTranslationEnabled,
+      setDeviceTranslation: enabled => {
+        if (!saveJSON(KEY.autoTranslate + '.deviceEnabledV3', enabled === true)) throw new Error('Storage unavailable');
+        ctDeviceTranslation?.clear(); ctScheduleScan();
       },
       deviceTranslationSupported: ctDeviceTranslation.supported,
       prepareDeviceTranslation: source => ctDeviceTranslation.prepare(source),
-      getTranslationStatus: () => ctTranslationMessage,
-      setAutoTranslate: enabled => {
-        if (!saveJSON(KEY.autoTranslate + '.optInV2', enabled === true)) throw new Error('Storage unavailable');
-        ctCancelTranslations();
-        ctScheduleScan();
-      }
+      getTranslationStatus: () => ctTranslationMessage
     });
     document.addEventListener('click', ctRememberTranslationChoice, true);
     ctRunScan();
@@ -5064,12 +4926,50 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           ? {isGIF:true} : {})})).filter(asset => asset.url);
   }
 
+  function ctFavoriteTranslationMetadataBlock(node) {
+    return !!node?.matches('div.mt-0\\.5,div.mt-1') && node.children.length > 0 && node.children.length <= 2 &&
+      [...node.children].every(el => el.matches('p.text-tl-app-text-muted') &&
+        el.classList.contains('text-[0.8125rem]') && !el.children.length &&
+        (!el.hasAttribute('role') || el.getAttribute('role') === 'alert'));
+  }
+
+  function ctFavoriteTranslationState(article) {
+    // Tweet 2.6 renders an icon instead of the old text toggle. Restrict the
+    // control to this post: a quoted/nested post's translation is independent.
+    const controls = [...article.querySelectorAll('button')].filter(el => el.closest('article') === article &&
+      !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-ct-owned],[data-ct-local-ui],.tl-user-text,[data-user-content]'));
+    const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')].find(el => el.closest('article') === article &&
+      !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-ct-owned],[data-ct-local-ui]'));
+    const metadata = body?.previousElementSibling;
+    const sourceLine = ctFavoriteTranslationMetadataBlock(metadata) &&
+      [...metadata.children].some(el => !el.hasAttribute('role'));
+    const native = controls.filter(el => el.hasAttribute('data-translate-mode'));
+    if (native.length) {
+      if (native.length !== 1) return 'unknown';
+      const control = native[0], mode = control.getAttribute('data-translate-mode');
+      if (!['idle', 'busy', 'active', 'original'].includes(mode)) return 'unknown';
+      if (mode === 'busy' || control.getAttribute('aria-busy') === 'true') return 'busy';
+      if (mode === 'active') return 'translated';
+      if (control.getAttribute('aria-pressed') === 'true' || sourceLine) return 'unknown';
+      return 'original';
+    }
+    if (sourceLine) return 'unknown';
+    return controls.some(el => [el.textContent, el.getAttribute('title'), el.getAttribute('aria-label')]
+      .some(value => /^(?:Show original|原文を表示)$/i.test((value || '').trim()))) ? 'translated' : 'original';
+  }
+
   function ctFavoriteCandidate(article) {
+    const translation = ctFavoriteTranslationState(article);
+    if (translation === 'busy' || translation === 'unknown') return null;
+    const translated = translation === 'translated';
     const timestamp = [...article.querySelectorAll('span.text-tl-app-text-muted.hover\\:underline[title]')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border') &&
       !!ctTimestampParse(el.title));
+    // A translated reply has no exact ISO time or original body in the DOM.
+    // Check this before a known permalink can bypass the original-text check.
+    if (!timestamp && translated) return null;
     const known = snapshotFavorite(article);
-    if (known) return { ...known, createdAt: timestamp?.title || '', media: ctFavoriteDOMMedia(article) };
+    if (known) return { ...known, translated, createdAt: timestamp?.title || '', media: ctFavoriteDOMMedia(article) };
     const username = validUser(articleAuthor(article));
     const body = [...article.querySelectorAll('p.whitespace-pre-wrap.break-words')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[aria-live]'));
@@ -5079,11 +4979,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       el.parentElement.querySelector('button > svg.lucide-ellipsis-vertical'));
     const parentId = ctFavoriteReplyParent(article);
     if (!username || !body || (!timestamp && !replyTime)) return null;
-    const translated = [...article.querySelectorAll('button')].some(el => el.closest('article') === article &&
-      /^(Show original|原文を表示)$/i.test(el.textContent.trim()));
-    // A translated reply has no exact ISO time or original body in the DOM.
-    // Do not infer its identity from the translated text.
-    if (!timestamp && translated) return null;
     const author = [...article.querySelectorAll('button.truncate.font-bold')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border'));
     return { username, name: author?.textContent || username, text: body.textContent,
@@ -5149,12 +5044,22 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!candidate || !uid || (candidate.createdAt && !ctTimestampParse(candidate.createdAt))) return null;
     const auth = await getAuth();
     if (!auth?.token || auth.uid !== uid) return null;
-    if (candidate.id) return candidate;
-    const posts = candidate.relativeText && !candidate.createdAt ? await ctFavoriteReplyPosts(candidate, auth, deadline) :
+    if (candidate.id && !candidate.translated) return candidate;
+    let posts;
+    if (candidate.id) {
+      // A permalink establishes the post ID, not that the visible paragraph is
+      // its original. Read that exact post before storing a translated card.
+      if (!/^[A-Za-z0-9_-]{1,160}$/.test(candidate.id) || !candidate.createdAt ||
+          typeof candidate.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(candidate.username) || Date.now() >= deadline) return null;
+      const json = await requestJSON(API_ORIGIN + '/api/posts/' + encodeURIComponent(candidate.id),
+        { Authorization: `Bearer ${auth.token}` });
+      posts = json && json.success !== false && !json.error && json.post ? [json.post] : null;
+    } else posts = candidate.relativeText && !candidate.createdAt ? await ctFavoriteReplyPosts(candidate, auth, deadline) :
       await ctFavoriteAuthorPosts(candidate.username, auth, deadline);
     const current = await getAuth();
     if (current?.uid !== uid || !Array.isArray(posts)) return null;
     const matches = posts.filter(post => typeof post.id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(post.id) &&
+      (!candidate.id || post.id === candidate.id) &&
       !post.isDeleted && !post.originalPostId && !post.isRepost &&
       !['MUTED','BLOCKED'].includes(post.status) &&
       post.authorUsername?.toLowerCase() === candidate.username.toLowerCase() &&
@@ -5280,19 +5185,25 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       (!!record.pending || !!record.posts && Date.now() - record.at < 60000);
   }
 
+  function ctReplyTimeBody(header) {
+    let body = header?.nextElementSibling;
+    // Native 2.6 places its translation source/error block before the body.
+    if (ctFavoriteTranslationMetadataBlock(body)) body = body.nextElementSibling;
+    return body;
+  }
+
   function ctReplyTimeCandidate(el, context) {
     if (!context) return null;
     const { article, container, panel, inline, parentId } = context;
     const header = el.parentElement;
     const author = header?.querySelector(':scope > button.font-bold.truncate');
     const separator = el.previousElementSibling;
-    const body = header?.nextElementSibling;
+    const body = ctReplyTimeBody(header);
     if (!article || !parentId || !ctReplyTimeAgeKey(el.textContent) || !header?.matches('div.flex.items-center.gap-1.min-w-0') ||
         !author || !separator?.matches('span.text-tl-app-text-muted') || separator.textContent.trim() !== '·' ||
         !header.querySelector('button > svg.lucide-ellipsis-vertical') ||
         !body?.matches('p.whitespace-pre-wrap.break-words') || body.closest('article') !== article ||
-        [...article.querySelectorAll('button')].some(button => button.closest('article') === article &&
-          /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()))) return null;
+        ctFavoriteTranslationState(article) !== 'original') return null;
     const native = ctFavoriteCandidate(article);
     if (!native || native.translated || native.parentId && native.parentId !== parentId ||
         typeof native.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(native.username) ||
@@ -5310,12 +5221,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           candidate.container.id !== 'inline-replies-' + candidate.parentId :
           ctTimestampDetailContext(candidate.article) !== candidate.panel ||
           candidate.panel?.querySelector(':scope > div.min-h-0.flex-1.overflow-y-auto') !== candidate.container) ||
-        candidate.el.parentElement?.nextElementSibling !== candidate.body ||
+        ctReplyTimeBody(candidate.el.parentElement) !== candidate.body ||
         candidate.body.textContent !== candidate.text || !candidate.author.isConnected ||
         (candidate.author.getAttribute('aria-label') || '') !== candidate.authorLabel ||
         candidate.author.textContent !== candidate.authorText ||
-        [...candidate.article.querySelectorAll('button')].some(button => button.closest('article') === candidate.article &&
-          /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()))) return false;
+        ctFavoriteTranslationState(candidate.article) !== 'original') return false;
     const expectedText = candidate.lastOwnText ?? candidate.initialText;
     if (checkText && candidate.el.textContent !== expectedText &&
         (!ctReplyTimeAgeKey(expectedText) || ctReplyTimeAgeKey(candidate.el.textContent) !== ctReplyTimeAgeKey(expectedText))) return false;
@@ -8068,6 +7978,23 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (body) ctLinkPreviewState.originals.delete(body);
     return null;
   }
+  function ctLinkPreviewTranslationState(post, header, sourceLine) {
+    const controls = [...header.querySelectorAll('button')].filter(el => el.closest('article') === post &&
+      !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-ct-owned],[data-ct-local-ui],.tl-user-text,[data-user-content]'));
+    const native = controls.filter(el => el.hasAttribute('data-translate-mode'));
+    if (native.length) {
+      if (native.length !== 1) return 'unknown';
+      const control = native[0], mode = control.getAttribute('data-translate-mode');
+      if (!['idle', 'busy', 'active', 'original'].includes(mode)) return 'unknown';
+      if (mode === 'busy' || control.getAttribute('aria-busy') === 'true') return 'busy';
+      if (mode === 'active') return 'translated';
+      if (control.getAttribute('aria-pressed') === 'true' || sourceLine) return 'unknown';
+      return 'original';
+    }
+    if (sourceLine) return 'unknown';
+    return controls.some(el => [el.textContent, el.getAttribute('title'), el.getAttribute('aria-label')]
+      .some(value => /^(?:Show original|原文を表示)$/i.test((value || '').trim()))) ? 'translated' : 'original';
+  }
   function ctLinkPreviewSource(body) {
     if (!body?.isConnected || body.closest('[hidden],[aria-hidden="true"],[data-ct-profile-timeline-hidden],[data-ct-keyword-hidden],.ct-keyword-collapsed,.ct-links-filter-hidden')) return ctLinkPreviewRejectSource(body);
     const profile = body.matches('p.ct-profile-text[data-ct-link-preview-source="original"]') && body.closest('.ct-profile-row[data-ct-profile-post]');
@@ -8081,7 +8008,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!body.matches('p.tl-user-text.whitespace-pre-wrap.break-words') || body.closest(ctLinkPreviewProtected)) return ctLinkPreviewRejectSource(body);
     const post = body.closest('article'), parent = body.parentElement;
     if (!post || !parent?.matches('div.min-w-0.flex-1') || parent.closest('article') !== post) return ctLinkPreviewRejectSource(body);
-    const header = body.previousElementSibling;
+    let header = body.previousElementSibling, sourceLine = false;
+    // The 2.6 source/error status is inserted between the stable header and
+    // original paragraph. It is not a second post body or a new identity.
+    if (header?.matches('div.mt-0\\.5,div.mt-1') && header.children.length > 0 && header.children.length <= 2 &&
+        [...header.children].every(el => el.matches('p.text-tl-app-text-muted') &&
+          el.classList.contains('text-[0.8125rem]') && !el.children.length &&
+          (!el.hasAttribute('role') || el.getAttribute('role') === 'alert'))) {
+      sourceLine = [...header.children].some(el => !el.hasAttribute('role'));
+      header = header.previousElementSibling;
+    }
     if (!header?.matches('div') || !header.querySelector('button.font-bold.truncate')) return ctLinkPreviewRejectSource(body);
     // A nested original body belongs to its own article. Poll labels, quoted
     // line-clamped snippets and live translation paragraphs do not qualify.
@@ -8093,10 +8029,10 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (candidate && !anchor.closest('button,[role="button"]')) { url = candidate; break; }
     }
     if (!url) return ctLinkPreviewRejectSource(body);
-    const translated = [...header.querySelectorAll('button')]
-      .some(button => /^(?:Show original|原文を表示)$/i.test(button.textContent.trim()));
+    const translation = ctLinkPreviewTranslationState(post, header, sourceLine);
+    if (translation === 'unknown') return ctLinkPreviewRejectSource(body);
     const identity = ctLinkPreviewNativeIdentity(post, parent, header);
-    if (translated) {
+    if (translation !== 'original') {
       const original = ctLinkPreviewState.originals.get(body);
       if (!identity || !original || original.url !== url ||
           ['post', 'parent', 'header', 'author', 'authorText', 'creation', 'createdAt', 'context']
@@ -8831,6 +8767,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ['Language', '言語'],
     ['Languages', '言語'],
     ['Language settings', '言語設定'],
+    ['Notified accounts', '投稿通知するアカウント'],
+    ['Nothing to see here yet. Likes, reposts, replies, quotes, mentions, follows, and posts from accounts you get notifications for will show up here.', '通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォロー、通知を設定したアカウントのツイートがここに表示されます。'],
+    ['Auto-translate posts that aren’t in your language.', '他の言語のツイートを自動翻訳します。'],
+    ['See and turn off the accounts you get post notifications from.', '投稿通知するアカウントの確認と解除ができます。'],
+    ['Back to settings', '設定に戻る'],
     ['English', '英語'],
     ['Japanese', '日本語'],
 
@@ -8934,6 +8875,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       ['お気に入りはまだありません。', 'いいねはまだありません。'],
       ['通知はまだありません。お気に入り、リツイート、フォローの通知がここに表示されます。', '通知はまだありません。いいね、リツイート、フォローの通知がここに表示されます。'],
       ['通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。', '通知はまだありません。いいね、リツイート、返信、引用、@ツイート、フォローの通知がここに表示されます。'],
+      ['通知はまだありません。お気に入り、リツイート、返信、引用、@ツイート、フォロー、通知を設定したアカウントのツイートがここに表示されます。', '通知はまだありません。いいね、リツイート、返信、引用、@ツイート、フォロー、通知を設定したアカウントのツイートがここに表示されます。'],
       ['あなたのツイートをお気に入りに登録しました', 'あなたのツイートにいいねしました'],
       ['あなたの返信をお気に入りに登録しました', 'あなたの返信にいいねしました'],
       ['相手はあなたのフォロー、ツイートへの返信、引用、リツイート、お気に入りができなくなります。お互いのツイートや通知も表示されません。相互のフォロー関係は解除され、ブロックを解除しても元には戻りません。', '相手はあなたのフォロー、ツイートへの返信、引用、リツイート、いいねができなくなります。お互いのツイートや通知も表示されません。相互のフォロー関係は解除され、ブロックを解除しても元には戻りません。']
@@ -9618,6 +9560,14 @@ if (/^just\s+now$/i.test(t)) {
     const author = header?.firstElementChild;
     const separatorIndex = [...(header?.children || [])].indexOf(separator);
     const decorations = [...(header?.children || [])].slice(1, separatorIndex);
+    let body = header?.nextElementSibling;
+    // 2.6 inserts its source/error metadata before an inline reply's body.
+    // Localize the native relative age without inventing a precise timestamp.
+    if (body?.matches('div.mt-1') && body.children.length > 0 && body.children.length <= 2 &&
+        [...body.children].every(line => line.matches('p.text-tl-app-text-muted') &&
+          line.classList.contains('text-[0.8125rem]') && !line.children.length &&
+          (!line.hasAttribute('role') || line.getAttribute('role') === 'alert')) &&
+        header.querySelector('button[data-translate-mode]')) body = body.nextElementSibling;
     return !!header?.matches('div.flex.items-center.gap-1.min-w-0') &&
       separatorIndex >= 1 && decorations.every(marker =>
         marker.matches('span.ct-official-badges[data-ct-owned][role="img"]') && marker.children.length &&
@@ -9628,7 +9578,7 @@ if (/^just\s+now$/i.test(t)) {
       !!author?.matches('button.font-bold.truncate.hover\\:underline') &&
       !!separator?.matches('span.text-tl-app-text-muted') && clean(separator.textContent) === '·' &&
       !!header.querySelector(':scope > div.flex.items-center.shrink-0.ml-auto') &&
-      !!header.nextElementSibling?.matches('p.tl-user-text.whitespace-pre-wrap');
+      !!body?.matches('p.tl-user-text.whitespace-pre-wrap');
   }
 
   function isNativeReplyOptionsButton(el) {
@@ -9669,6 +9619,162 @@ if (/^just\s+now$/i.test(t)) {
     return el === time.firstElementChild && time.children.length === 1 &&
       /^\/post\/[A-Za-z0-9_-]{1,160}$/.test(el.getAttribute('href') || '') &&
       [ `Open the post by ${handle} that this replies to`, `${handle}への返信元のツイートを開く` ].includes(el.getAttribute('aria-label'));
+  }
+
+  // Tweet 2.6 owns remote translation and profile post subscriptions.
+  // Read only verified native chrome; names, previews, options and handlers stay native.
+  function nativeLocalization26Context(el) {
+    if (!el || isOwnedLocalizationElement(el) || el.closest('article .tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],textarea,input,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,blockquote,[aria-label^="Quoted post"]')) return null;
+    if (/^\/settings\/?$/.test(location.pathname)) {
+      const section = el.closest('main section.flex.flex-col.flex-1.min-w-0');
+      const panel = section?.querySelector(':scope > div.p-5 > div.flex.flex-col.gap-5');
+      const heading = panel?.querySelector(':scope > div:first-child > h4.font-extrabold');
+      const title = clean(heading?.textContent);
+      if (heading && /^(?:Language|言語|Notified accounts|投稿通知するアカウント)$/.test(title)) {
+        const header = heading.parentElement;
+        const kind = /^(?:Language|言語)$/.test(title) ? 'language' : 'notified';
+        if (el === heading || el === header.querySelector(':scope > p.leading-relaxed') ||
+            el === section.querySelector(':scope > div.sm\\:hidden > span.font-extrabold')) return { kind, section, panel, header };
+        if (kind === 'language') {
+          const toggle = panel.querySelector('button[role="switch"][aria-labelledby][aria-describedby]');
+          const label = toggle && section.ownerDocument.getElementById(toggle.getAttribute('aria-labelledby'));
+          const hint = toggle && section.ownerDocument.getElementById(toggle.getAttribute('aria-describedby'));
+          const select = panel.querySelector('select');
+          const target = select?.id && [...panel.querySelectorAll('label[for]')].find(label => label.htmlFor === select.id);
+          if (toggle && label?.parentElement === hint?.parentElement && label?.parentElement?.nextElementSibling === toggle && panel.contains(label) && panel.contains(hint) &&
+              (el === label || el === hint || el === target || el.matches('option') && el.parentElement === select)) return { kind, section, panel, header, select };
+          if (el.matches('p.leading-relaxed') && el.parentElement?.matches('div.flex.items-center.justify-between') &&
+              el.parentElement.querySelector(':scope > button')) return { kind, section, panel, header };
+          if (el.matches('button') && el.parentElement?.matches('div.flex.items-center.justify-between') &&
+              el.parentElement.querySelector(':scope > p.leading-relaxed')) return { kind, section, panel, header };
+        } else {
+          if (el.parentElement === panel && el.matches('p.text-xs.text-tl-app-text-muted.px-1')) return { kind, section, panel, header, count: true };
+          const button = el.matches('button') ? el : el.closest('button');
+          const row = button?.parentElement;
+          if (button && row?.matches('div.flex.items-center.gap-3.px-4') && row.lastElementChild === button &&
+              row.querySelector('button[aria-label^="View @"]') && panel.contains(row)) return { kind, section, panel, header, button };
+        }
+        if (el.matches('[role="status"],[role="alert"]') && panel.contains(el)) return { kind, section, panel, header };
+        if (el.matches('span.text-xs.font-semibold') && el.parentElement?.matches('div.flex.items-center.justify-center') &&
+            el.parentElement.querySelector(':scope > svg.animate-spin')) return { kind, section, panel, header };
+        if (el.matches('button') && el.parentElement === panel) return { kind, section, panel, header };
+      }
+    }
+    if (/^\/(?:profile|user\/[A-Za-z0-9_.-]+)\/?$/.test(location.pathname) && el.closest('main') && !el.closest('article')) {
+      const button = el.matches('button[data-icon][aria-pressed]') ? el : null;
+      if (button && /^(?:bell|bell-ring)$/.test(button.dataset.icon) &&
+          button.matches('.min-w-10.min-h-10.rounded-full.border.p-2') &&
+          button.parentElement?.matches('div.pt-3.shrink-0.flex.items-center.gap-2')) return { kind: 'profile-bell', button };
+      if (el.matches('p.text-rose-500.leading-snug') && el.parentElement?.querySelector('div.pt-3 > button[data-icon][aria-pressed]')) return { kind: 'profile-error' };
+    }
+    if (el.closest('article')) {
+      const button = el.matches('button[data-translate-mode]') ? el : null;
+      const wrapper = (button || el).parentElement;
+      const control = button || wrapper?.querySelector(':scope > button[data-translate-mode]');
+      if (wrapper?.matches('span.inline-flex.items-center') && control?.matches('button.p-2.rounded-full[data-translate-mode][aria-pressed]') &&
+          wrapper.querySelector(':scope > span[data-translate-status][role="status"][aria-live="polite"]') &&
+          /^(?:idle|busy|active|original)$/.test(control.dataset.translateMode) && control.querySelector(':scope > svg[aria-hidden="true"]') &&
+          (el === control || el.matches('span[data-translate-status]'))) return { kind: 'translate-control', button: control };
+      if (el.matches('p.text-tl-app-text-muted') && el.parentElement?.matches('div.mt-0\\.5,div.mt-1') &&
+          !el.querySelector('*') && [...el.closest('article').querySelectorAll('button[data-translate-mode]')].some(control =>
+            control.closest('article') === el.closest('article') && nativeLocalization26Context(control)?.kind === 'translate-control')) return { kind: 'translation-message' };
+    }
+    if (/^\/notifications\/?$/.test(location.pathname) && el.closest('main')) {
+      const group = el.closest('div.border-b.border-tl-app-border');
+      const lead = group?.querySelector(':scope > button.w-full.flex.items-start.gap-3');
+      const icon = lead?.querySelector(':scope > div.mt-0\\.5.shrink-0 > svg.lucide-bell-ring[width="28"][height="28"]');
+      if (!icon) return null;
+      const paragraph = lead.querySelector(':scope > div.flex-1.min-w-0 > p.leading-snug');
+      if (paragraph?.querySelector(':scope > span.font-extrabold') && el.parentElement === paragraph && el.matches('span.text-tl-app-text-muted')) {
+        return { kind: el === paragraph.lastElementChild ? 'post-notification-time' : 'post-notification-action', group };
+      }
+      const detail = el.closest('button.w-full.flex.items-start.gap-3.py-2\\.5');
+      if (detail && detail.parentElement?.matches('div.pl-12.pr-4') && detail.parentElement.parentElement === group &&
+          el.matches('span.text-tl-app-text-muted') && el.parentElement?.querySelector(':scope > span.font-extrabold')) return { kind: 'post-notification-time', group };
+    }
+    return null;
+  }
+
+  function native26JapaneseText(el, text, attr = null) {
+    if (typeof text !== 'string' || text.length > 700) return null;
+    const context = nativeLocalization26Context(el);
+    if (!context) return null;
+    const languages = native26JapaneseText.languages ||= [
+      ['ar', 'Arabic', 'アラビア語'], ['bn', 'Bengali', 'ベンガル語'], ['de', 'German', 'ドイツ語'],
+      ['en', 'English', '英語'], ['es', 'Spanish', 'スペイン語'], ['fa', 'Persian', 'ペルシア語'],
+      ['fr', 'French', 'フランス語'], ['he', 'Hebrew', 'ヘブライ語'], ['hi', 'Hindi', 'ヒンディー語'],
+      ['id', 'Indonesian', 'インドネシア語'], ['it', 'Italian', 'イタリア語'], ['ja', 'Japanese', '日本語'],
+      ['ko', 'Korean', '韓国語'], ['ms', 'Malay', 'マレー語'], ['nl', 'Dutch', 'オランダ語'],
+      ['pl', 'Polish', 'ポーランド語'], ['pt', 'Portuguese', 'ポルトガル語'], ['ru', 'Russian', 'ロシア語'],
+      ['sv', 'Swedish', 'スウェーデン語'], ['sw', 'Swahili', 'スワヒリ語'], ['th', 'Thai', 'タイ語'],
+      ['tl', 'Filipino', 'フィリピノ語'], ['tr', 'Turkish', 'トルコ語'], ['uk', 'Ukrainian', 'ウクライナ語'],
+      ['ur', 'Urdu', 'ウルドゥー語'], ['vi', 'Vietnamese', 'ベトナム語'],
+      ['zh-CN', 'Chinese (Simplified)', '中国語（簡体字）'], ['zh-TW', 'Chinese (Traditional)', '中国語（繁体字）']
+    ];
+    if (context.kind === 'language' && el.matches('option') && el.value) return languages.find(entry => entry[0] === el.value)?.[2] || null;
+    const words = native26JapaneseText.words ||= new Map([
+      ['Language', '言語'], ['Notified accounts', '投稿通知するアカウント'],
+      ['Choose how posts in other languages appear.', '他の言語のツイートの表示方法を設定します。'],
+      ['Auto-translate', '自動翻訳'], ['Translate into', '翻訳先の言語'],
+      ['Posts and replies that aren’t in your language show translated, marked “Translated from …”. Tap the translate icon on a post to see the original.', '他の言語のツイートと返信を自動翻訳し、翻訳元の言語を表示します。翻訳アイコンを押すと原文に戻せます。'],
+      ['Auto-translate is included with Founder, Fighter and Centurion plans. You can still translate any post with the translate icon.', '自動翻訳はFounder・Fighter・Centurionプランで利用できます。手動の翻訳アイコンは引き続き使えます。'],
+      ['See plans', 'プランを見る'], ['Couldn’t load your language settings. Try again later.', '言語設定を読み込めませんでした。しばらくしてから再度お試しください。'],
+      ['Couldn’t save. Try again.', '保存できませんでした。もう一度お試しください。'], ['Saved.', '保存しました。'],
+      ['Translated', '翻訳済み'], ['Translate post', 'ツイートを翻訳'], ['Show original', '原文を表示'], ['Show translation', '翻訳を表示'],
+      ['Translating post…', 'ツイートを翻訳中…'], ['This post is already in your language.', 'このツイートは翻訳先と同じ言語です。'],
+      ['Showing the original post.', '原文を表示しています。'], ['Showing the translation.', '訳文を表示しています。'],
+      ['Couldn’t translate. Try again.', '翻訳できませんでした。もう一度お試しください。'],
+      ['Turn on post notifications', '投稿通知をオンにする'], ['Turn off post notifications', '投稿通知をオフにする'],
+      ['Could not update post notifications. Try again.', '投稿通知を変更できませんでした。もう一度お試しください。'],
+      ['Follow this account to turn on post notifications.', '投稿通知をオンにするには、このアカウントをフォローしてください。'],
+      ['You can get post notifications from up to 25 accounts. Turn one off in Settings → Notified accounts to add another.', '投稿通知は25アカウントまで設定できます。別のアカウントを追加するには、「設定」→「投稿通知するアカウント」で通知をオフにしてください。'],
+      ["You haven't turned on post notifications for anyone.", '投稿通知をオンにしているアカウントはありません。'],
+      ['Something went wrong loading the accounts you get notifications from.', '投稿通知するアカウントを読み込めませんでした。'],
+      ['Loading notified accounts...', '投稿通知するアカウントを読み込み中…'], ['Loading more notified accounts', '投稿通知するアカウントをさらに読み込み中…'],
+      ['Turn off', 'オフにする'], ['Load more', 'さらに読み込む'],
+      ['Chinese (Simplified)', '中国語（簡体字）'], ['Chinese (Traditional)', '中国語（繁体字）']
+    ]);
+    if (context.kind === 'post-notification-action') return text === 'posted' ? 'ツイートしました' : null;
+    if (context.kind === 'post-notification-time') {
+      const relative = text.match(/^(\d+)([smhd])$/);
+      if (relative) return relative[1] + { s: '秒前', m: '分前', h: '時間前', d: '日前' }[relative[2]];
+      if (text === 'Just now') return 'たった今';
+      const date = text.match(/^([A-Za-z]+\.?) (\d{1,2})$/);
+      const month = date && nativeLocalizationMonthNumber(date[1]);
+      return month && +date[2] >= 1 && +date[2] <= 31 ? `${month}月${+date[2]}日` : null;
+    }
+    if (context.kind === 'notified' && context.count && !el.children.length && /^\d+ (?:of|\/) \d+ (?:used|アカウントを設定中)$/.test(clean(el.textContent))) {
+      return text === 'of' ? '/' : text === 'used' ? 'アカウントを設定中' : null;
+    }
+    let match;
+    if (context.kind === 'translation-message' && (match = text.match(/^Translated from (.{1,80})$/))) return `${languages.find(entry => entry[1] === match[1])?.[2] || JP.get(match[1]) || match[1]}から翻訳`;
+    if (context.kind === 'language' && el.matches('option[value=""]') && (match = text.match(/^Browser language \((.{1,80})\)$/))) return `ブラウザの言語（${languages.find(entry => entry[1] === match[1])?.[2] || JP.get(match[1]) || match[1]}）`;
+    if (context.kind === 'notified' && el === context.header.querySelector(':scope > p') &&
+        (match = text.match(/^You get a notification when these accounts post\. Turn it on from the bell on a profile you follow, for up to (\d{1,5}) accounts\.$/))) return `このアカウントがツイートすると通知します。フォロー中のプロフィールのベルから、最大${match[1]}アカウントまで設定できます。`;
+    if (context.kind === 'notified' && attr === 'aria-label' &&
+        (match = text.match(/^(Turning off|Turn off) post notifications for (@[A-Za-z0-9_.-]{1,80})$/))) return `${match[2]}の投稿通知を${match[1] === 'Turning off' ? 'オフにしています…' : 'オフにする'}`;
+    if (context.kind === 'notified' && el.matches('[role="status"],[role="alert"]') &&
+        (match = text.match(/^Could not turn off post notifications for (@[A-Za-z0-9_.-]{1,80})\. Please try again\.$/))) return `${match[1]}の投稿通知をオフにできませんでした。もう一度お試しください。`;
+    return words.get(text) || (context.kind === 'language' && el.matches('option') ? JP.get(text) : null) || null;
+  }
+
+  function patchNative26UI(root = document) {
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const selector = 'button[data-translate-mode],button[data-icon][aria-pressed],main section button[aria-label],main section select > option';
+    const elements = host instanceof Element && host.matches(selector) ? [host] : [];
+    host?.querySelectorAll?.(selector).forEach(el => elements.push(el));
+    for (const el of elements) {
+      if (!nativeLocalization26Context(el)) continue;
+      if (el.matches('option')) {
+        for (const node of el.childNodes) if (node.nodeType === Node.TEXT_NODE) {
+          const value = native26JapaneseText(el, clean(node.nodeValue));
+          if (value) replaceLocalizationText(node, value);
+        }
+      } else for (const attr of ['aria-label', 'title']) {
+        const value = el.getAttribute(attr), out = native26JapaneseText(el, value, attr);
+        if (out && out !== value) ctRememberLocalization(el, attr, out);
+      }
+    }
   }
 
   function isNativeTranslationMetadata(el) {
@@ -10181,7 +10287,7 @@ if (/^just\s+now$/i.test(t)) {
     if (el.closest('.font-extrabold,.font-bold,a')) return null;
     if (!(el === paragraph || el.parentElement === paragraph)) return null;
     const text = clean(node.nodeValue);
-    if (!/^(?:(?:liked|favorited|reposted|retweeted|quoted) your (?:post|tweet|reply)|followed you|mentioned you(?: in a (?:post|tweet))?|replied to (?:your (?:post|tweet)|you)|flagged your post for review|awarded you a badge|interacted with you|(?:さん)?が?あなた(?:の(?:ツイート|返信)(?:を(?:お気に入りに登録|リツイート|引用)|に(?:いいね|返信))|を(?:フォロー|@ツイート)|宛てにツイート|に(?:返信|バッジを贈り))しました)$/i.test(text)) return null;
+    if (!/^(?:(?:liked|favorited|reposted|retweeted|quoted) your (?:post|tweet|reply)|posted|(?:さん)?が?ツイートしました|followed you|mentioned you(?: in a (?:post|tweet))?|replied to (?:your (?:post|tweet)|you)|flagged your post for review|awarded you a badge|interacted with you|(?:さん)?が?あなた(?:の(?:ツイート|返信)(?:を(?:お気に入りに登録|リツイート|引用)|に(?:いいね|返信))|を(?:フォロー|@ツイート)|宛てにツイート|に(?:返信|バッジを贈り))しました)$/i.test(text)) return null;
     return { row, paragraph, element: el };
   }
 
@@ -10248,6 +10354,7 @@ if (/^just\s+now$/i.test(t)) {
   function isLocalizationUI(node) {
     const el = node?.parentElement;
     if (isProtectedLocalizationElement(el)) return false;
+    if (native26JapaneseText(el, clean(node.nodeValue))) return true;
     if (nativePinJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeGameJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeMediaUploadJapaneseText(el, node.nodeValue)) return true;
@@ -10487,7 +10594,7 @@ if (/^just\s+now$/i.test(t)) {
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
     const parentPoll = nativeLocalizationParentPostPreview(el) && el.matches('p.mt-1.text-tl-app-text-muted') && text.match(/^Poll · ([2-5]) choices$/);
-    let out = nativePinJapaneseText(el, text) || nativeGameJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+    let out = native26JapaneseText(el, text) || nativePinJapaneseText(el, text) || nativeGameJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
       (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
@@ -10511,6 +10618,7 @@ if (/^just\s+now$/i.test(t)) {
     ctSyncLocalizationAppearance(root);
     patchNativePollAndAccountUI(root);
     patchNativeGamesUI(root);
+    patchNative26UI(root);
     localizationScopeNodes(root).forEach(translateTextNode);
     patchUIAttributes(root);
   }
@@ -10537,7 +10645,7 @@ if (/^just\s+now$/i.test(t)) {
       // Mentions/quotes have a separate action paragraph and need no actor
       // particles. Never reach into a previous notification to find an actor.
       if (context.element === paragraph) continue;
-      if (!/^(?:さん)?が?あなた/.test(clean(action.nodeValue))) continue;
+      if (!/^(?:さん)?が?(?:あなた|ツイートしました$)/.test(clean(action.nodeValue))) continue;
       const actorElements = [...paragraph.children].filter(el => el.matches('span.font-extrabold'));
       if (!actorElements.length) continue;
       const siblings = [...paragraph.childNodes];
@@ -10574,8 +10682,8 @@ if (/^just\s+now$/i.test(t)) {
           if (otherWord) next.nodeValue = '';
         }
       }
-      const actionText = clean(action.nodeValue).replace(/^(?:さん)?が?(?=あなた)/, '');
-      if (!/^あなた/.test(actionText)) continue;
+      const actionText = clean(action.nodeValue).replace(/^(?:さん)?が?(?=あなた|ツイートしました$)/, '');
+      if (!/^(?:あなた|ツイートしました$)/.test(actionText)) continue;
       const previous = before.slice().reverse().find(node => clean(node.textContent));
       if (!previous) continue;
       const prefix = previous.nodeType === Node.TEXT_NODE && /そのほか\d+人$/.test(clean(previous.nodeValue)) ? 'が' : 'さんが';
@@ -11083,72 +11191,13 @@ if (/^just\s+now$/i.test(t)) {
   }
 
 
-  function ctTranslationButtonText(el) {
-    return clean(el?.textContent || el?.getAttribute?.('aria-label') || el?.getAttribute?.('title') || '');
-  }
-
   function ctTranslationControls(root = document) {
-    const scope = root instanceof Element ? root : document;
-    const out = [];
-    const selector = 'button,[role="button"],a';
-    if (scope instanceof Element && scope.matches(selector)) out.push(scope);
-    scope.querySelectorAll?.(selector).forEach(el => out.push(el));
-    return out.filter(el => /^(?:Show translation|Translate|翻訳を表示)$/i.test(ctTranslationButtonText(el)));
+    const controls = new Set(root.querySelectorAll?.('button[data-translate-mode]') || []);
+    if (root.matches?.('button[data-translate-mode]')) controls.add(root);
+    const article = root.closest?.('article');
+    if (article) for (const button of article.querySelectorAll('button[data-translate-mode]')) controls.add(button);
+    return [...controls];
   }
-
-  function ctDeclaredLanguage(container) {
-    if (!container) return '';
-    const nodes = [container, ...(container.querySelectorAll?.('[lang],[data-lang],[data-language]') || [])];
-    for (const el of nodes) {
-      const raw = clean(el.getAttribute?.('lang') || el.getAttribute?.('data-lang') || el.getAttribute?.('data-language') || '').toLowerCase();
-      const lang = raw.split(/[-_]/)[0];
-      if (/^[a-z]{2,3}$/.test(lang)) return lang;
-    }
-    return '';
-  }
-
-  function ctPostTextForTranslation(control) {
-    const article = control?.closest?.('article');
-    if (!article) return '';
-    let box = control.parentElement;
-    for (let depth = 0; box && box !== article && depth < 6; depth++, box = box.parentElement) {
-      const candidates = [...box.querySelectorAll('p,[dir="auto"],[data-testid*="text" i]')]
-        .filter(el => !el.closest('button,[role="button"]'))
-        .map(el => clean(el.textContent))
-        .filter(t => t && !/^(?:Show translation|Translate|翻訳を表示|Show original|原文を表示)$/i.test(t));
-      const text = candidates.sort((a,b) => b.length - a.length)[0] || '';
-      if (text.length >= 2) return text;
-    }
-    if (typeof articleText === 'function') return clean(articleText(article));
-    return clean(article.textContent);
-  }
-
-  function ctLikelyLanguage(text, container) {
-    const declared = ctDeclaredLanguage(container);
-    if (declared) return declared;
-    const s = clean(text).replace(/https?:\/\/\S+/gi,' ').replace(/@[A-Za-z0-9_.-]+/g,' ').replace(/#[^\s]+/g,' ');
-    if (!s) return 'unknown';
-    if (/[\u3040-\u30ff]/u.test(s)) return 'ja';
-    if (/[\uac00-\ud7af]/u.test(s)) return 'ko';
-    if (/[\u4e00-\u9fff]/u.test(s)) return 'zh';
-    if (/[\u0400-\u04ff]/u.test(s)) return 'ru';
-    if (/[\u0600-\u06ff]/u.test(s)) return 'ar';
-    if (/[\u0590-\u05ff]/u.test(s)) return 'he';
-    if (/[\u0900-\u097f]/u.test(s)) return 'hi';
-    if (/[\u0e00-\u0e7f]/u.test(s)) return 'th';
-    const lowered = ` ${s.toLowerCase()} `;
-    const words = s.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) || [];
-    if (!words.length) return 'unknown';
-    const other = ['bonjour','merci','salut','avec','pour','dans','une','des','est','mais','vous','nous','hola','gracias','para','con','una','que','los','las','por','pero','como','muy','ciao','grazie','per','che','gli','della','sono','molto','hallo','danke','und','der','die','das','ist','nicht','mit','für','ein','eine','olá','obrigado','obrigada','não','muito'];
-    if (other.some(w => lowered.includes(` ${w} `)) || /[À-ÖØ-öø-ÿ]/u.test(s)) return 'other';
-    const english = new Set(['a','an','and','are','as','at','be','been','but','by','can','could','did','do','does','for','from','had','has','have','he','her','here','his','how','i','if','in','is','it','just','me','more','my','no','not','of','on','one','or','our','out','she','so','some','than','that','the','their','them','there','they','this','to','too','up','us','was','we','were','what','when','where','which','who','why','will','with','would','you','your']);
-    const hits = words.reduce((n,w) => n + (english.has(w) ? 1 : 0), 0);
-    if (hits >= 2 || (words.length <= 4 && hits >= 1)) return 'en';
-    if (words.length <= 3 && /^[\x00-\x7F\s.,!?'"()\-:;]+$/u.test(s)) return 'en';
-    if (words.length >= 5 && hits / words.length >= 0.12) return 'en';
-    return 'other';
-  }
-
 
   function patchExactPostTime(root = document) {
     ctTimestampPatchExactPostTime(root);
@@ -11236,7 +11285,7 @@ if (/^just\s+now$/i.test(t)) {
       );
       patchComposeJapanese(root);
       patchNotificationFollowGrammar(root);
-      patchAutoTranslation(root, 'ja');
+      patchDeviceTranslation(root);
       ctReplyTimesEnhance(root);
       patchExactPostTime(root);
       patchInviteJoinedLabels(root);
