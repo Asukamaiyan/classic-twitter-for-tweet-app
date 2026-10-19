@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.29.1
+// @version      6.29.2
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -2874,7 +2874,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.29.1';
+    document.documentElement.dataset.ctActiveVersion = '6.29.2';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -4160,9 +4160,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     for (const match of value.matchAll(/https?:\/\/[^\s<>"'`\u0000-\u001f\u007f「」『』【】（）、。]+/gi)) {
       if (match.index > 0 && /[A-Za-z0-9_:/\\]/.test(value[match.index - 1])) continue;
       let label = match[0].replace(/[.,!?;:]+$/, '');
-      for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
-        while (label.endsWith(close) && label.split(close).length > label.split(open).length) label = label.slice(0, -1);
-      }
+      let previousLabel;
+      do {
+        previousLabel = label;
+        for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+          while (label.endsWith(close) && label.split(close).length > label.split(open).length) label = label.slice(0, -1);
+        }
+      } while (label !== previousLabel);
       let url;
       try { url = new URL(label); } catch { continue; }
       if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) continue;
@@ -11018,6 +11022,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.29.1 loaded'
+    '🐦 Classic Twitter JP v6.29.2 loaded'
   );
 })();
