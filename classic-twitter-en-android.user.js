@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Android
 // @namespace    https://tweet.app/
-// @version      6.29.0
+// @version      6.29.1
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -11,7 +11,6 @@
 // @connect      news.web.nhk
 // @connect      www.nikkansports.com
 // @connect      rss.itmedia.co.jp
-// @connect      *
 
 // @noframes
 // @run-at       document-start
@@ -671,7 +670,7 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
 }
 
   /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getLinkPreviews, setLinkPreviews, getDeviceTranslation, setDeviceTranslation, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getDeviceTranslation, setDeviceTranslation, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -679,8 +678,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     tools: '便利ツール', title: '便利ツール', close: '閉じる',
     appearance: '昔のTwitterの表示', classic: 'クラシック表示を使う', classicHelp: '青いナビゲーションと星のお気に入り。オフにするとハート・いいね表記・Tweet標準の色や形に戻ります。日本語化と便利機能はそのまま使えます。動きを減らす端末設定にも対応します。',
     scope: '表示設定・キーワード・保存検索・保存投稿は、このブラウザ内で共有します。お気に入りの履歴はログインアカウント別です。',
-    links: 'URLカードとリンク', linksAutomatic: 'URLカードを自動で取得する',
-    linksHelp: '表示中の投稿のリンク先と画像配信元へ直接通信します。ログイン情報や投稿本文は送りません。オフでもカードの「プレビューを取得」から手動で読めます。サイトによってはアクセス許可が必要です。',
+    links: 'リンク付き投稿',
     linksOnly: 'ホームでリンク付き投稿だけ表示する', linksOnlyHelp: '読み込み済みの投稿だけを絞り込みます。詳細・返信・通知・プロフィールには適用しません。',
     linksCount: (shown, total) => `リンク付きのみ · 確認済み ${shown} / ${total}件`, linksAll: 'すべて表示',
     filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
@@ -725,8 +723,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     tools: 'Tools', title: 'Tools', close: 'Close',
     appearance: 'Classic Twitter appearance', classic: 'Use classic appearance', classicHelp: 'Blue navigation and star favorites. Turn off to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available. Respects your reduced motion preference.',
     scope: 'Appearance, keywords, saved searches and saved links are shared within this browser. Favorites history is saved separately for each signed-in account.',
-    links: 'URL cards and links', linksAutomatic: 'Automatically load URL previews',
-    linksHelp: 'Reads visible posts’ destination pages and image hosts directly, without sign-in credentials or post text. Turn off for manual Load preview. A site permission may be required.',
+    links: 'Posts with links',
     linksOnly: 'Show only posts with links on Home', linksOnlyHelp: 'Filters only loaded posts. Does not filter details, replies, notifications or profiles.',
     linksCount: (shown, total) => `Links only · ${shown} / ${total} verified posts`, linksAll: 'Show all',
     filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
@@ -873,7 +870,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   document.body.append(root);
 
   function openPanel(open, moveFocus = true) {
-    if (open) { updateBookmarkControl(); refreshAppearance(); refreshLinkPreviews(); }
+    if (open) { updateBookmarkControl(); refreshAppearance(); }
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open && moveFocus) close.focus({ preventScroll: true });
@@ -960,25 +957,8 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     body.append(section);
   }
 
-  let refreshLinkPreviews = () => {};
   const linksSection = element('section');
   linksSection.append(element('h3', copy.links));
-  if (typeof getLinkPreviews === 'function' && typeof setLinkPreviews === 'function') {
-    const label = element('label');
-    const input = element('input', undefined, { type:'checkbox', id:'ct-local-link-previews', 'aria-describedby':'ct-local-link-help' });
-    refreshLinkPreviews = () => { input.checked = getLinkPreviews() === true; };
-    refreshLinkPreviews();
-    label.append(input, document.createTextNode(copy.linksAutomatic));
-    input.addEventListener('change', () => {
-      const requested = input.checked;
-      try {
-        if (setLinkPreviews(requested) === false || getLinkPreviews() !== requested) throw new Error('Setting was not saved');
-        announce(copy.saved);
-      } catch { announce(copy.storageError, true); }
-      refreshLinkPreviews();
-    });
-    linksSection.append(label, element('p', copy.linksHelp, { id:'ct-local-link-help', class:'ct-local-note' }));
-  }
   const linksOnlyLabel = element('label');
   const linksOnly = element('input', undefined, { type:'checkbox', id:'ct-local-links-only', 'aria-describedby':'ct-local-links-only-help' });
   linksOnly.checked = state.linksOnly;
@@ -1265,7 +1245,6 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   function refresh() {
     refreshBrowserNotifications();
-    refreshLinkPreviews();
     refreshLinksFilter();
     updateBookmarkControl();
     for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);
@@ -2890,15 +2869,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   let ctTools = null;
   let ctBrowserNotifications = null;
-  const ctLinkPreviewsSettingKey = 'ct-link-previews-enabled-v1';
-  function ctGetLinkPreviewsEnabled() {
-    return loadJSON(ctLinkPreviewsSettingKey, true) !== false;
-  }
 
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.29.0';
+    document.documentElement.dataset.ctActiveVersion = '6.29.1';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -2909,13 +2884,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
-      getLinkPreviews: ctGetLinkPreviewsEnabled,
-      setLinkPreviews: enabled => {
-        if (!saveJSON(ctLinkPreviewsSettingKey, enabled === true)) throw new Error('Storage unavailable');
-        ctLinkPreviewsCleanup();
-        ctLinkPreviewsPatch(document);
-        ctScheduleScan();
-      },
       browserNotifications: ctBrowserNotifications,
       restoreVisibleFavorites: ctRestoreVisibleFavorites,
       getFavoriteHistoryStatus: ctFavoriteHistoryStatus,
@@ -2944,12 +2912,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     document.addEventListener('click', ctRememberTranslationChoice, true);
     ctRunScan();
     window.addEventListener('popstate', ctScheduleScan);
-    window.addEventListener('storage', event => {
-      if (event.key !== ctLinkPreviewsSettingKey && event.key !== null) return;
-      ctLinkPreviewsCleanup();
-      ctTools?.refresh();
-      ctScheduleScan();
-    });
     for (const name of ['pushState', 'replaceState']) {
       const original = history[name];
       history[name] = function (...args) {
@@ -2962,7 +2924,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       if (document.hidden) {
         observer.disconnect(); clearTimeout(ctScanTimer); ctScanTimer = null;
         ctScanFull = false; ctScanRoots.clear(); ctCancelTranslations();
-        ctLinkPreviewsCleanup();
       } else { ctObserve(); ctScheduleScan(); }
     });
     window.addEventListener('pagehide', () => {
@@ -2972,7 +2933,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       ctScanTimer = null;
       ctScanFull = false; ctScanRoots.clear();
       ctCancelTranslations();
-      ctLinkPreviewsCleanup();
     });
     window.addEventListener('pageshow', event => {
       if (event.persisted && !ctPageActive) {
@@ -3693,6 +3653,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-handle,.ct-profile-time,.ct-profile-edited{font-size:12px;color:var(--color-tl-app-text-muted,#657786);text-decoration:none}
       .ct-profile-time{white-space:nowrap}
       .ct-profile-text{font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 10px}
+      .ct-profile-text a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+      .ct-profile-text a:focus-visible{outline:2px solid currentColor;outline-offset:2px}
       .ct-profile-gallery{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;border-radius:4px;scrollbar-width:thin}
       .ct-profile-photo{display:block;flex:0 0 100%;min-width:0;padding:0;background:var(--color-tl-app-bg,#f5f8fa);border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;overflow:hidden;scroll-snap-align:start;cursor:zoom-in}
       .ct-profile-photo img{display:block;width:100%;height:auto;max-height:480px;object-fit:contain}
@@ -4189,6 +4151,28 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const button = document.createElement('button'); button.type = 'button'; button.className = 'ct-profile-control';
     button.textContent = text; button.onclick = action; return button;
   }
+  function ctProfilePostText(value) {
+    const text = document.createElement('p'); text.className = 'ct-profile-text';
+    let offset = 0;
+    // Only added profile rows need linkification. Native post nodes and their
+    // handlers remain untouched; anchors do not fetch previews or metadata.
+    for (const match of value.matchAll(/https?:\/\/[^\s<>"'`\u0000-\u001f\u007f「」『』【】（）、。]+/gi)) {
+      if (match.index > 0 && /[A-Za-z0-9_:/\\]/.test(value[match.index - 1])) continue;
+      let label = match[0].replace(/[.,!?;:]+$/, '');
+      for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+        while (label.endsWith(close) && label.split(close).length > label.split(open).length) label = label.slice(0, -1);
+      }
+      let url;
+      try { url = new URL(label); } catch { continue; }
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) continue;
+      text.append(document.createTextNode(value.slice(offset, match.index)));
+      const link = document.createElement('a'); link.href = url.href; link.textContent = label;
+      link.target = '_blank'; link.rel = 'noopener noreferrer';
+      text.append(link); offset = match.index + label.length;
+    }
+    text.append(document.createTextNode(value.slice(offset)));
+    return text;
+  }
   function ctProfileRow(item) {
     const row = document.createElement('div'); row.className = 'ct-profile-row'; row.dataset.ctProfilePost = item.id;
     ctProfileState.rowItems.set(row, JSON.stringify(item));
@@ -4218,8 +4202,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       edited.textContent = ctProfileText('編集済み', 'Edited'); meta.append(edited);
     }
     main.append(meta);
-    if (item.text) { const text = document.createElement('p'); text.className = 'ct-profile-text';
-      text.dataset.ctLinkPreviewSource = 'original'; text.textContent = item.text; main.append(text); }
+    if (item.text) main.append(ctProfilePostText(item.text));
     const images = (item.media || []).filter(asset => asset.type === 'image');
     if (images.length) {
       const gallery = document.createElement('div'); gallery.className = 'ct-profile-gallery';
@@ -4271,7 +4254,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (typeof ctMediaEnhanceVideo === 'function') {
       for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
     }
-    if (typeof ctLinkPreviewsPatch === 'function') ctLinkPreviewsPatch(panel);
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
   function ctProfileFavoriteMuteState() {
@@ -4858,6 +4840,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   // match through the author's established read-only posts route, never a quote
   // link, text search, React internals or an extra engagement request.
   const ctFavoriteCaptures = new WeakMap();
+  const ctFavoriteInteractions = new WeakMap();
+  const ctFavoriteOriginals = new WeakMap();
   const ctFavoritePostCache = new Map();
   const ctFavoriteStateWatchers = new WeakMap();
   let ctFavoriteRestoreBusy = false;
@@ -4887,11 +4871,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return false;
   }
 
-  function ctWatchFavoriteRollback(button, snapshot, uid, generation, liked) {
+  function ctWatchFavoriteRollback(button, snapshot, uid, generation, liked, sameIdentity = () => true) {
     let currentLiked = liked;
     const stop = () => { observer.disconnect(); clearTimeout(timer); ctFavoriteStateWatchers.delete(button); };
     const observer = new MutationObserver(() => {
-      if (!button.isConnected || ctNetworkState.authUID !== uid || ctFavoriteCaptures.get(button) !== generation) { stop(); return; }
+      if (!button.isConnected || ctNetworkState.authUID !== uid || ctFavoriteCaptures.get(button) !== generation || !sameIdentity()) { stop(); return; }
       const next = ctIsLiked(button);
       if (next === currentLiked) return;
       currentLiked = next;
@@ -4958,10 +4942,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .some(value => /^(?:Show original|原文を表示)$/i.test((value || '').trim()))) ? 'translated' : 'original';
   }
 
-  function ctFavoriteCandidate(article) {
+  function ctFavoriteCandidate(article, removing = false) {
     const translation = ctFavoriteTranslationState(article);
-    if (translation === 'busy' || translation === 'unknown') return null;
-    const translated = translation === 'translated';
+    if (!removing && (translation === 'busy' || translation === 'unknown')) return null;
+    // Removing a known Favorite needs its identity, not the displayed body.
+    // Uncertain native text must still resolve through a saved/API original.
+    const translated = translation !== 'original';
     const timestamp = [...article.querySelectorAll('span.text-tl-app-text-muted.hover\\:underline[title]')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border') &&
       !!ctTimestampParse(el.title));
@@ -4984,6 +4970,44 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return { username, name: author?.textContent || username, text: body.textContent,
       avatar: articleAvatar(article), createdAt: timestamp?.title || '', savedAt: Date.now(),
       relativeText: replyTime?.textContent || '', observedAt: Date.now(), parentId, translated };
+  }
+
+  function ctFavoriteSavedRemoval(candidate, uid) {
+    if (!candidate?.id || !candidate.translated || !candidate.createdAt ||
+        ctNetworkState.authUID !== uid || typeof loadFavorites !== 'function') return null;
+    const created = ctTimestampParse(candidate.createdAt)?.getTime();
+    const matches = loadFavorites().filter(item => item.id === candidate.id &&
+      typeof item.username === 'string' && item.username.toLowerCase() === candidate.username?.toLowerCase() &&
+      ctTimestampParse(item.createdAt)?.getTime() === created && typeof item.text === 'string');
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function ctFavoriteCaptureSame(article, candidate, snapshot) {
+    const current = ctFavoriteCandidate(article, true);
+    if (!current || (current.id || null) !== (candidate.id || null) ||
+        current.username?.toLowerCase() !== candidate.username?.toLowerCase() ||
+        (current.parentId || null) !== (candidate.parentId || null)) return false;
+    if (candidate.createdAt) return ctTimestampParse(current.createdAt)?.getTime() === ctTimestampParse(candidate.createdAt)?.getTime();
+    if (candidate.id) return true;
+    return !current.translated && current.text === candidate.text &&
+      ctFavoriteRelativeTimeMatches(current.relativeText, snapshot.createdAt, current.observedAt);
+  }
+
+  function ctFavoriteRememberedOriginal(button, article, uid) {
+    const original = ctFavoriteOriginals.get(button);
+    if (!original) return null;
+    const created = ctTimestampParse(original.candidate.createdAt)?.getTime();
+    if (!uid || original.uid !== uid || original.article !== article || !button.isConnected ||
+        button.closest('article') !== article || original.path !== location.pathname + location.search ||
+        !Number.isFinite(created) || ctTimestampParse(original.snapshot.createdAt)?.getTime() !== created ||
+        typeof original.candidate.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(original.candidate.username) ||
+        typeof original.snapshot.username !== 'string' || original.snapshot.username.toLowerCase() !== original.candidate.username.toLowerCase() ||
+        typeof original.snapshot.id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(original.snapshot.id) ||
+        original.candidate.id && original.candidate.id !== original.snapshot.id ||
+        !ctFavoriteCaptureSame(article, original.candidate, original.snapshot)) {
+      ctFavoriteOriginals.delete(button); return null;
+    }
+    return original;
   }
 
   async function ctFavoriteAuthorPosts(username, auth, deadline = Infinity) {
@@ -5090,6 +5114,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         if (Date.now() >= deadline) { unresolved += cards.length - index; break; }
         if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
         const button = article.querySelector('button[data-testid="tweet-like-action"]');
+        const interaction = ctFavoriteInteractions.get(button) || 0;
+        const path = location.pathname + location.search;
         const candidate = ctFavoriteCandidate(article);
         let snapshot = candidate && await ctResolveFavorite(candidate, auth.uid, deadline);
         if (snapshot && Date.now() < deadline) {
@@ -5107,7 +5133,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         const current = await getAuth();
         if (current?.uid !== auth.uid) throw new Error('account-changed');
         if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
-        if (snapshot && button.isConnected && ctIsLiked(button)) {
+        // A pending recovery must not undo a later click, even if a rapid
+        // unlike/like cycle or a reused row ends in the same pressed state.
+        if (snapshot && button?.isConnected && button.closest('article') === article && ctIsLiked(button) &&
+            article.querySelector('button[data-testid="tweet-like-action"]') === button &&
+            location.pathname + location.search === path && (ctFavoriteInteractions.get(button) || 0) === interaction &&
+            (!candidate.createdAt || ctTimestampParse(snapshot.createdAt)?.getTime() === ctTimestampParse(candidate.createdAt)?.getTime()) &&
+            ctFavoriteCaptureSame(article, candidate, snapshot)) {
           if (saveFavorite(snapshot, auth.uid) !== false) saved++;
         } else unresolved++;
       }
@@ -5119,24 +5151,42 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const button = event.target.closest?.('button[data-testid="tweet-like-action"]');
     const article = button?.closest('article');
     if (!article || article.closest('[data-ct-owned],[data-ct-local-ui]')) return;
-    ctFavoriteStateWatchers.get(button)?.();
-    const candidate = ctFavoriteCandidate(article);
-    const uid = ctNetworkState.authUID;
-    if (!candidate || !uid) return;
+    // Invalidate older recovery work for every native click, including a
+    // currently unidentifiable reply that cannot safely be captured itself.
+    ctFavoriteInteractions.set(button, (ctFavoriteInteractions.get(button) || 0) + 1);
     const wasLiked = ctIsLiked(button);
+    const uid = ctNetworkState.authUID;
+    const original = ctFavoriteRememberedOriginal(button, article, uid);
+    let candidate = ctFavoriteCandidate(article, wasLiked);
+    let remembered = null;
+    if (!candidate && original) {
+      // A prior unlike removes the stored Favorite, but not the independently
+      // verified original for this unchanged native button. An explicit re-like
+      // can reuse it even after the short rollback observer has expired.
+      candidate = ctFavoriteCandidate(article, true);
+      remembered = original.snapshot;
+    }
+    if (!candidate || !uid) return;
+    // Accepted capture work owns its separate generation; recovery interaction
+    // tracking never supplies a new original or extends the rollback observer.
     const generation = (ctFavoriteCaptures.get(button) || 0) + 1;
     ctFavoriteCaptures.set(button, generation);
+    ctFavoriteStateWatchers.get(button)?.();
+    const path = location.pathname + location.search;
     setTimeout(async () => {
       try {
         if (ctFavoriteCaptures.get(button) !== generation || !button.isConnected || ctNetworkState.authUID !== uid) return;
         const liked = ctIsLiked(button);
         if (liked === wasLiked) return;
-        const snapshot = await ctResolveFavorite(candidate, uid);
+        const snapshot = remembered || (wasLiked && ctFavoriteSavedRemoval(candidate, uid)) || await ctResolveFavorite(candidate, uid);
+        const sameIdentity = () => button.closest('article') === article && location.pathname + location.search === path &&
+          ctFavoriteCaptureSame(article, candidate, snapshot);
         if (!snapshot || ctFavoriteCaptures.get(button) !== generation || !button.isConnected ||
-            ctNetworkState.authUID !== uid || ctIsLiked(button) !== liked) return;
+            ctNetworkState.authUID !== uid || ctIsLiked(button) !== liked || !sameIdentity()) return;
+        ctFavoriteOriginals.set(button, { article, candidate, snapshot, uid, path });
         if (liked) saveFavorite(snapshot, uid);
         else removeFavorite(snapshot.id, uid);
-        ctWatchFavoriteRollback(button, snapshot, uid, generation, liked);
+        ctWatchFavoriteRollback(button, snapshot, uid, generation, liked, sameIdentity);
         if (favoritesActive) renderFavoritesPanel();
       } catch { /* Native favorite actions remain available if a read fails. */ }
     }, 450);
@@ -7773,566 +7823,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ctNewsScheduleRefresh();
   }
 
-    // Link cards use anonymous reads of the original public destination. Neither
-  // native post text nor its anchors/handlers are replaced.
-  const ctLinkPreviewState = { records: new Map(), cards: new Map(), originals: new WeakMap(), jobs: new Map(), cache: new Map(), observer: null, observedSources: new Set(),
-    context: '', generation: 0, running: 0, enabled: null, style: null, imageBytes: 0, recordImageBytes: 0 };
-  const ctLinkPreviewLimits = { text: 512 * 1024, image: 2 * 1024 * 1024, cacheImages: 16 * 1024 * 1024,
-    cache: 100, records: 160, timeout: 8000, ttl: 15 * 60 * 1000, failureTTL: 60000 };
-  const ctLinkPreviewProtected = '[data-ct-owned],[data-ct-local-ui],[contenteditable]:not([contenteditable="false"]),[role="dialog"],blockquote,[aria-label^="Quoted post"],[data-testid="quote-tweet"],[data-ct-quote],[aria-live],fieldset,[data-testid="profile-bio"]';
-  function ctLinkPreviewText(value, length = 240) {
-    return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, length) : '';
-  }
-  function ctLinkPreviewURL(value, base = '', metadata = true) {
-    if (typeof value !== 'string' || !value || value.length > 4096 || /[\u0000-\u0020\u007f\\]/.test(value)) return '';
-    try {
-      const url = base ? new URL(value, base) : new URL(value);
-      const host = url.hostname.toLowerCase().replace(/\.$/, '');
-      // Public domain names only: this also rejects alternative numeric IPv4
-      // spellings normalized by URL, IPv6, LAN suffixes and single-label hosts.
-      if (url.protocol !== 'https:' || url.username || url.password || url.port && url.port !== '443' ||
-          !host.includes('.') || /[\[\]:]/.test(host) || /^\d+(?:\.\d+){3}$/.test(host) ||
-          /(?:^|\.)(?:localhost|local|localdomain|internal|lan|home|invalid|test|onion|arpa)$/.test(host) ||
-          /^(?:localhost|metadata\.google\.internal)$/.test(host) || host === location.hostname.toLowerCase() ||
-          host === 'tweet.app' || host.endsWith('.tweet.app')) return '';
-      if (metadata) for (const key of url.searchParams.keys()) {
-        const normalized = key.toLowerCase().replace(/[-_.]/g, '');
-        if (/(?:token|secret|password|passwd|signature|credential|session|jwt|saml|authorization|apikey|accesskey|privatekey)/.test(normalized) ||
-            /^(?:key|auth|authorization|sig|code|accesskey|apikey|policy|keypairid|session(?:id|key)?|jwt|saml|sso)$/.test(normalized) ||
-            normalized.startsWith('xamz') || normalized.startsWith('xgoog')) return '';
-      }
-      return url.href;
-    } catch { return ''; }
-  }
-  function ctLinkPreviewFirstURL(text) {
-    if (typeof text !== 'string' || text.length > 100000) return '';
-    const matches = text.match(/https:\/\/[^\s<>"'`]+/gi) || [];
-    for (let value of matches.slice(0, 32)) {
-      value = value.replace(/[.,!?;:、。！？，；：]+$/, '');
-      for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
-        while (value.endsWith(close) && value.split(close).length > value.split(open).length) value = value.slice(0, -1);
-      }
-      const url = ctLinkPreviewURL(value, '', false);
-      if (url) return url;
-    }
-    return '';
-  }
-  function ctLinkPreviewParse(html, finalURL) {
-    const base = ctLinkPreviewURL(finalURL);
-    if (!base || typeof html !== 'string' || !html || html.length > ctLinkPreviewLimits.text || /<!ENTITY/i.test(html)) return null;
-    // Parse only meta/title tokens, never the external body, scripts, images,
-    // frames or base element. The detached parser cannot trigger body resources.
-    const head = html.slice(0, 128 * 1024)
-      .replace(/<!--[\s\S]*?(?:-->|$)|<(script|style|noscript|template)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, '')
-      .split(/<body\b|<\/head\s*>/i)[0];
-    const tags = (head.match(/<meta\b(?:"[^"]*"|'[^']*'|[^'">])*?>/gi) || []).slice(0, 128).filter(tag => tag.length <= 8192);
-    const rawTitle = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(head)?.[1]?.slice(0, 3000) || '';
-    if (!tags.length && !rawTitle && !/<(?:!doctype\s+html|html|head|body)\b/i.test(html)) return null;
-    const doc = new DOMParser().parseFromString('<!doctype html><html><head>' + tags.join('') +
-      '<title>' + rawTitle.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</title></head></html>', 'text/html');
-    const meta = new Map();
-    for (const node of doc.querySelectorAll('meta')) {
-      const key = (node.getAttribute('property') || node.getAttribute('name') || '').toLowerCase();
-      const value = node.getAttribute('content') || '';
-      if (!meta.has(key) && value) meta.set(key, value);
-    }
-    const domain = new URL(base).hostname;
-    const title = ctLinkPreviewText(meta.get('og:title') || meta.get('twitter:title') || doc.title) || domain;
-    const description = ctLinkPreviewText(meta.get('og:description') || meta.get('twitter:description') || meta.get('description'), 360);
-    const site = ctLinkPreviewText(meta.get('og:site_name'), 100) || domain;
-    const images = [];
-    for (const key of ['og:image:secure_url', 'og:image', 'twitter:image', 'twitter:image:src']) {
-      const image = ctLinkPreviewURL((meta.get(key) || '').trim(), base);
-      if (image && !images.includes(image)) images.push(image);
-      if (images.length === 2) break;
-    }
-    return { title, description, site, domain, images };
-  }
-  function ctLinkPreviewHeader(headers, name) {
-    if (typeof headers !== 'string' || headers.length > 32768) return '';
-    const value = headers.split(/\r?\n/).find(line => line.slice(0, line.indexOf(':')).toLowerCase() === name);
-    return value ? value.slice(value.indexOf(':') + 1).trim() : '';
-  }
-  function ctLinkPreviewRequest(value, binary = false) {
-    const target = ctLinkPreviewURL(value);
-    let current = null, canceled = false;
-    const fail = reason => ({ ok: false, reason });
-    const abort = () => { canceled = true; current?.abort(); };
-    const single = url => new Promise(resolve => {
-      let settled = false, handle = null, abortWhenReady = false;
-      const limit = binary ? ctLinkPreviewLimits.image : ctLinkPreviewLimits.text;
-      const finish = result => { if (!settled) { settled = true; clearTimeout(timer); resolve(result); } };
-      const stop = reason => {
-        if (settled) return;
-        finish(fail(reason)); abortWhenReady = true;
-        try { handle?.abort?.(); } catch {}
-      };
-      const timer = setTimeout(() => stop('timeout'), ctLinkPreviewLimits.timeout);
-      current = { abort: () => stop('canceled') };
-      let request = null;
-      if (typeof GM_xmlhttpRequest === 'function') request = GM_xmlhttpRequest;
-      else { const gm = typeof GM !== 'undefined' ? GM : globalThis.GM;
-        if (typeof gm?.xmlHttpRequest === 'function') request = gm.xmlHttpRequest.bind(gm); }
-      if (!request) { finish(fail('unavailable')); return; }
-      const parse = response => {
-        try {
-          const status = Number(response?.status);
-          const aliases = [response.finalUrl, response.responseURL].filter(Boolean).map(urlValue => ctLinkPreviewURL(urlValue));
-          if (aliases.some(urlValue => !urlValue) || aliases.length === 2 && aliases[0] !== aliases[1]) return fail('unsafe');
-          const finalURL = aliases[0] || url;
-          const headers = response.responseHeaders || '';
-          if ([301, 302, 303, 307, 308].includes(status)) {
-            const redirect = ctLinkPreviewURL(ctLinkPreviewHeader(headers, 'location'), finalURL);
-            return redirect ? { redirect } : fail('unsafe');
-          }
-          if (!(status >= 200 && status < 300)) return fail(status === 401 || status === 403 ? 'permission' : 'http');
-          if (Number(ctLinkPreviewHeader(headers, 'content-length')) > limit) return fail('size');
-          const type = ctLinkPreviewHeader(headers, 'content-type').split(';')[0].toLowerCase();
-          if (binary) {
-            if (!/^image\/(?:jpeg|png|webp|avif)$/.test(type)) return fail('image');
-            const data = response.response;
-            // Stay serializes arraybuffer responses as ordinary byte arrays.
-            // Validate the complete bounded array before allocating a buffer.
-            const serialized = Array.isArray(data);
-            const length = serialized ? data.length : data?.byteLength;
-            if (!Number.isSafeInteger(length) || length < 8 || length > limit || serialized &&
-                data.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)) return fail('image');
-            const bytes = serialized ? new Uint8Array(data) : new Uint8Array(data.buffer || data, data.byteOffset || 0, length);
-            const ascii = (start, end) => String.fromCharCode(...bytes.slice(start, end));
-            const valid = type === 'image/jpeg' ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 :
-              type === 'image/png' ? bytes[0] === 137 && ascii(1, 4) === 'PNG' && bytes[4] === 13 &&
-                bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10 :
-              type === 'image/webp' ? ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP' :
-              ascii(4, 8) === 'ftyp' && /(?:avif|avis)/.test(ascii(8, 32));
-            // Animated image formats cannot autoplay through a preview. GIFs
-            // are omitted; reject the animation markers in PNG/WebP/AVIF too.
-            let animated = type === 'image/avif' && /avis/.test(ascii(8, 32));
-            if (type === 'image/png' || type === 'image/webp') {
-              const marker = type === 'image/png' ? 'acTL' : 'ANIM';
-              for (let i = 8; i + 4 <= bytes.length; i++) if (bytes[i] === marker.charCodeAt(0) &&
-                  bytes[i + 1] === marker.charCodeAt(1) && bytes[i + 2] === marker.charCodeAt(2) &&
-                  bytes[i + 3] === marker.charCodeAt(3)) { animated = true; break; }
-            }
-            return valid && !animated ? { ok: true, blob: new Blob([bytes], { type }), url: finalURL } : fail('image');
-          }
-          if (type && !/^(?:text\/html|application\/xhtml\+xml)$/.test(type)) return fail('type');
-          let html; try { html = response.responseText; } catch {}
-          if (typeof html !== 'string') html = response.response;
-          return typeof html === 'string' && html.length <= limit ? { ok: true, html, url: finalURL } : fail('size');
-        } catch { return fail('response'); }
-      };
-      try {
-        handle = request({ method: 'GET', url, anonymous: true, redirect: 'manual', responseType: binary ? 'arraybuffer' : 'text',
-          timeout: ctLinkPreviewLimits.timeout, headers: { Accept: binary ? 'image/avif,image/webp,image/png,image/jpeg' : 'text/html,application/xhtml+xml' },
-          onload: response => finish(parse(response)),
-          // Stay releases its request message listener only in this callback.
-          onloadend: response => finish(parse(response)), onerror: () => finish(fail('permission')),
-          ontimeout: () => stop('timeout'), onabort: () => finish(fail('canceled')),
-          onprogress: event => { if (Number(event?.loaded) > limit) stop('size'); } });
-        if (abortWhenReady) try { handle?.abort?.(); } catch {}
-        if (handle && typeof handle.then === 'function') Promise.resolve(handle).then(response => {
-          try { if (Number(response?.status) > 0 && (response.readyState == null || Number(response.readyState) === 4)) finish(parse(response)); }
-          catch { finish(fail('response')); }
-        }, () => finish(fail('permission')));
-      } catch { finish(fail('permission')); }
-    });
-    const promise = (async () => {
-      if (!target) return fail('unsafe');
-      let url = target; const seen = new Set();
-      for (let count = 0; count < 4; count++) {
-        if (canceled) return fail('canceled');
-        if (seen.has(url)) return fail('redirect');
-        seen.add(url); const result = await single(url);
-        if (canceled) return fail('canceled');
-        if (!result.redirect) return result;
-        url = result.redirect;
-      }
-      return fail('redirect');
-    })();
-    return { promise, abort };
-  }
-  function ctLinkPreviewEnabled() { return typeof ctGetLinkPreviewsEnabled !== 'function' || ctGetLinkPreviewsEnabled() !== false; }
-  function ctLinkPreviewActive() { return !!globalThis.document && !document.hidden && (typeof ctPageActive === 'undefined' || ctPageActive); }
-  function ctLinkPreviewContext() {
-    const uid = typeof ctNetworkState === 'undefined' ? '' : ctNetworkState.authUID || '';
-    return `${location.pathname}${location.search}\n${uid}`;
-  }
-  function ctLinkPreviewNativeIdentity(post, parent, header) {
-    // A translated paragraph occupies the native original's same DOM node.
-    // Only an independently verified creation instant can bind the saved URL
-    // to that row; standalone consumers without timestamp helpers fail closed.
-    if (typeof ctTimestampCreationNode !== 'function' || typeof ctTimestampNativeValue !== 'function' ||
-        typeof ctTimestampParse !== 'function') return null;
-    const authors = [...header.querySelectorAll('button.font-bold.truncate')];
-    const author = authors.length === 1 ? authors[0] : null;
-    const authorText = author && ctLinkPreviewText(author.textContent, 160).toLowerCase();
-    const creation = ctTimestampCreationNode(post), createdAt = creation && ctTimestampNativeValue(creation);
-    if (!authorText || !creation || !createdAt || !header.contains(creation)) return null;
-    const edits = [...header.querySelectorAll('span.text-tl-app-text-muted')]
-      .filter(node => /^(?:Edited|編集済み)$/.test(ctLinkPreviewText(node.textContent)))
-      .map(node => ({ node, value: node.getAttribute('title') || '' }));
-    if (edits.length > 1 || edits.some(edit => !ctTimestampParse(edit.value))) return null;
-    return { post, parent, header, author, authorText, creation, createdAt, edits, context: ctLinkPreviewContext() };
-  }
-  function ctLinkPreviewRejectSource(body) {
-    if (body) ctLinkPreviewState.originals.delete(body);
-    return null;
-  }
-  function ctLinkPreviewTranslationState(post, header, sourceLine) {
-    const controls = [...header.querySelectorAll('button')].filter(el => el.closest('article') === post &&
-      !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-ct-owned],[data-ct-local-ui],.tl-user-text,[data-user-content]'));
-    const native = controls.filter(el => el.hasAttribute('data-translate-mode'));
-    if (native.length) {
-      if (native.length !== 1) return 'unknown';
-      const control = native[0], mode = control.getAttribute('data-translate-mode');
-      if (!['idle', 'busy', 'active', 'original'].includes(mode)) return 'unknown';
-      if (mode === 'busy' || control.getAttribute('aria-busy') === 'true') return 'busy';
-      if (mode === 'active') return 'translated';
-      if (control.getAttribute('aria-pressed') === 'true' || sourceLine) return 'unknown';
-      return 'original';
-    }
-    if (sourceLine) return 'unknown';
-    return controls.some(el => [el.textContent, el.getAttribute('title'), el.getAttribute('aria-label')]
-      .some(value => /^(?:Show original|原文を表示)$/i.test((value || '').trim()))) ? 'translated' : 'original';
-  }
-  function ctLinkPreviewSource(body) {
-    if (!body?.isConnected || body.closest('[hidden],[aria-hidden="true"],[data-ct-profile-timeline-hidden],[data-ct-keyword-hidden],.ct-keyword-collapsed,.ct-links-filter-hidden')) return ctLinkPreviewRejectSource(body);
-    const profile = body.matches('p.ct-profile-text[data-ct-link-preview-source="original"]') && body.closest('.ct-profile-row[data-ct-profile-post]');
-    if (profile) {
-      if (body.parentElement?.matches('.ct-profile-row-main') && body.parentElement.parentElement === profile &&
-          profile.closest('section[data-ct-profile-panel][data-ct-local-ui="profile"]')) {
-        const url = ctLinkPreviewFirstURL(body.textContent); return url ? { body, post: profile, url, text: body.textContent } : null;
-      }
-      return null;
-    }
-    if (!body.matches('p.tl-user-text.whitespace-pre-wrap.break-words') || body.closest(ctLinkPreviewProtected)) return ctLinkPreviewRejectSource(body);
-    const post = body.closest('article'), parent = body.parentElement;
-    if (!post || !parent?.matches('div.min-w-0.flex-1') || parent.closest('article') !== post) return ctLinkPreviewRejectSource(body);
-    let header = body.previousElementSibling, sourceLine = false;
-    // The 2.6 source/error status is inserted between the stable header and
-    // original paragraph. It is not a second post body or a new identity.
-    if (header?.matches('div.mt-0\\.5,div.mt-1') && header.children.length > 0 && header.children.length <= 2 &&
-        [...header.children].every(el => el.matches('p.text-tl-app-text-muted') &&
-          el.classList.contains('text-[0.8125rem]') && !el.children.length &&
-          (!el.hasAttribute('role') || el.getAttribute('role') === 'alert'))) {
-      sourceLine = [...header.children].some(el => !el.hasAttribute('role'));
-      header = header.previousElementSibling;
-    }
-    if (!header?.matches('div') || !header.querySelector('button.font-bold.truncate')) return ctLinkPreviewRejectSource(body);
-    // A nested original body belongs to its own article. Poll labels, quoted
-    // line-clamped snippets and live translation paragraphs do not qualify.
-    const originals = [...parent.children].filter(node => node.matches('p.tl-user-text.whitespace-pre-wrap.break-words'));
-    if (originals.length !== 1) return ctLinkPreviewRejectSource(body);
-    let url = '';
-    for (const anchor of body.querySelectorAll('a[href]')) {
-      const candidate = ctLinkPreviewURL(anchor.getAttribute('href'), '', false);
-      if (candidate && !anchor.closest('button,[role="button"]')) { url = candidate; break; }
-    }
-    if (!url) return ctLinkPreviewRejectSource(body);
-    const translation = ctLinkPreviewTranslationState(post, header, sourceLine);
-    if (translation === 'unknown') return ctLinkPreviewRejectSource(body);
-    const identity = ctLinkPreviewNativeIdentity(post, parent, header);
-    if (translation !== 'original') {
-      const original = ctLinkPreviewState.originals.get(body);
-      if (!identity || !original || original.url !== url ||
-          ['post', 'parent', 'header', 'author', 'authorText', 'creation', 'createdAt', 'context']
-            .some(key => identity[key] !== original[key]) || identity.edits.length !== original.edits.length ||
-          identity.edits.some((edit, index) => edit.node !== original.edits[index].node || edit.value !== original.edits[index].value)) {
-        return ctLinkPreviewRejectSource(body);
-      }
-      return { body, post, url: original.url, text: original.text };
-    }
-    const result = { body, post, url, text: body.textContent };
-    if (identity) ctLinkPreviewState.originals.set(body, { ...identity, url, text: result.text });
-    else ctLinkPreviewState.originals.delete(body);
-    return result;
-  }
-  function ctLinkPreviewCopy(ja, en) { return typeof CT_LOCALE !== 'undefined' && CT_LOCALE === 'ja' ? ja : en; }
-  function ctLinkPreviewEnsureStyle() {
-    if (ctLinkPreviewState.style?.isConnected) return;
-    const style = document.createElement('style'); style.dataset.ctOwned = 'link-preview';
-    style.textContent = `.ct-link-preview{margin:10px 0;max-width:100%;border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:10px;overflow:hidden;background:var(--color-tl-app-bg,#fff);color:var(--color-tl-app-text,#14171a)}.ct-link-preview a{display:block;min-height:44px;color:inherit;text-decoration:none}.ct-link-preview-content{padding:10px 12px;min-width:0}.ct-link-preview-domain{font-size:12px;color:var(--color-tl-app-text-muted,#657786);overflow-wrap:anywhere}.ct-link-preview-title{display:block;margin:3px 0;font-weight:700;font-size:14px;line-height:1.4;overflow-wrap:anywhere}.ct-link-preview-description{margin:0;font-size:13px;line-height:1.4;color:var(--color-tl-app-text-muted,#657786);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.ct-link-preview-image{display:block;width:100%;max-height:260px;object-fit:contain;background:var(--color-tl-app-bg,#fff)}.ct-link-preview-actions{display:flex;flex-wrap:wrap;gap:0 8px;padding:0 8px;border-top:1px solid var(--color-tl-app-border,#8b98a544)}.ct-link-preview button{min-height:44px;padding:6px 4px;border:0;background:none;color:var(--color-tl-app-text,#14171a);font:inherit;font-size:12px;cursor:pointer;transition:transform 120ms ease}.ct-link-preview button:active{transform:scale(.97)}.ct-link-preview button:disabled{opacity:.6;cursor:default}.ct-link-preview a:focus-visible,.ct-link-preview button:focus-visible,.ct-link-preview input:focus-visible{outline:2px solid currentColor;outline-offset:-2px}.ct-link-preview-status{margin:0;padding:0 12px 7px;font-size:12px;line-height:1.45;overflow-wrap:anywhere;color:var(--color-tl-app-text-muted,#657786)}.ct-link-preview-copy-field{display:block;width:calc(100% - 24px);min-height:44px;margin:0 12px 8px;border:1px solid var(--color-tl-app-border,#8b98a544);background:var(--color-tl-app-input-bg,#fff);color:inherit;font:inherit;font-size:13px}.ct-link-preview [hidden]{display:none!important}@media(prefers-reduced-motion:reduce){.ct-link-preview button{transition:none}.ct-link-preview button:active{transform:none}}`;
-    document.head?.append(style); ctLinkPreviewState.style = style;
-  }
-  function ctLinkPreviewValid(record) {
-    if (!ctLinkPreviewActive() || record.context !== ctLinkPreviewContext() || !record.card.isConnected ||
-        record.card.previousElementSibling !== record.body) return false;
-    const source = ctLinkPreviewSource(record.body);
-    return !!source && source.post === record.post && source.url === record.url && source.text === record.text;
-  }
-  function ctLinkPreviewFallback(record, reason = '') {
-    record.card.removeAttribute('aria-busy'); record.fetch.disabled = !record.metadataURL;
-    record.fetch.hidden = false; record.fetch.textContent = ctLinkPreviewCopy('プレビューを取得', 'Load preview');
-    if (!record.metadataURL) record.status.textContent = ctLinkPreviewCopy('認証情報を含むリンクはプレビューを取得しません。', 'Preview is unavailable for links containing credentials.');
-    else if (reason === 'permission' || reason === 'unavailable') record.status.textContent = ctLinkPreviewCopy('取得できませんでした。管理アプリのサイト通信許可を確認して再試行できます。', 'Could not load. Check the site permission in your script manager, then retry.');
-    else if (reason) record.status.textContent = ctLinkPreviewCopy('プレビューを取得できませんでした。再試行できます。', 'Preview could not be loaded. You can retry.');
-    else record.status.textContent = ctLinkPreviewCopy('リンク先のプレビュー', 'Link preview');
-  }
-  function ctLinkPreviewRender(record, result) {
-    if (!ctLinkPreviewValid(record)) return;
-    if (!result.ok) { ctLinkPreviewFallback(record, result.reason); return; }
-    const meta = result.meta;
-    record.title.textContent = meta.title; record.domain.textContent = `${meta.site} · ${meta.domain}`;
-    record.description.textContent = meta.description; record.description.hidden = !meta.description;
-    record.status.textContent = ''; record.fetch.hidden = true; record.card.removeAttribute('aria-busy');
-    ctLinkPreviewReleaseImage(record);
-    if (record.visible && meta.blob && ctLinkPreviewState.recordImageBytes + meta.blob.size <= ctLinkPreviewLimits.cacheImages &&
-        typeof URL.createObjectURL === 'function') {
-      const image = document.createElement('img'); image.className = 'ct-link-preview-image'; image.alt = '';
-      image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
-      try { record.objectURL = URL.createObjectURL(meta.blob); image.src = record.objectURL;
-        record.imageBytes = meta.blob.size; ctLinkPreviewState.recordImageBytes += record.imageBytes;
-        image.onerror = () => ctLinkPreviewReleaseImage(record);
-        image.onload = () => { if (image.naturalWidth > 8192 || image.naturalHeight > 8192 ||
-          image.naturalWidth * image.naturalHeight > 16 * 1024 * 1024) ctLinkPreviewReleaseImage(record); };
-        record.link.prepend(image); } catch {}
-    }
-  }
-  async function ctLinkPreviewClipboard(record, text) {
-    if (!ctLinkPreviewValid(record)) return;
-    try {
-      if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('clipboard');
-      await navigator.clipboard.writeText(text);
-      if (ctLinkPreviewValid(record)) record.status.textContent = ctLinkPreviewCopy('コピーしました。', 'Copied.');
-    } catch {
-      if (!ctLinkPreviewValid(record)) return;
-      let field = record.card.querySelector('.ct-link-preview-copy-field');
-      if (!field) { field = document.createElement('input'); field.type = 'text'; field.readOnly = true;
-        field.className = 'ct-link-preview-copy-field'; field.setAttribute('aria-label', ctLinkPreviewCopy('コピーするリンク', 'Link to copy')); record.card.append(field); }
-      field.value = text; field.focus({ preventScroll: true }); field.select();
-      record.status.textContent = ctLinkPreviewCopy('選択したリンクをコピーしてください。', 'Copy the selected link.');
-    }
-  }
-  function ctLinkPreviewCreate(source) {
-    const { body, post, url, text } = source;
-    const card = document.createElement('section'); card.className = 'ct-link-preview'; card.dataset.ctOwned = 'link-preview';
-    card.setAttribute('aria-label', ctLinkPreviewCopy('リンクのプレビュー', 'Link preview'));
-    const link = document.createElement('a'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    const content = document.createElement('div'); content.className = 'ct-link-preview-content';
-    const domain = document.createElement('span'); domain.className = 'ct-link-preview-domain'; domain.textContent = new URL(url).hostname;
-    const title = document.createElement('strong'); title.className = 'ct-link-preview-title'; title.textContent = ctLinkPreviewCopy('リンクを開く ↗', 'Open link ↗');
-    const description = document.createElement('p'); description.className = 'ct-link-preview-description'; description.hidden = true;
-    content.append(domain, title, description); link.append(content);
-    const actions = document.createElement('div'); actions.className = 'ct-link-preview-actions';
-    const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = ctLinkPreviewCopy('リンクをコピー', 'Copy link');
-    const share = document.createElement('button'); share.type = 'button'; share.textContent = ctLinkPreviewCopy('リンクを共有', 'Share link');
-    const fetchButton = document.createElement('button'); fetchButton.type = 'button';
-    const status = document.createElement('p'); status.className = 'ct-link-preview-status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-    actions.append(copy, share, fetchButton); card.append(link, actions, status);
-    const metadataURL = ctLinkPreviewURL(url);
-    const record = { body, post, url, text, metadataURL: metadataURL ? metadataURL.split('#')[0] : '',
-      card, link, domain, title, description, fetch: fetchButton, status, context: ctLinkPreviewContext(),
-      visible: false, bodyVisible: false, cardVisible: false, attempted: false, manual: false, job: null, objectURL: '', imageBytes: 0 };
-    // Stop only the containing native post's click navigation. Link default
-    // navigation and all native body handlers remain intact.
-    card.addEventListener('click', event => event.stopPropagation());
-    copy.onclick = () => ctLinkPreviewClipboard(record, url);
-    share.onclick = async () => {
-      if (!ctLinkPreviewValid(record)) return;
-      if (typeof navigator.share !== 'function') { ctLinkPreviewClipboard(record, url); return; }
-      try { await navigator.share({ url, title: record.title.textContent });
-        if (ctLinkPreviewValid(record)) status.textContent = ctLinkPreviewCopy('共有しました。', 'Shared.'); }
-      catch (error) { if (error?.name !== 'AbortError') ctLinkPreviewClipboard(record, url); }
-    };
-    fetchButton.onclick = () => {
-      if (!ctLinkPreviewValid(record) || !record.metadataURL || record.job) return;
-      ctLinkPreviewDeleteCache(record.metadataURL); record.manual = true; record.attempted = false;
-      record.visible = true;
-      ctLinkPreviewQueue(record); ctLinkPreviewPump();
-    };
-    body.after(card); ctLinkPreviewFallback(record); return record;
-  }
-  function ctLinkPreviewDeleteCache(key) {
-    const old = ctLinkPreviewState.cache.get(key);
-    if (old?.meta?.blob) ctLinkPreviewState.imageBytes -= old.meta.blob.size;
-    ctLinkPreviewState.cache.delete(key);
-  }
-  function ctLinkPreviewCache(key, result) {
-    ctLinkPreviewDeleteCache(key);
-    const size = result.meta?.blob?.size || 0;
-    while (ctLinkPreviewState.cache.size >= ctLinkPreviewLimits.cache ||
-        ctLinkPreviewState.imageBytes + size > ctLinkPreviewLimits.cacheImages) {
-      const first = ctLinkPreviewState.cache.keys().next().value;
-      if (!first) break; ctLinkPreviewDeleteCache(first);
-    }
-    ctLinkPreviewState.imageBytes += size;
-    ctLinkPreviewState.cache.set(key, { ...result, until: Date.now() + (result.ok ? ctLinkPreviewLimits.ttl : ctLinkPreviewLimits.failureTTL) });
-  }
-  function ctLinkPreviewDetach(record) {
-    const job = record.job; record.job = null;
-    if (job) { job.records.delete(record); if (!job.records.size) {
-      job.canceled = true; job.request?.abort(); ctLinkPreviewState.jobs.delete(job.key); } }
-    if (record.card.hasAttribute('aria-busy')) { record.attempted = false; record.manual = false; ctLinkPreviewFallback(record); }
-    if (!record.visible && record.objectURL) { ctLinkPreviewReleaseImage(record); record.attempted = false; }
-  }
-  function ctLinkPreviewReleaseImage(record) {
-    if (record.objectURL) try { URL.revokeObjectURL(record.objectURL); } catch {}
-    record.objectURL = ''; ctLinkPreviewState.recordImageBytes -= record.imageBytes || 0; record.imageBytes = 0;
-    record.card.querySelectorAll('img').forEach(image => { image.onerror = null; image.onload = null; image.removeAttribute('src'); image.remove(); });
-  }
-  function ctLinkPreviewDrop(record, keepObserved = false) {
-    ctLinkPreviewDetach(record); if (!keepObserved) { ctLinkPreviewState.observer?.unobserve(record.body); ctLinkPreviewState.observedSources.delete(record.body); }
-    ctLinkPreviewState.observer?.unobserve(record.card); ctLinkPreviewState.cards.delete(record.card);
-    record.visible = false; record.bodyVisible = false; record.cardVisible = false;
-    ctLinkPreviewReleaseImage(record);
-    record.card.remove(); ctLinkPreviewState.records.delete(record.body);
-  }
-  function ctLinkPreviewObserve(record) {
-    ctLinkPreviewState.cards.set(record.card, record);
-    if (!ctLinkPreviewState.observer) return;
-    ctLinkPreviewState.observer.observe(record.body); ctLinkPreviewState.observedSources.add(record.body);
-    ctLinkPreviewState.observer.observe(record.card);
-  }
-  function ctLinkPreviewMakeRoom() {
-    if (ctLinkPreviewState.records.size < ctLinkPreviewLimits.records) return true;
-    for (const record of ctLinkPreviewState.records.values()) if (!record.visible && !record.job && !record.card.contains(document.activeElement)) {
-      // The source remains observed, so returning to an old row recreates its
-      // bounded card instead of retaining every feed row indefinitely.
-      ctLinkPreviewDrop(record, true); return true;
-    }
-    return false;
-  }
-  function ctLinkPreviewQueue(record) {
-    if (record.job || record.attempted || !record.visible || !record.metadataURL || !ctLinkPreviewValid(record) ||
-        !ctLinkPreviewEnabled() && !record.manual) return;
-    const cached = ctLinkPreviewState.cache.get(record.metadataURL);
-    if (cached && cached.until > Date.now()) { record.attempted = true; ctLinkPreviewRender(record, cached); return; }
-    if (cached) ctLinkPreviewDeleteCache(record.metadataURL);
-    let job = ctLinkPreviewState.jobs.get(record.metadataURL);
-    if (!job) { job = { key: record.metadataURL, records: new Set(), started: false, canceled: false,
-      generation: ctLinkPreviewState.generation, request: null }; ctLinkPreviewState.jobs.set(job.key, job); }
-    job.records.add(record); record.job = job; record.attempted = true;
-    record.card.setAttribute('aria-busy', 'true'); record.fetch.disabled = true;
-    record.status.textContent = ctLinkPreviewCopy('プレビューを取得中…', 'Loading preview…');
-  }
-  function ctLinkPreviewPump() {
-    if (!ctLinkPreviewState.jobs.size || !ctLinkPreviewActive()) return;
-    for (const job of ctLinkPreviewState.jobs.values()) {
-      if (ctLinkPreviewState.running >= 2) break;
-      if (job.started || job.canceled) continue;
-      for (const record of [...job.records]) if (!ctLinkPreviewValid(record) || !record.visible) ctLinkPreviewDetach(record);
-      if (!job.records.size) continue;
-      job.started = true; ctLinkPreviewState.running++;
-      const valid = () => !job.canceled && job.generation === ctLinkPreviewState.generation && ctLinkPreviewActive() &&
-        [...job.records].some(record => record.visible && ctLinkPreviewValid(record));
-      (async () => {
-        job.request = ctLinkPreviewRequest(job.key); let result = await job.request.promise;
-        if (!valid()) return;
-        if (result.ok) {
-          const meta = ctLinkPreviewParse(result.html, result.url);
-          if (!meta) result = { ok: false, reason: 'metadata' };
-          else {
-            if (typeof URL.createObjectURL === 'function') for (const imageURL of meta.images) {
-              job.request = ctLinkPreviewRequest(imageURL, true); const image = await job.request.promise;
-              if (!valid()) return;
-              if (image.ok) { meta.blob = image.blob; break; }
-            }
-            result = { ok: true, meta };
-          }
-        }
-        if (!valid()) return;
-        ctLinkPreviewCache(job.key, result);
-        for (const record of job.records) { record.job = null; ctLinkPreviewRender(record, result); }
-      })().catch(() => {
-        if (valid()) for (const record of job.records) { record.job = null; ctLinkPreviewFallback(record, 'response'); }
-      }).finally(() => {
-        ctLinkPreviewState.running--; if (ctLinkPreviewState.jobs.get(job.key) === job) ctLinkPreviewState.jobs.delete(job.key);
-        for (const record of job.records) if (record.job === job) { record.job = null; record.attempted = false; ctLinkPreviewFallback(record); }
-        ctLinkPreviewPump();
-      });
-    }
-  }
-  function ctLinkPreviewsPatch(root = document) {
-    if (!ctLinkPreviewActive()) { ctLinkPreviewsCleanup(); return; }
-    const context = ctLinkPreviewContext(), enabled = ctLinkPreviewEnabled();
-    if (ctLinkPreviewState.context && ctLinkPreviewState.context !== context ||
-        ctLinkPreviewState.enabled !== null && ctLinkPreviewState.enabled !== enabled) ctLinkPreviewsCleanup();
-    ctLinkPreviewState.context = context;
-    ctLinkPreviewState.enabled = enabled;
-    for (const body of ctLinkPreviewState.observedSources) if (!body.isConnected ||
-        !ctLinkPreviewState.records.has(body) && !ctLinkPreviewSource(body)) {
-      ctLinkPreviewState.observer?.unobserve(body); ctLinkPreviewState.observedSources.delete(body);
-    }
-    for (const record of [...ctLinkPreviewState.records.values()]) if (!ctLinkPreviewValid(record)) ctLinkPreviewDrop(record);
-    if (!ctLinkPreviewState.observer && typeof IntersectionObserver === 'function') {
-      const observer = new IntersectionObserver(entries => {
-        // A disconnected observer may still deliver an already queued batch.
-        if (ctLinkPreviewState.observer !== observer) return;
-        const affected = new Set(), returning = [];
-        for (const entry of entries) {
-          let record = ctLinkPreviewState.records.get(entry.target) || ctLinkPreviewState.cards.get(entry.target);
-          if (!entry.target.isConnected) { ctLinkPreviewState.observer?.unobserve(entry.target);
-            ctLinkPreviewState.observedSources.delete(entry.target);
-            if (record) ctLinkPreviewDrop(record);
-            continue; }
-          const visible = entry.isIntersecting && entry.intersectionRatio > 0;
-          if (!record) {
-            if (visible && ctLinkPreviewState.observedSources.has(entry.target)) returning.push(entry);
-            continue;
-          }
-          if (entry.target === record.body) record.bodyVisible = visible;
-          else record.cardVisible = visible;
-          affected.add(record);
-        }
-        // Resolve the whole batch before detaching a request. Scrolling from
-        // the original text into its card often reports body=false first.
-        for (const record of affected) record.visible = record.bodyVisible || record.cardVisible;
-        for (const entry of returning) {
-          if (!entry.target.isConnected || ctLinkPreviewState.records.has(entry.target)) continue;
-          const source = ctLinkPreviewSource(entry.target);
-          if (!source) { observer.unobserve(entry.target); ctLinkPreviewState.observedSources.delete(entry.target); continue; }
-          if (!ctLinkPreviewMakeRoom()) continue;
-          ctLinkPreviewEnsureStyle(); const record = ctLinkPreviewCreate(source);
-          record.bodyVisible = true; record.visible = true;
-          ctLinkPreviewState.records.set(entry.target, record); ctLinkPreviewObserve(record); affected.add(record);
-        }
-        for (const record of [...affected]) {
-          if (ctLinkPreviewState.records.get(record.body) !== record) { affected.delete(record); continue; }
-          if (!ctLinkPreviewValid(record)) { ctLinkPreviewDrop(record); affected.delete(record); }
-        }
-        // Attach newly visible duplicate destinations before removing their
-        // old row, so a same-batch handoff can reuse the pending request too.
-        for (const record of affected) if (record.visible) ctLinkPreviewQueue(record);
-        for (const record of affected) if (!record.visible) ctLinkPreviewDetach(record);
-        ctLinkPreviewPump();
-      }, { threshold: 0 });
-      ctLinkPreviewState.observer = observer;
-    }
-    const selector = 'p.tl-user-text.whitespace-pre-wrap.break-words,p.ct-profile-text[data-ct-link-preview-source="original"]';
-    const bodies = new Set(root.querySelectorAll?.(selector) || []);
-    if (root.matches?.(selector)) bodies.add(root);
-    const owner = root.closest?.('article,.ct-profile-row');
-    if (owner) for (const body of owner.querySelectorAll(selector)) bodies.add(body);
-    for (const body of bodies) {
-      if (ctLinkPreviewState.records.has(body)) continue;
-      const source = ctLinkPreviewSource(body); if (!source) continue;
-      if (!ctLinkPreviewMakeRoom()) { if (ctLinkPreviewState.observer) {
-        ctLinkPreviewState.observer.observe(body); ctLinkPreviewState.observedSources.add(body); } continue; }
-      ctLinkPreviewEnsureStyle(); const record = ctLinkPreviewCreate(source); ctLinkPreviewState.records.set(body, record);
-      ctLinkPreviewObserve(record);
-      if (!ctLinkPreviewState.observer) {
-        // Older browsers keep a useful manual card; no unseen automatic reads.
-        const visible = node => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight; };
-        record.bodyVisible = visible(body); record.cardVisible = visible(record.card);
-        record.visible = record.bodyVisible || record.cardVisible;
-      }
-    }
-    for (const record of ctLinkPreviewState.records.values()) ctLinkPreviewQueue(record);
-    ctLinkPreviewPump();
-  }
-  function ctLinkPreviewsCleanup() {
-    ctLinkPreviewState.generation++;
-    ctLinkPreviewState.originals = new WeakMap();
-    ctLinkPreviewState.observer?.disconnect(); ctLinkPreviewState.observer = null;
-    ctLinkPreviewState.observedSources.clear();
-    for (const record of [...ctLinkPreviewState.records.values()]) ctLinkPreviewDrop(record);
-    ctLinkPreviewState.cards.clear();
-    for (const job of ctLinkPreviewState.jobs.values()) { job.canceled = true; job.request?.abort(); }
-    ctLinkPreviewState.jobs.clear(); ctLinkPreviewState.cache.clear(); ctLinkPreviewState.imageBytes = 0; ctLinkPreviewState.recordImageBytes = 0;
-    ctLinkPreviewState.style?.remove(); ctLinkPreviewState.style = null;
-    ctLinkPreviewState.context = ''; ctLinkPreviewState.enabled = null;
-  }
-
 
 
   const API_ORIGIN = 'https://api.tweet.app';
@@ -9197,7 +8687,6 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     patchOfficialBadges(root);
     ctMediaEnhance(root);
     patchJapaneseNews(root);
-    ctLinkPreviewsPatch(root);
     } catch (error) {
       console.debug('[Classic Twitter EN]', error);
     }
@@ -9211,5 +8700,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.26.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.29.1 loaded');
 })();

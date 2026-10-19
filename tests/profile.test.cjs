@@ -93,6 +93,40 @@ test('native tab clicks restore the same native timeline, state, post content an
   assert.equal(h.api.state.active, '');
 });
 
+for (const tab of ['favorites', 'media']) {
+  test(`${tab} rows retain full text and expose ordinary keyboard-focusable links without URL cards`, async t => {
+    const h = harness(t);
+    const text = 'Read (https://example.org/article?topic=web&mode=full#section).\n' +
+      'HTTP http://example.net/path and https://example.org/wiki/Topic_(part)\n' +
+      'Unsafe javascript:alert(1) javascript:https://evil.example/a data:text/html,<script>alert(1)</script> ' +
+      'https://user:password@example.org/private';
+    if (tab === 'media') h.pages([{ posts: [post('linked', undefined, { text })], nextCursor: null }]);
+    await h.ready();
+    if (tab === 'favorites') h.api.save(item('linked', { text }));
+    await h.select(tab);
+    const paragraph = h.document.querySelector('.ct-profile-text');
+    assert.equal(paragraph.textContent, text);
+    const links = [...paragraph.querySelectorAll('a')];
+    assert.deepEqual(links.map(link => link.getAttribute('href')), [
+      'https://example.org/article?topic=web&mode=full#section',
+      'http://example.net/path', 'https://example.org/wiki/Topic_(part)'
+    ]);
+    for (const link of links) {
+      assert.equal(link.target, '_blank');
+      assert.equal(link.rel, 'noopener noreferrer');
+      assert.equal(link.tabIndex, 0);
+      link.focus(); assert.equal(h.document.activeElement, link);
+      const enter = new h.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      assert.equal(link.dispatchEvent(enter), true, 'standard keyboard activation is not intercepted');
+      let nativeClick = false;
+      link.addEventListener('click', event => { nativeClick = !event.defaultPrevented; event.preventDefault(); }, { once: true });
+      link.click(); assert.equal(nativeClick, true, 'anchor navigation reaches the browser unchanged');
+    }
+    assert.equal(paragraph.querySelector('script, iframe, img'), null);
+    assert.equal(h.document.querySelector('.ct-link-preview, [data-ct-link-preview]'), null);
+  });
+}
+
 test('Japanese labels and hidden retained feed subtrees select only the visible profile tabs', async t => {
   const h = harness(t, { locale: 'ja', html: `<div hidden aria-hidden="true">${client('wrong')}</div><div>${client('viewer', ['ツイート', 'リプライ', 'リツイート'])}</div>` });
   await h.ready();

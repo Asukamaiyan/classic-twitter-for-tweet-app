@@ -605,15 +605,11 @@
 
   let ctTools = null;
   let ctBrowserNotifications = null;
-  const ctLinkPreviewsSettingKey = 'ct-link-previews-enabled-v1';
-  function ctGetLinkPreviewsEnabled() {
-    return loadJSON(ctLinkPreviewsSettingKey, true) !== false;
-  }
 
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.29.0';
+    document.documentElement.dataset.ctActiveVersion = '6.29.1';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -624,13 +620,6 @@
     });
     ctTools = installLocalEnhancements({
       locale: CT_LOCALE,
-      getLinkPreviews: ctGetLinkPreviewsEnabled,
-      setLinkPreviews: enabled => {
-        if (!saveJSON(ctLinkPreviewsSettingKey, enabled === true)) throw new Error('Storage unavailable');
-        ctLinkPreviewsCleanup();
-        ctLinkPreviewsPatch(document);
-        ctScheduleScan();
-      },
       browserNotifications: ctBrowserNotifications,
       restoreVisibleFavorites: ctRestoreVisibleFavorites,
       getFavoriteHistoryStatus: ctFavoriteHistoryStatus,
@@ -659,12 +648,6 @@
     document.addEventListener('click', ctRememberTranslationChoice, true);
     ctRunScan();
     window.addEventListener('popstate', ctScheduleScan);
-    window.addEventListener('storage', event => {
-      if (event.key !== ctLinkPreviewsSettingKey && event.key !== null) return;
-      ctLinkPreviewsCleanup();
-      ctTools?.refresh();
-      ctScheduleScan();
-    });
     for (const name of ['pushState', 'replaceState']) {
       const original = history[name];
       history[name] = function (...args) {
@@ -677,7 +660,6 @@
       if (document.hidden) {
         observer.disconnect(); clearTimeout(ctScanTimer); ctScanTimer = null;
         ctScanFull = false; ctScanRoots.clear(); ctCancelTranslations();
-        ctLinkPreviewsCleanup();
       } else { ctObserve(); ctScheduleScan(); }
     });
     window.addEventListener('pagehide', () => {
@@ -687,7 +669,6 @@
       ctScanTimer = null;
       ctScanFull = false; ctScanRoots.clear();
       ctCancelTranslations();
-      ctLinkPreviewsCleanup();
     });
     window.addEventListener('pageshow', event => {
       if (event.persisted && !ctPageActive) {

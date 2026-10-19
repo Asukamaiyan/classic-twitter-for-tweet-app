@@ -36,8 +36,8 @@ test('six editions preserve existing identifiers and share their platform implem
     assert.equal(source.match(/^\/\/ @version\s+(.+)$/m)?.[1], releaseVersion);
     assert.match(source, new RegExp(`const CT_LOCALE = '${locale}'`));
     assert.match(source, new RegExp(`const CT_PLATFORM = '${platform}'`));
-    assert.match(source, /^\/\/ @connect\s+\*$/m, 'general public URL cards have an explicit connection permission');
-    assert.match(source, /function ctLinkPreviewsPatch\(/, 'all editions include the same URL-card module');
+    assert.doesNotMatch(source, /^\/\/ @connect\s+\*$/m, 'removed URL cards no longer require unrestricted connections');
+    assert.doesNotMatch(source, /ctLinkPreview|ct-link-preview/, 'no edition retains URL-card code or settings');
     for (const host of ['news.yahoo.co.jp', 'news.web.nhk', 'www.nikkansports.com', 'rss.itmedia.co.jp']) {
       assert.equal(source.includes(`// @connect      ${host}`), true, 'each publisher uses an explicit public feed permission');
     }

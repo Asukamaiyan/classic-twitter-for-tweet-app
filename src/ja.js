@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.29.0
+// @version      6.29.1
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -11,7 +11,6 @@
 // @connect      news.web.nhk
 // @connect      www.nikkansports.com
 // @connect      rss.itmedia.co.jp
-// @connect      *
 /* @safari-grants */
 // @noframes
 // @run-at       document-start
@@ -44,7 +43,6 @@
   /* @include badges */
   /* @include media */
   /* @include news */
-  /* @include link-preview */
   /* @include safari */
 
   const API_ORIGIN = 'https://api.tweet.app';
@@ -3014,7 +3012,6 @@ if (/^just\s+now$/i.test(t)) {
     patchOfficialBadges(root);
     ctMediaEnhance(root);
     patchJapaneseNews(root);
-    ctLinkPreviewsPatch(root);
 
     } catch(error) {
       console.debug(
@@ -3043,6 +3040,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.26.0 loaded'
+    '🐦 Classic Twitter JP v6.29.1 loaded'
   );
 })();

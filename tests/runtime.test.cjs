@@ -13,7 +13,6 @@ const motion = fs.readFileSync(path.join(__dirname, '../src/motion.js'), 'utf8')
 const navigation = fs.readFileSync(path.join(__dirname, '../src/navigation.js'), 'utf8');
 const browserNotifications = fs.readFileSync(path.join(__dirname, '../src/browser-notifications.js'), 'utf8');
 const network = fs.readFileSync(path.join(__dirname, '../src/network.js'), 'utf8');
-const linkPreviews = fs.readFileSync(path.join(__dirname, '../src/link-preview.js'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../classic-twitter-ja.user.js'), 'utf8');
 const helperNames = new Set(['ctTranslationControls']);
 const helpers = [];
@@ -79,7 +78,7 @@ function harness(t, html = '', options = {}) {
   let nextID = 0;
   const timers = new Map();
   const intervals = new Map();
-  const stats = { scans: 0, refreshes: 0, installs: 0, roots: [], previewPatches: 0, previewCleanups: 0 };
+  const stats = { scans: 0, refreshes: 0, installs: 0, roots: [] };
   let hidden = false;
   let settings;
   Object.defineProperty(document, 'hidden', { get: () => hidden });
@@ -117,8 +116,6 @@ function harness(t, html = '', options = {}) {
   window.ctRunFavoriteHistory = async () => {};
   window.ctStopFavoriteHistory = () => {};
   window.ctRestartFavoriteHistory = async () => {};
-  window.ctLinkPreviewsPatch = () => { stats.previewPatches += 1; };
-  window.ctLinkPreviewsCleanup = () => { stats.previewCleanups += 1; };
   if (options.navigation) {
     window.API_ORIGIN = 'https://api.tweet.app';
     window.ctNetworkState = { authUID: 'fixture-viewer' };
@@ -138,7 +135,6 @@ function harness(t, html = '', options = {}) {
     ${options.motion ? motion : ''}
     ${browserNotifications}
     ${runtime}
-    ${options.linkPreviews ? linkPreviews : ''}
     ${options.navigation ? navigation : ''}
     ${options.localization && !options.navigation ? localizationNavigationSource : ''}
     ${options.localization ? localizationSource : ''}
@@ -151,8 +147,6 @@ function harness(t, html = '', options = {}) {
       patchUI: typeof patchUI === 'function' ? patchUI : null,
       networkState: typeof ctNetworkState === 'undefined' ? null : ctNetworkState,
       getAuth: typeof getAuth === 'function' ? getAuth : null,
-      linkPreviewsPatch: ctLinkPreviewsPatch, linkPreviewsCleanup: ctLinkPreviewsCleanup,
-      linkPreviewState: typeof ctLinkPreviewState === 'undefined' ? null : ctLinkPreviewState,
       destroyBrowserNotifications: () => ctBrowserNotifications?.destroy() };
   `);
   async function flush() { await Promise.resolve(); await Promise.resolve(); }
@@ -287,43 +281,31 @@ test('observer settles after own scan writes and batches dynamic navigation and 
   assert.equal(f.stats.refreshes, 3);
 });
 
-test('URL preview setting persists before cleanup and failed storage leaves active work untouched', async t => {
-  const f = harness(t);
+test('runtime leaves old URL-card settings unused and passes no card controls to Tools', t => {
+  const f = harness(t, '', { values: { 'ct-link-previews-enabled-v1': true } });
   f.qa.start();
-  assert.equal(f.settings.getLinkPreviews(), true);
-  f.settings.setLinkPreviews(false);
-  assert.equal(f.values.get('ct-link-previews-enabled-v1'), false);
-  assert.equal(f.settings.getLinkPreviews(), false);
-  assert.equal(f.stats.previewCleanups, 1);
-  assert.equal(f.stats.previewPatches, 1);
-  await f.advance(100);
-  const g = harness(t, '', { storageFailure: true });
-  g.qa.start();
-  assert.throws(() => g.settings.setLinkPreviews(false), /Storage unavailable/);
-  assert.equal(g.settings.getLinkPreviews(), true);
-  assert.equal(g.stats.previewCleanups, 0);
-  assert.equal(g.stats.previewPatches, 0);
+  assert.equal(f.settings.getLinkPreviews, undefined);
+  assert.equal(f.settings.setLinkPreviews, undefined);
+  assert.equal(f.values.get('ct-link-previews-enabled-v1'), true, 'unused stored preferences are not deleted');
 });
 
-test('URL preview lifecycle cancels on relevant storage, background and pagehide, while href edits rescan', async t => {
+test('native href edits still rescan and old URL-card storage no longer schedules card work', async t => {
   const f = harness(t, '<main><article><p><a id="url" href="https://ogp.me/">link</a></p></article></main>');
   f.qa.start();
+  await f.advance(100);
+  const beforeStorage = f.stats.scans;
   f.window.dispatchEvent(new f.window.StorageEvent('storage', { key: 'unrelated' }));
-  assert.equal(f.stats.previewCleanups, 0);
   f.values.set('ct-link-previews-enabled-v1', false);
   f.window.dispatchEvent(new f.window.StorageEvent('storage', { key: 'ct-link-previews-enabled-v1' }));
-  assert.equal(f.stats.previewCleanups, 1);
-  assert.equal(f.settings.getLinkPreviews(), false);
   await f.advance(100);
+  assert.equal(f.stats.scans, beforeStorage);
   const before = f.stats.scans;
   f.document.getElementById('url').setAttribute('href', 'https://example.com/changed');
   await f.advance(100);
-  assert.equal(f.stats.scans, before + 1, 'a reused native link updates its card without polling');
+  assert.equal(f.stats.scans, before + 1, 'native link changes remain visible to other enhancements');
   f.hidden(true);
-  assert.equal(f.stats.previewCleanups, 2);
   f.hidden(false); await f.advance(100);
   f.window.dispatchEvent(new f.window.Event('pagehide'));
-  assert.equal(f.stats.previewCleanups, 3);
   f.window.dispatchEvent(new f.window.PageTransitionEvent('pageshow', { persisted: true }));
   await f.advance(100);
   assert.equal(f.intervals.size, 0);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English
 // @namespace    https://tweet.app/
-// @version      6.29.0
+// @version      6.29.1
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -11,7 +11,6 @@
 // @connect      news.web.nhk
 // @connect      www.nikkansports.com
 // @connect      rss.itmedia.co.jp
-// @connect      *
 /* @safari-grants */
 // @noframes
 // @run-at       document-start
@@ -44,7 +43,6 @@
   /* @include badges */
   /* @include media */
   /* @include news */
-  /* @include link-preview */
   /* @include safari */
 
   const API_ORIGIN = 'https://api.tweet.app';
@@ -909,7 +907,6 @@
     patchOfficialBadges(root);
     ctMediaEnhance(root);
     patchJapaneseNews(root);
-    ctLinkPreviewsPatch(root);
     } catch (error) {
       console.debug('[Classic Twitter EN]', error);
     }
@@ -923,5 +920,5 @@
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.26.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.29.1 loaded');
 })();
