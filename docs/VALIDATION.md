@@ -9,8 +9,10 @@
 - **画面確認:** Chromeの隔離fixtureで1280px／390pxの通常リンク、Homeリンク絞り込みON/OFF、追加投稿、旧設定イベント、元ノード・下書きの保持を確認。保存済み投稿の本文全文・URL・クエリ・フラグメントを保ち、Tabの見えるフォーカスとEnterでローカル到達先を開きました。リンクは本文色を継承し、下線で識別します。カード0・外部要求0・エラー0。動画はノードとcontrolsの保全だけを確認し、再生検証は含みません。
 - **独立レビュー:** 最終ソースに未解決の指摘なし。お気に入りの対象61件と、遅延復元6ケース・実モジュールイベント7ケース・30秒経過後8ケースがすべて成功。実ブラウザでも翻訳中と未知状態で30秒超の解除→再登録を確認しました。
 - **公式配信:** HTML・JS・CSS・公開設定・メディア設定を再取得し、前回確認したTweet 2.6.0 / build 1792299140と同一であることを確認。
-- **追加修正:** 保存済み本文の `[(https://example.org/article)]` のような二重括弧で、リンク先に余分な閉じ括弧が入るケースを修正。本文全文とURL自体に含まれる正しい括弧は保持します。6.29.1は日本語PC版だけ先行公開し、全6版を6.29.2へ揃えます。
-- **公開:** 6.29.1実装はPR #30からmainへマージしCI成功。6.29.2の全体検証は785件成功。公開結果は完了後に記録します。
+- **追加修正:** 保存済み本文の `[(https://example.org/article)]` のような二重括弧で、リンク先に余分な閉じ括弧が入るケースを修正。本文全文とURL自体に含まれる正しい括弧は保持します。6.29.1は日本語PC版だけ先行公開し、全6版を6.29.2へ揃えました。
+- **GitHub:** [PR #30](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/30)と[PR #31](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/31)をmainへマージ。各PRのpush／PR CIと、マージ後main CIが成功。最終実装は `0757fdd`。PR #30の30秒後再登録の指摘は修正・回帰検証後に解決しました。
+- **Greasy Fork:** 通常の更新フォームで全6版を**6.29.2**へ公開し、送信前にコード・案内の全文SHA256一致、HTML・限定公開・adult=falseを確認。各成功画面でも版番号を確認しました。独立した匿名GETで6コード＋6案内＋6更新metadataの**18件すべてHTTP200・初回で一致**。Android2版は送信後の画面取得がタイムアウトしたため、成功画面を改めて確認し再送していません。
+- **証拠:** `extension-final-npm-check.log`、`independent-favorite-final-review.json`、`independent-nested-brackets-review.json`、`browser-cards/acceptance.json`、`browser-cards/nested-acceptance.json`、`greasyfork-publication-ui.json`、`public-code-guide-checks-after-publication-final.json`、`update-metadata-checks-after-publication-final.json`、公開画面PNGへ保存。
 
 証拠はリポジトリ外 `outputs/tweet-audit-2026-10-19/` に保存。隔離fixture・Simulatorの検証は、実Tweetへの認証済み操作、Safari＋Stay／Android実機の受入れとは区別します。実機の操作は行っていません。
 
