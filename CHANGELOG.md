@@ -1,5 +1,9 @@
 # Changelog
 
+## All distributions v6.29.1 — 2026-10-19
+
+Keep local Favorites in sync when a native unlike occurs while Tweet translation is busy or its state is unknown. Resolve removal from the post identity and a verified original, independently of whether the current body may be saved. Retain the native rollback, account and reused-card guards; translated or uncertain text is never stored as an original. Reject an older loaded-Favorites recovery result after a newer favorite action, route change or card reuse, so it cannot restore a post the user just removed. Correct the stale diagnostic version label.
+
 ## All distributions v6.29.0 — 2026-10-18
 
 Support verified Tweet **2.6.0 / build 1792299140**. Remove the extension’s duplicate remote automatic-translation queue, automatic on-device queue and engine selector. Native Settings → Language owns automatic translation; supported Chrome retains optional manual-only on-device translation. Preserve prior storage without silently enabling another translator or changing native account settings.

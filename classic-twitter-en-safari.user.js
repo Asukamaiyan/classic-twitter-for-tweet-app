@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Safari
 // @namespace    https://tweet.app/
-// @version      6.29.0
+// @version      6.29.1
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -2899,7 +2899,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.29.0';
+    document.documentElement.dataset.ctActiveVersion = '6.29.1';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -4859,6 +4859,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   // match through the author's established read-only posts route, never a quote
   // link, text search, React internals or an extra engagement request.
   const ctFavoriteCaptures = new WeakMap();
+  const ctFavoriteInteractions = new WeakMap();
   const ctFavoritePostCache = new Map();
   const ctFavoriteStateWatchers = new WeakMap();
   let ctFavoriteRestoreBusy = false;
@@ -4888,11 +4889,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return false;
   }
 
-  function ctWatchFavoriteRollback(button, snapshot, uid, generation, liked) {
+  function ctWatchFavoriteRollback(button, snapshot, uid, generation, liked, sameIdentity = () => true) {
     let currentLiked = liked;
     const stop = () => { observer.disconnect(); clearTimeout(timer); ctFavoriteStateWatchers.delete(button); };
     const observer = new MutationObserver(() => {
-      if (!button.isConnected || ctNetworkState.authUID !== uid || ctFavoriteCaptures.get(button) !== generation) { stop(); return; }
+      if (!button.isConnected || ctNetworkState.authUID !== uid || ctFavoriteCaptures.get(button) !== generation || !sameIdentity()) { stop(); return; }
       const next = ctIsLiked(button);
       if (next === currentLiked) return;
       currentLiked = next;
@@ -4959,10 +4960,12 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .some(value => /^(?:Show original|原文を表示)$/i.test((value || '').trim()))) ? 'translated' : 'original';
   }
 
-  function ctFavoriteCandidate(article) {
+  function ctFavoriteCandidate(article, removing = false) {
     const translation = ctFavoriteTranslationState(article);
-    if (translation === 'busy' || translation === 'unknown') return null;
-    const translated = translation === 'translated';
+    if (!removing && (translation === 'busy' || translation === 'unknown')) return null;
+    // Removing a known Favorite needs its identity, not the displayed body.
+    // Uncertain native text must still resolve through a saved/API original.
+    const translated = translation !== 'original';
     const timestamp = [...article.querySelectorAll('span.text-tl-app-text-muted.hover\\:underline[title]')].find(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],div.mt-3.rounded-2xl.border') &&
       !!ctTimestampParse(el.title));
@@ -4985,6 +4988,27 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return { username, name: author?.textContent || username, text: body.textContent,
       avatar: articleAvatar(article), createdAt: timestamp?.title || '', savedAt: Date.now(),
       relativeText: replyTime?.textContent || '', observedAt: Date.now(), parentId, translated };
+  }
+
+  function ctFavoriteSavedRemoval(candidate, uid) {
+    if (!candidate?.id || !candidate.translated || !candidate.createdAt ||
+        ctNetworkState.authUID !== uid || typeof loadFavorites !== 'function') return null;
+    const created = ctTimestampParse(candidate.createdAt)?.getTime();
+    const matches = loadFavorites().filter(item => item.id === candidate.id &&
+      typeof item.username === 'string' && item.username.toLowerCase() === candidate.username?.toLowerCase() &&
+      ctTimestampParse(item.createdAt)?.getTime() === created && typeof item.text === 'string');
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function ctFavoriteCaptureSame(article, candidate, snapshot) {
+    const current = ctFavoriteCandidate(article, true);
+    if (!current || (current.id || null) !== (candidate.id || null) ||
+        current.username?.toLowerCase() !== candidate.username?.toLowerCase() ||
+        (current.parentId || null) !== (candidate.parentId || null)) return false;
+    if (candidate.createdAt) return ctTimestampParse(current.createdAt)?.getTime() === ctTimestampParse(candidate.createdAt)?.getTime();
+    if (candidate.id) return true;
+    return !current.translated && current.text === candidate.text &&
+      ctFavoriteRelativeTimeMatches(current.relativeText, snapshot.createdAt, current.observedAt);
   }
 
   async function ctFavoriteAuthorPosts(username, auth, deadline = Infinity) {
@@ -5091,6 +5115,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         if (Date.now() >= deadline) { unresolved += cards.length - index; break; }
         if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
         const button = article.querySelector('button[data-testid="tweet-like-action"]');
+        const interaction = ctFavoriteInteractions.get(button) || 0;
+        const path = location.pathname + location.search;
         const candidate = ctFavoriteCandidate(article);
         let snapshot = candidate && await ctResolveFavorite(candidate, auth.uid, deadline);
         if (snapshot && Date.now() < deadline) {
@@ -5108,7 +5134,13 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
         const current = await getAuth();
         if (current?.uid !== auth.uid) throw new Error('account-changed');
         if (ctNetworkState.authUID !== auth.uid) throw new Error('account-changed');
-        if (snapshot && button.isConnected && ctIsLiked(button)) {
+        // A pending recovery must not undo a later click, even if a rapid
+        // unlike/like cycle or a reused row ends in the same pressed state.
+        if (snapshot && button?.isConnected && button.closest('article') === article && ctIsLiked(button) &&
+            article.querySelector('button[data-testid="tweet-like-action"]') === button &&
+            location.pathname + location.search === path && (ctFavoriteInteractions.get(button) || 0) === interaction &&
+            (!candidate.createdAt || ctTimestampParse(snapshot.createdAt)?.getTime() === ctTimestampParse(candidate.createdAt)?.getTime()) &&
+            ctFavoriteCaptureSame(article, candidate, snapshot)) {
           if (saveFavorite(snapshot, auth.uid) !== false) saved++;
         } else unresolved++;
       }
@@ -5120,24 +5152,33 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const button = event.target.closest?.('button[data-testid="tweet-like-action"]');
     const article = button?.closest('article');
     if (!article || article.closest('[data-ct-owned],[data-ct-local-ui]')) return;
-    ctFavoriteStateWatchers.get(button)?.();
-    const candidate = ctFavoriteCandidate(article);
+    // Invalidate older recovery work for every native click, including a
+    // currently unidentifiable reply that cannot safely be captured itself.
+    ctFavoriteInteractions.set(button, (ctFavoriteInteractions.get(button) || 0) + 1);
+    const wasLiked = ctIsLiked(button);
+    const candidate = ctFavoriteCandidate(article, wasLiked);
     const uid = ctNetworkState.authUID;
     if (!candidate || !uid) return;
-    const wasLiked = ctIsLiked(button);
+    // Accepted capture work owns its separate generation. If busy/unknown
+    // text prevents a fresh Like snapshot, keep the existing original's
+    // short rollback watcher available to follow that native state change.
     const generation = (ctFavoriteCaptures.get(button) || 0) + 1;
     ctFavoriteCaptures.set(button, generation);
+    ctFavoriteStateWatchers.get(button)?.();
+    const path = location.pathname + location.search;
     setTimeout(async () => {
       try {
         if (ctFavoriteCaptures.get(button) !== generation || !button.isConnected || ctNetworkState.authUID !== uid) return;
         const liked = ctIsLiked(button);
         if (liked === wasLiked) return;
-        const snapshot = await ctResolveFavorite(candidate, uid);
+        const snapshot = (wasLiked && ctFavoriteSavedRemoval(candidate, uid)) || await ctResolveFavorite(candidate, uid);
+        const sameIdentity = () => button.closest('article') === article && location.pathname + location.search === path &&
+          ctFavoriteCaptureSame(article, candidate, snapshot);
         if (!snapshot || ctFavoriteCaptures.get(button) !== generation || !button.isConnected ||
-            ctNetworkState.authUID !== uid || ctIsLiked(button) !== liked) return;
+            ctNetworkState.authUID !== uid || ctIsLiked(button) !== liked || !sameIdentity()) return;
         if (liked) saveFavorite(snapshot, uid);
         else removeFavorite(snapshot.id, uid);
-        ctWatchFavoriteRollback(button, snapshot, uid, generation, liked);
+        ctWatchFavoriteRollback(button, snapshot, uid, generation, liked, sameIdentity);
         if (favoritesActive) renderFavoritesPanel();
       } catch { /* Native favorite actions remain available if a read fails. */ }
     }, 450);
@@ -9409,5 +9450,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.26.0 loaded');
+  console.log('🐦 Classic Twitter EN v6.29.1 loaded');
 })();
