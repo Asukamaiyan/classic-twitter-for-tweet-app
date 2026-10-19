@@ -1,3 +1,9 @@
+## 6.29.1: user-requested URL card withdrawal (2026-10-19)
+
+Remove the custom URL-card UI and direct public metadata/image requests at the user's request. Original URLs, normal native links, independent Home links-only filtering, quotes, media and game cards remain. This is a product decision; it does not claim that the official client added a replacement or changed its API. The first-party 2.6.0 build and authentication/media boundaries below remain unchanged. Earlier sections describe the feature set at their recorded release dates.
+
+---
+
 ## 6.29.0: Tweet 2.6.0 compatibility (2026-10-18)
 
 The [official app](https://app.tweet.app/) serves [index-DFVeeabz.js](https://app.tweet.app/assets/index-DFVeeabz.js), **2.6.0 / build 1792299140**, 1,753,586 bytes, SHA256 `beead439a000f921ea4fde01ac18a6c0cd5988ac15cac8a0bd1014e76f332a99`. The signed-in Chrome footer agrees. Public configuration and media configuration are byte-identical to 2.5.0. Normalized API route families increase from 193 to 197, with no removed family in the public bundle comparison.

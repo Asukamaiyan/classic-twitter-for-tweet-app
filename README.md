@@ -2,7 +2,7 @@
 
 **6.29.1** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**6.29.1の修正:** 翻訳の処理中や状態を確認できない投稿で「いいね」を解除したとき、拡張のお気に入り一覧に残る問題を修正。復元処理の古い応答が、解除した投稿を戻す競合も防ぎます。投稿の同一性と確認済み原文を使って同期し、訳文を原文として保存しない処理を保持します。
+**6.29.1の変更:** 独自URLカードとプレビュー取得をいったん削除し、元のURL・通常リンクを残しました。 翻訳の処理中や状態を確認できない投稿で「いいね」を解除したとき、拡張のお気に入り一覧に残る問題を修正。復元処理の古い応答が、解除した投稿を戻す競合も防ぎます。時間を空けて再登録した場合も確認済み原文を保持します。投稿の同一性と確認済み原文を使って同期し、訳文を原文として保存しない処理を保持します。
 
 **Tweet 2.6.0への対応:** 公式配信 **2.6.0 / build 1792299140**（2026-10-18）を確認。自動翻訳はTweet標準へ一本化し、拡張の自動クリック・待ち行列・翻訳方法の切り替えを削除しました。新しい言語設定、翻訳アイコン、個別アカウントの投稿通知を日本語化し、元のボタン・設定値・本文を保持します。全6版を更新しています。
 
@@ -12,13 +12,11 @@
 
 **配布状況（2026-10-19）:** 6.29.0の全6版を[PR #29](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/29)でGitHubのmainへ反映し、Greasy Forkへも公開しました。通常の配布コード6本・導入案内6ページを匿名取得し、全HTTP200・生成結果との全文一致を確認済みです。既存の限定公開設定を保持しています。Safari＋StayとAndroidの今回の実機確認は未実施です。
 
-## URLカード
+## URLの表示
 
-リンク付き投稿に、リンク先の公開タイトル・説明・画像を表示します。「開く」「コピー」「共有」が使え、失敗時も元のURLを残します。便利ツールの「URLカードを自動で取得する」をオフにすると、必要なカードだけ手動で読み込めます。「ホームでリンク付き投稿だけ表示する」は、読み込み済み投稿の範囲を表示します。
+6.29.1では独自URLカードをいったん削除しました。リンク先のタイトル・説明・画像の自動取得と手動プレビュー、カード固有の設定を外し、投稿本文と元のURLリンクを保持します。リンク先へのカード用通信も行いません。
 
-カードは公開HTTPSサイトと画像を直接読みます。外部のプレビュー代行サービスは使わず、Tweetの認証情報・投稿本文は送りません。更新時にサイトへの接続権限が追加されます。Stayで画像が出ない場合はリンク先／画像配信先のアクセス許可を確認してください。権限・サイト側の制限・非対応の画像ではURLのみの表示になります。
-
-6.26.0では本文かカードが画面に残っている間、取得と画像を保持します。日本語へ翻訳しても、翻訳前に確認した元URL・著者・投稿日時・編集状態が一致するカードは維持します。初めから翻訳済みで元URLを確認できない投稿は、原文を表示すると対象になります。
+「ホームでリンク付き投稿だけ表示する」は引き続き使え、読み込み済み投稿の範囲を表示します。ニュースや投稿の画像・動画、引用・標準のゲームカードは従来どおりです。既存の保存データは削除しません。
 
 ## 導入・更新
 
@@ -133,7 +131,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 
 **Enable only one edition. Disable the previous edition when switching.**
 
-Version 6.29.1 fixes local Favorites remaining after a native unlike during a busy or unknown translation state. Removal uses verified post identity and an original snapshot, with account, reused-card and native rollback guards. Older recovery responses cannot undo a newer favorite action. It supports verified Tweet 2.6.0 (build 1792299140, 2026-10-18). Automatic translation now belongs entirely to Tweet: the extension’s native-button queue, automatic device queue and engine selector have been removed. Use Settings → Language; native auto-translate is available with Founder, Fighter and Centurion plans. Optional on-device translation in supported desktop Chrome is manual only. The Japanese edition localizes verified language settings, icon translation states and per-account post notifications while preserving names, post text, target language values and native handlers. English editions keep native English. Profile bells and Settings → Notified accounts remain native; no subscription or translation-write API is added. New translation states preserve only independently verified original URL cards and Favorites, and never infer precise reply timestamps from translated text. All six edition identities and saved data remain. URL cards add public titles, descriptions and static thumbnails with Open, Copy, Share, manual loading and retry. Tools → Automatically load URL previews controls direct anonymous HTTPS reads; Tools → Show only posts with links on Home reports loaded coverage. Destination/image-site permission may be required. Physical Safari/Stay and Android acceptance was not performed for this release; device checks below are historical. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
+Version 6.29.1 temporarily removes custom URL cards, preview requests and their controls while retaining original post URLs and ordinary links. It also fixes local Favorites remaining after a native unlike during a busy or unknown translation state. Removal uses verified post identity and an original snapshot, with account, reused-card and native rollback guards. Older recovery responses cannot undo a newer favorite action. It supports verified Tweet 2.6.0 (build 1792299140, 2026-10-18). Automatic translation now belongs entirely to Tweet: the extension’s native-button queue, automatic device queue and engine selector have been removed. Use Settings → Language; native auto-translate is available with Founder, Fighter and Centurion plans. Optional on-device translation in supported desktop Chrome is manual only. The Japanese edition localizes verified language settings, icon translation states and per-account post notifications while preserving names, post text, target language values and native handlers. English editions keep native English. Profile bells and Settings → Notified accounts remain native; no subscription or translation-write API is added. New translation states preserve only independently verified original Favorites, and never infer precise reply timestamps from translated text. All six edition identities and saved data remain. Tools → Show only posts with links on Home still reports loaded coverage. News, native media, quotes and standard game cards remain available; custom URL-card network requests and the general destination permission are removed. Physical Safari/Stay and Android acceptance was not performed for this release; device checks below are historical. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
 
 Optional browser alerts remain off by default: Tools → Alert when the unread count increases, then allow notifications. They use native unread increases while Tweet is open, contain no names or post text, and stop when the page is closed or suspended. Regular iPhone Safari tabs are unsupported.
 

@@ -265,6 +265,8 @@
       .ct-profile-handle,.ct-profile-time,.ct-profile-edited{font-size:12px;color:var(--color-tl-app-text-muted,#657786);text-decoration:none}
       .ct-profile-time{white-space:nowrap}
       .ct-profile-text{font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 10px}
+      .ct-profile-text a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+      .ct-profile-text a:focus-visible{outline:2px solid currentColor;outline-offset:2px}
       .ct-profile-gallery{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;border-radius:4px;scrollbar-width:thin}
       .ct-profile-photo{display:block;flex:0 0 100%;min-width:0;padding:0;background:var(--color-tl-app-bg,#f5f8fa);border:1px solid var(--color-tl-app-border,#8b98a544);border-radius:4px;overflow:hidden;scroll-snap-align:start;cursor:zoom-in}
       .ct-profile-photo img{display:block;width:100%;height:auto;max-height:480px;object-fit:contain}
@@ -761,6 +763,28 @@
     const button = document.createElement('button'); button.type = 'button'; button.className = 'ct-profile-control';
     button.textContent = text; button.onclick = action; return button;
   }
+  function ctProfilePostText(value) {
+    const text = document.createElement('p'); text.className = 'ct-profile-text';
+    let offset = 0;
+    // Only added profile rows need linkification. Native post nodes and their
+    // handlers remain untouched; anchors do not fetch previews or metadata.
+    for (const match of value.matchAll(/https?:\/\/[^\s<>"'`\u0000-\u001f\u007f「」『』【】（）、。]+/gi)) {
+      if (match.index > 0 && /[A-Za-z0-9_:/\\]/.test(value[match.index - 1])) continue;
+      let label = match[0].replace(/[.,!?;:]+$/, '');
+      for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+        while (label.endsWith(close) && label.split(close).length > label.split(open).length) label = label.slice(0, -1);
+      }
+      let url;
+      try { url = new URL(label); } catch { continue; }
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) continue;
+      text.append(document.createTextNode(value.slice(offset, match.index)));
+      const link = document.createElement('a'); link.href = url.href; link.textContent = label;
+      link.target = '_blank'; link.rel = 'noopener noreferrer';
+      text.append(link); offset = match.index + label.length;
+    }
+    text.append(document.createTextNode(value.slice(offset)));
+    return text;
+  }
   function ctProfileRow(item) {
     const row = document.createElement('div'); row.className = 'ct-profile-row'; row.dataset.ctProfilePost = item.id;
     ctProfileState.rowItems.set(row, JSON.stringify(item));
@@ -790,8 +814,7 @@
       edited.textContent = ctProfileText('編集済み', 'Edited'); meta.append(edited);
     }
     main.append(meta);
-    if (item.text) { const text = document.createElement('p'); text.className = 'ct-profile-text';
-      text.dataset.ctLinkPreviewSource = 'original'; text.textContent = item.text; main.append(text); }
+    if (item.text) main.append(ctProfilePostText(item.text));
     const images = (item.media || []).filter(asset => asset.type === 'image');
     if (images.length) {
       const gallery = document.createElement('div'); gallery.className = 'ct-profile-gallery';
@@ -843,7 +866,6 @@
     if (typeof ctMediaEnhanceVideo === 'function') {
       for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
     }
-    if (typeof ctLinkPreviewsPatch === 'function') ctLinkPreviewsPatch(panel);
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
   function ctProfileFavoriteMuteState() {

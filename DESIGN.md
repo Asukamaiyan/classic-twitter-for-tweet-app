@@ -169,7 +169,7 @@ Use native GIF upload, native reply notifications, polls and account blocking. T
 Block/mute visibility checks precede saved-row display and native mutations invalidate those checks. Preserve stored history; unavailable visibility checks use a retryable status rather than exposing saved rows. Blocked native profile panels retain their own content instead of being mistaken for a timeline. No notification, upload, poll or block write API is added. Current first-party Tweet UI/bundle is the compatibility reference; no new visual reference or brand material is substituted.
 
 
-## 6.25.0 URL cards and Home link filter
+## 6.25.0 URL cards and Home link filter (historical; cards removed in 6.29.1)
 
 Only structurally verified original post bodies receive an owned URL card; names, bios, drafts, translations, notification rows and quote snippets remain untouched. Keep the original anchors and native event handlers. Use a compact bounded thumbnail and a text/domain fallback, with 44px Open/Copy/Share and manual Load/Retry controls. No iframe, HTML injection or animated preview image is used. Respect reduced motion.
 
@@ -195,4 +195,9 @@ Japanese labels are limited to verified settings sections, label relationships, 
 
 2.6 translated text uses the same body node and can insert a source/error block. Link previews retain only independently observed originals with unchanged author/creation/edit/context identity. Favorites with translated permalink content read and validate the exact post original; replies without precise timestamps are not identified from translated text. Relative labels may be localized without fabricating an absolute title. Keep the existing classic design, finite motion and reduced-motion behavior; this compatibility work uses current first-party UI structure and existing design references.
 
-Version 6.29.1 separates native unlike synchronization from permission to capture body text. A busy or unknown translation state can remove a verified favorite without treating the displayed text as an original. Retain post identity and account checks across delayed work, and use an original snapshot when a native action rolls back. Loaded-Favorites recovery also checks the captured route, button, post identity and action generation before saving; newer actions invalidate an old recovery response. No extra control or motion is introduced.
+Version 6.29.1 separates native unlike synchronization from permission to capture body text. A busy or unknown translation state can remove a verified favorite without treating the displayed text as an original. Retain post identity and account checks across delayed work, and use an original snapshot when a native action rolls back. Loaded-Favorites recovery also checks the captured route, button, post identity and action generation before saving; newer actions invalidate an old recovery response. A button-scoped verified original remains available beyond the short rollback observer for explicit later re-likes, guarded by the same account, route, article and post identity. It is not persisted as a new storage entry. No extra control or motion is introduced.
+
+
+## 6.29.1 URL card withdrawal
+
+At the user's request, remove the extension-owned generic URL card, public metadata/image fetch pipeline, manual preview controls and automatic-preview settings. Preserve native post text, anchors and event handlers, quotes, image/video media, game cards and independent Home links-only filtering. Do not replace cards with a new card UI or eagerly fetch any link destination. Preserve previous stored settings as inactive data; existing saved Favorites and original URLs remain intact. Remove the card-only unrestricted destination permission and retain the bounded requests required by unrelated features. The earlier URL-card sections describe historical releases.

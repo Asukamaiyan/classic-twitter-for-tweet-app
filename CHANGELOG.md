@@ -2,7 +2,9 @@
 
 ## All distributions v6.29.1 — 2026-10-19
 
-Keep local Favorites in sync when a native unlike occurs while Tweet translation is busy or its state is unknown. Resolve removal from the post identity and a verified original, independently of whether the current body may be saved. Retain the native rollback, account and reused-card guards; translated or uncertain text is never stored as an original. Reject an older loaded-Favorites recovery result after a newer favorite action, route change or card reuse, so it cannot restore a post the user just removed. Correct the stale diagnostic version label.
+Temporarily remove custom URL cards, public metadata/image fetching, manual preview controls and the automatic-preview setting. Preserve original post text, ordinary URL links, the independent Home links-only filter, native quotes/media/game cards, news and stored user data. Remove the card-only unrestricted destination permission.
+
+Keep local Favorites in sync when a native unlike occurs while Tweet translation is busy or its state is unknown. Resolve removal from the post identity and a verified original, independently of whether the current body may be saved. Retain the native rollback, account and reused-card guards; translated or uncertain text is never stored as an original. Reject an older loaded-Favorites recovery result after a newer favorite action, route change or card reuse, so it cannot restore a post the user just removed. Retain a verified original for later re-likes on the same post after the short rollback watcher expires. Correct the stale diagnostic version label.
 
 ## All distributions v6.29.0 — 2026-10-18
 

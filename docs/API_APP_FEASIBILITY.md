@@ -1,3 +1,9 @@
+## 2026-10-19: URLカードの一時撤去
+
+ユーザーの依頼により、TweetNest 1.3.2と拡張6.29.1の独自URLカード・OGP取得・関連設定を外します。本文とURLの通常操作を残し、公式APIの変更としては扱いません。認証・外部アプリ登録・実サービス受入れの未確認事項は継続します。以下は各時点の調査履歴です。
+
+---
+
 ## 2026-10-18: Tweet 2.6.0 recheck
 
 The current first-party app is **2.6.0 / build1792299140** (`index-DFVeeabz.js`, SHA256 `beead439a000f921ea4fde01ac18a6c0cd5988ac15cac8a0bd1014e76f332a99`). It adds native automatic translation/settings and per-account post notifications. These are first-party contracts, not newly confirmed external-app authentication. No removed existing route, changed media limit or supported third-party sign-in/App Check registration was identified in the inspected delta.

@@ -3,6 +3,7 @@
   // link, text search, React internals or an extra engagement request.
   const ctFavoriteCaptures = new WeakMap();
   const ctFavoriteInteractions = new WeakMap();
+  const ctFavoriteOriginals = new WeakMap();
   const ctFavoritePostCache = new Map();
   const ctFavoriteStateWatchers = new WeakMap();
   let ctFavoriteRestoreBusy = false;
@@ -154,6 +155,23 @@
       ctFavoriteRelativeTimeMatches(current.relativeText, snapshot.createdAt, current.observedAt);
   }
 
+  function ctFavoriteRememberedOriginal(button, article, uid) {
+    const original = ctFavoriteOriginals.get(button);
+    if (!original) return null;
+    const created = ctTimestampParse(original.candidate.createdAt)?.getTime();
+    if (!uid || original.uid !== uid || original.article !== article || !button.isConnected ||
+        button.closest('article') !== article || original.path !== location.pathname + location.search ||
+        !Number.isFinite(created) || ctTimestampParse(original.snapshot.createdAt)?.getTime() !== created ||
+        typeof original.candidate.username !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(original.candidate.username) ||
+        typeof original.snapshot.username !== 'string' || original.snapshot.username.toLowerCase() !== original.candidate.username.toLowerCase() ||
+        typeof original.snapshot.id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(original.snapshot.id) ||
+        original.candidate.id && original.candidate.id !== original.snapshot.id ||
+        !ctFavoriteCaptureSame(article, original.candidate, original.snapshot)) {
+      ctFavoriteOriginals.delete(button); return null;
+    }
+    return original;
+  }
+
   async function ctFavoriteAuthorPosts(username, auth, deadline = Infinity) {
     const key = auth.uid + ':' + username.toLowerCase();
     const previous = ctFavoritePostCache.get(key);
@@ -299,12 +317,20 @@
     // currently unidentifiable reply that cannot safely be captured itself.
     ctFavoriteInteractions.set(button, (ctFavoriteInteractions.get(button) || 0) + 1);
     const wasLiked = ctIsLiked(button);
-    const candidate = ctFavoriteCandidate(article, wasLiked);
     const uid = ctNetworkState.authUID;
+    const original = ctFavoriteRememberedOriginal(button, article, uid);
+    let candidate = ctFavoriteCandidate(article, wasLiked);
+    let remembered = null;
+    if (!candidate && original) {
+      // A prior unlike removes the stored Favorite, but not the independently
+      // verified original for this unchanged native button. An explicit re-like
+      // can reuse it even after the short rollback observer has expired.
+      candidate = ctFavoriteCandidate(article, true);
+      remembered = original.snapshot;
+    }
     if (!candidate || !uid) return;
-    // Accepted capture work owns its separate generation. If busy/unknown
-    // text prevents a fresh Like snapshot, keep the existing original's
-    // short rollback watcher available to follow that native state change.
+    // Accepted capture work owns its separate generation; recovery interaction
+    // tracking never supplies a new original or extends the rollback observer.
     const generation = (ctFavoriteCaptures.get(button) || 0) + 1;
     ctFavoriteCaptures.set(button, generation);
     ctFavoriteStateWatchers.get(button)?.();
@@ -314,11 +340,12 @@
         if (ctFavoriteCaptures.get(button) !== generation || !button.isConnected || ctNetworkState.authUID !== uid) return;
         const liked = ctIsLiked(button);
         if (liked === wasLiked) return;
-        const snapshot = (wasLiked && ctFavoriteSavedRemoval(candidate, uid)) || await ctResolveFavorite(candidate, uid);
+        const snapshot = remembered || (wasLiked && ctFavoriteSavedRemoval(candidate, uid)) || await ctResolveFavorite(candidate, uid);
         const sameIdentity = () => button.closest('article') === article && location.pathname + location.search === path &&
           ctFavoriteCaptureSame(article, candidate, snapshot);
         if (!snapshot || ctFavoriteCaptures.get(button) !== generation || !button.isConnected ||
             ctNetworkState.authUID !== uid || ctIsLiked(button) !== liked || !sameIdentity()) return;
+        ctFavoriteOriginals.set(button, { article, candidate, snapshot, uid, path });
         if (liked) saveFavorite(snapshot, uid);
         else removeFavorite(snapshot.id, uid);
         ctWatchFavoriteRollback(button, snapshot, uid, generation, liked, sameIdentity);

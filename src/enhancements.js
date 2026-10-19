@@ -1,5 +1,5 @@
 /* Local-only additions. Embedded by the build inside each userscript's IIFE. */
-function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getLinkPreviews, setLinkPreviews, getDeviceTranslation, setDeviceTranslation, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
+function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClassicAppearance, getDeviceTranslation, setDeviceTranslation, deviceTranslationSupported = false, prepareDeviceTranslation, getTranslationStatus, restoreVisibleFavorites, getFavoriteHistoryStatus, runFavoriteHistory, stopFavoriteHistory, restartFavoriteHistory, browserNotifications } = {}) {
   const existing = document.getElementById('ct-local-tools');
   if (existing) return existing.ctController;
   const ja = locale.startsWith('ja');
@@ -7,8 +7,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     tools: '便利ツール', title: '便利ツール', close: '閉じる',
     appearance: '昔のTwitterの表示', classic: 'クラシック表示を使う', classicHelp: '青いナビゲーションと星のお気に入り。オフにするとハート・いいね表記・Tweet標準の色や形に戻ります。日本語化と便利機能はそのまま使えます。動きを減らす端末設定にも対応します。',
     scope: '表示設定・キーワード・保存検索・保存投稿は、このブラウザ内で共有します。お気に入りの履歴はログインアカウント別です。',
-    links: 'URLカードとリンク', linksAutomatic: 'URLカードを自動で取得する',
-    linksHelp: '表示中の投稿のリンク先と画像配信元へ直接通信します。ログイン情報や投稿本文は送りません。オフでもカードの「プレビューを取得」から手動で読めます。サイトによってはアクセス許可が必要です。',
+    links: 'リンク付き投稿',
     linksOnly: 'ホームでリンク付き投稿だけ表示する', linksOnlyHelp: '読み込み済みの投稿だけを絞り込みます。詳細・返信・通知・プロフィールには適用しません。',
     linksCount: (shown, total) => `リンク付きのみ · 確認済み ${shown} / ${total}件`, linksAll: 'すべて表示',
     filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
@@ -53,8 +52,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     tools: 'Tools', title: 'Tools', close: 'Close',
     appearance: 'Classic Twitter appearance', classic: 'Use classic appearance', classicHelp: 'Blue navigation and star favorites. Turn off to restore hearts, Like wording and Tweet’s original colors and shapes. Other tools remain available. Respects your reduced motion preference.',
     scope: 'Appearance, keywords, saved searches and saved links are shared within this browser. Favorites history is saved separately for each signed-in account.',
-    links: 'URL cards and links', linksAutomatic: 'Automatically load URL previews',
-    linksHelp: 'Reads visible posts’ destination pages and image hosts directly, without sign-in credentials or post text. Turn off for manual Load preview. A site permission may be required.',
+    links: 'Posts with links',
     linksOnly: 'Show only posts with links on Home', linksOnlyHelp: 'Filters only loaded posts. Does not filter details, replies, notifications or profiles.',
     linksCount: (shown, total) => `Links only · ${shown} / ${total} verified posts`, linksAll: 'Show all',
     filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
@@ -201,7 +199,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   document.body.append(root);
 
   function openPanel(open, moveFocus = true) {
-    if (open) { updateBookmarkControl(); refreshAppearance(); refreshLinkPreviews(); }
+    if (open) { updateBookmarkControl(); refreshAppearance(); }
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open && moveFocus) close.focus({ preventScroll: true });
@@ -288,25 +286,8 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     body.append(section);
   }
 
-  let refreshLinkPreviews = () => {};
   const linksSection = element('section');
   linksSection.append(element('h3', copy.links));
-  if (typeof getLinkPreviews === 'function' && typeof setLinkPreviews === 'function') {
-    const label = element('label');
-    const input = element('input', undefined, { type:'checkbox', id:'ct-local-link-previews', 'aria-describedby':'ct-local-link-help' });
-    refreshLinkPreviews = () => { input.checked = getLinkPreviews() === true; };
-    refreshLinkPreviews();
-    label.append(input, document.createTextNode(copy.linksAutomatic));
-    input.addEventListener('change', () => {
-      const requested = input.checked;
-      try {
-        if (setLinkPreviews(requested) === false || getLinkPreviews() !== requested) throw new Error('Setting was not saved');
-        announce(copy.saved);
-      } catch { announce(copy.storageError, true); }
-      refreshLinkPreviews();
-    });
-    linksSection.append(label, element('p', copy.linksHelp, { id:'ct-local-link-help', class:'ct-local-note' }));
-  }
   const linksOnlyLabel = element('label');
   const linksOnly = element('input', undefined, { type:'checkbox', id:'ct-local-links-only', 'aria-describedby':'ct-local-links-only-help' });
   linksOnly.checked = state.linksOnly;
@@ -593,7 +574,6 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   function refresh() {
     refreshBrowserNotifications();
-    refreshLinkPreviews();
     refreshLinksFilter();
     updateBookmarkControl();
     for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);

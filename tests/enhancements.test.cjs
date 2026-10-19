@@ -28,19 +28,18 @@ function acknowledgeNativeSearch(input) {
   input.parentElement.append(button);
 }
 
-test('link preview toggle reflects persisted state and restores its checkbox after a save failure', t => {
-  let automatic = true, reject = false;
+test('Tools retains the links-only filter without URL-card settings or callbacks', t => {
+  let callbacks = 0;
   const { document, controller } = setup(t, { options:{
-    getLinkPreviews:() => automatic,
-    setLinkPreviews:value => { if (reject) return false; automatic = value; }
+    getLinkPreviews:() => { callbacks++; return true; },
+    setLinkPreviews:() => { callbacks++; }
   }});
-  const input = document.getElementById('ct-local-link-previews');
-  assert.equal(input.checked, true);
-  input.click(); assert.equal(automatic, false); assert.equal(input.checked, false);
-  reject = true; input.click(); assert.equal(input.checked, false);
-  assert.match(document.getElementById('ct-local-tools-status').textContent, /Could not save/);
-  automatic = true; controller.refresh(); assert.equal(input.checked, true);
-  assert.match(document.getElementById('ct-local-link-help').textContent, /directly.*without sign-in credentials or post text/);
+  document.getElementById('ct-local-tools-toggle').click();
+  controller.refresh();
+  assert.equal(document.getElementById('ct-local-link-previews'), null);
+  assert.equal(document.getElementById('ct-local-link-help'), null);
+  assert.ok(document.getElementById('ct-local-links-only'));
+  assert.equal(callbacks, 0, 'obsolete settings cannot start any card work');
 });
 
 test('links-only Home filter preserves native nodes, counts verified originals and can be cleared immediately', t => {
@@ -64,7 +63,7 @@ test('links-only Home filter preserves native nodes, counts verified originals a
   controller.destroy(); assert.equal(document.getElementById('plain'), plain);
 });
 
-test('links-only filtering ignores preview-owned and quoted anchors, restores after route changes and reacts to reused bodies', t => {
+test('links-only filtering ignores extension-owned and quoted anchors, restores after route changes and reacts to reused bodies', t => {
   const { document, window, controller } = setup(t, { settings:state({ linksOnly:true }), html:
     post('a', '<a href="https://example.com/article">External</a>') +
     post('b', '<span data-ct-owned><a href="https://example.com/preview">Preview</a></span>') });

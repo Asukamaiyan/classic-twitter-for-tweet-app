@@ -20,8 +20,16 @@ function harness(t) {
     {url:'https://app.tweet.app/feed', runScripts:'outside-only'});
   t.after(() => dom.window.close());
   const w = dom.window;
-  const f = {w, doc:w.document, requests:[], saves:[], removals:[], timers:[]};
-  w.setTimeout = (cb, delay) => { if (delay === 450) f.timers.push(cb); return f.timers.length + 1; };
+  const f = {w, doc:w.document, requests:[], saves:[], removals:[], timers:[], watcherTimers:new Map()};
+  let nextTimer=0;
+  w.setTimeout = (cb, delay) => {
+    const id=++nextTimer;
+    if (delay === 450) f.timers.push(cb);
+    if (delay === 30000) f.watcherTimers.set(id,cb);
+    return id;
+  };
+  w.clearTimeout = id => f.watcherTimers.delete(id);
+  f.expireWatchers = () => { for(const [id,cb] of [...f.watcherTimers]) { f.watcherTimers.delete(id); cb(); } };
   w.snapshotFavorite = () => null;
   w.validUser = value => value;
   w.articleAuthor = () => 'alice';
@@ -223,18 +231,109 @@ test('uncertain unlike and re-like retain the saved original through repeated na
       f.click();f.button.setAttribute('aria-pressed','false');await f.timers.shift()();
       assert.equal(items.size,0,mode+' unlike');
       assert.equal(f.candidate(),null,'uncertain text remains unavailable for new snapshots');
-      f.click();f.button.setAttribute('aria-pressed','true');await Promise.resolve();await Promise.resolve();
-      assert.equal(f.timers.length,0,'the retained original watcher handles the state change');
+      f.click();f.button.setAttribute('aria-pressed','true');await f.timers.shift()();
       assert.equal(items.get('post-a')?.text,'Saved original',mode+' re-like');
       assert.equal(items.get('post-a')?.savedAt,123);
       // The native request rejects the re-like, then a later explicit retry succeeds.
       f.button.setAttribute('aria-pressed','false');await Promise.resolve();await Promise.resolve();
       assert.equal(items.size,0,mode+' re-like rollback');
-      f.click();f.button.setAttribute('aria-pressed','true');await Promise.resolve();await Promise.resolve();
+      f.click();f.button.setAttribute('aria-pressed','true');await f.timers.shift()();
       assert.equal(items.get('post-a')?.text,'Saved original',mode+' retry');
     }
     assert.equal(f.requests.length,0);
     assert.ok(f.saves.every(row=>row.item.text==='Saved original'));
+  }
+});
+
+async function removedUncertainFavorite(t, mode='busy', known=true) {
+  const f=harness(t);
+  f.original={id:'post-a',username:'alice',text:'Saved original',createdAt:date,savedAt:123};
+  f.items=new Map([[f.original.id,f.original]]);
+  f.currentIdentity={id:'post-a',username:'alice'};
+  f.w.loadFavorites=()=>[...f.items.values()];
+  f.w.saveFavorite=(item,uid)=>{f.saves.push({item,uid});f.items.set(item.id,item);};
+  f.w.removeFavorite=(id,uid)=>{f.removals.push({id,uid});f.items.delete(id);};
+  f.w.snapshotFavorite=()=>known?{...f.currentIdentity,text:'Visible translation'}:null;
+  f.w.articleAuthor=()=>f.currentIdentity.username;
+  f.response={posts:[{...f.post(),text:'Saved original'}]};
+  f.article.querySelector('p').textContent='Visible translation';
+  f.article.insertAdjacentHTML('beforeend',native26Control(mode));
+  f.button.setAttribute('aria-pressed','true');f.click();f.button.setAttribute('aria-pressed','false');
+  await f.timers.shift()();assert.equal(f.items.size,0);assert.equal(f.watcherTimers.size,1);
+  f.w.Date.now=()=>Date.now()+31000;
+  f.expireWatchers();assert.equal(f.watcherTimers.size,0,'the actual 30-second observer stop callback ran');
+  return f;
+}
+
+test('uncertain re-like reuses a verified original after the rollback watcher expires and still handles failures', async t => {
+  for(const mode of ['busy','future-state'])for(const known of [true,false]){
+    const f=await removedUncertainFavorite(t,mode,known);
+    f.click();f.button.setAttribute('aria-pressed','true');
+    assert.equal(f.items.size,0,'wait for the ordinary native capture check');
+    assert.equal(f.timers.length,1);await f.timers.shift()();
+    assert.equal(f.items.get('post-a')?.text,'Saved original',mode);
+    if(known)assert.equal(f.items.get('post-a')?.savedAt,123);
+    assert.equal(f.watcherTimers.size,1,'a new bounded observer belongs to this explicit action');
+    f.button.setAttribute('aria-pressed','false');await Promise.resolve();await Promise.resolve();
+    assert.equal(f.items.size,0,'failed re-like rolls back');
+    f.expireWatchers();assert.equal(f.watcherTimers.size,0);
+    f.click();f.button.setAttribute('aria-pressed','true');await f.timers.shift()();
+    assert.equal(f.items.get('post-a')?.text,'Saved original','retry after another observer expiry');
+    assert.ok(f.saves.every(row=>row.item.text==='Saved original'));
+    assert.equal(f.requests.length,known?0:1,'retained originals need no additional GET');
+  }
+});
+
+test('expired remembered originals cannot cross account, route, article, button or post identity boundaries', async t => {
+  for(const change of ['account','id','author','time','missing-time','route','button','article','detached']){
+    const f=await removedUncertainFavorite(t);
+    if(change==='account')f.w.identity.authUID='account-b';
+    if(change==='id')f.currentIdentity.id='post-b';
+    if(change==='author')f.currentIdentity.username='bob';
+    if(change==='time')f.article.querySelector('span[title]').title='2026-09-30T08:00:00.000Z';
+    if(change==='missing-time')f.article.querySelector('span[title]').removeAttribute('title');
+    if(change==='route')f.w.history.pushState({},'', '/user/bob');
+    if(change==='button'){const replacement=f.button.cloneNode(true);f.button.replaceWith(replacement);f.button=replacement;}
+    if(change==='article'){
+      const replacement=f.article.cloneNode(true);replacement.querySelector('button[data-testid]').replaceWith(f.button);
+      f.article.replaceWith(replacement);f.article=replacement;
+    }
+    if(change==='detached')f.article.remove();
+    f.click();f.button.setAttribute('aria-pressed','true');
+    while(f.timers.length)await f.timers.shift()();await Promise.resolve();await Promise.resolve();
+    assert.equal(f.items.size,0,change);assert.equal(f.saves.length,0,change);assert.equal(f.requests.length,0,change);
+    if(change==='id'){
+      f.currentIdentity.id='post-a';f.button.setAttribute('aria-pressed','false');f.click();f.button.setAttribute('aria-pressed','true');
+      assert.equal(f.timers.length,0,'a rejected reused row discards its old remembered original');
+    }
+  }
+});
+
+test('remembered re-like rejects late identity changes and native reversal during its capture delay', async t => {
+  for(const change of ['account','id','author','time','route','button','detached','reversal']){
+    const f=await removedUncertainFavorite(t,'future-state');
+    f.click();f.button.setAttribute('aria-pressed','true');assert.equal(f.timers.length,1);
+    if(change==='account')f.w.identity.authUID='account-b';
+    if(change==='id')f.currentIdentity.id='post-b';
+    if(change==='author')f.currentIdentity.username='bob';
+    if(change==='time')f.article.querySelector('span[title]').title='2026-09-30T08:00:00.000Z';
+    if(change==='route')f.w.history.pushState({},'', '/user/bob');
+    if(change==='button')f.button.replaceWith(f.button.cloneNode(true));
+    if(change==='detached')f.article.remove();
+    if(change==='reversal')f.button.setAttribute('aria-pressed','false');
+    await f.timers.shift()();
+    assert.equal(f.items.size,0,change);assert.equal(f.saves.length,0,change);assert.equal(f.requests.length,0,change);
+  }
+});
+
+test('a first Like with uncertain text never gains an original from unrelated storage or elapsed time', async t => {
+  for(const mode of ['busy','future-state']){
+    const f=harness(t);f.article.insertAdjacentHTML('beforeend',native26Control(mode));
+    f.w.snapshotFavorite=()=>({id:'post-a',username:'alice',text:'Visible translation'});
+    f.w.loadFavorites=()=>[{id:'post-a',username:'alice',text:'Old stored snapshot',createdAt:date}];
+    f.w.Date.now=()=>Date.now()+31000;f.expireWatchers();
+    f.click();f.button.setAttribute('aria-pressed','true');await Promise.resolve();await Promise.resolve();
+    assert.equal(f.timers.length,0);assert.equal(f.saves.length,0);assert.equal(f.requests.length,0);
   }
 });
 
@@ -402,7 +501,7 @@ test('loaded-Favorites recovery is invalidated by later native clicks even when 
   }
 });
 
-test('uncertain re-like preserves the original watcher while independently invalidating older Favorites recovery', async t => {
+test('uncertain re-like preserves the original snapshot while independently invalidating older Favorites recovery', async t => {
   const f=harness(t),original={id:'post-a',username:'alice',text:'Saved original',createdAt:date,savedAt:123};
   const items=new Map([[original.id,original]]);
   f.w.loadFavorites=()=>[...items.values()];
@@ -413,7 +512,7 @@ test('uncertain re-like preserves the original watcher while independently inval
   f.article.querySelector('p').textContent='Visible translation';
   f.article.insertAdjacentHTML('beforeend',native26Control('busy'));
   f.click();f.button.setAttribute('aria-pressed','false');await f.timers.shift()();assert.equal(items.size,0);
-  f.click();f.button.setAttribute('aria-pressed','true');await Promise.resolve();await Promise.resolve();
+  f.click();f.button.setAttribute('aria-pressed','true');await f.timers.shift()();
   assert.equal(items.get('post-a')?.text,'Saved original');
   const before=f.saves.length;recovery.finish();const result=await recovery.pending;
   assert.equal(result.saved,0);assert.equal(result.unresolved,1);assert.equal(f.saves.length,before);

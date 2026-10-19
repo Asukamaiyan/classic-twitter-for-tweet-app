@@ -11,7 +11,6 @@
 // @connect      news.web.nhk
 // @connect      www.nikkansports.com
 // @connect      rss.itmedia.co.jp
-// @connect      *
 /* @safari-grants */
 // @noframes
 // @run-at       document-start
@@ -44,7 +43,6 @@
   /* @include badges */
   /* @include media */
   /* @include news */
-  /* @include link-preview */
   /* @include safari */
 
   const API_ORIGIN = 'https://api.tweet.app';
@@ -3014,7 +3012,6 @@ if (/^just\s+now$/i.test(t)) {
     patchOfficialBadges(root);
     ctMediaEnhance(root);
     patchJapaneseNews(root);
-    ctLinkPreviewsPatch(root);
 
     } catch(error) {
       console.debug(
