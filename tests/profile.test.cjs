@@ -127,6 +127,20 @@ for (const tab of ['favorites', 'media']) {
   });
 }
 
+test('profile links unwrap nested surrounding brackets while preserving balanced URL parentheses and full text', async t => {
+  const h = harness(t);
+  const text = '[(https://example.org/article)] {([https://example.net/nested])} ' +
+    '[(https://example.org/wiki/Topic_(part))]';
+  await h.ready();
+  h.api.save(item('nested-links', { text }));
+  await h.select('favorites');
+  const paragraph = h.document.querySelector('.ct-profile-text');
+  assert.equal(paragraph.textContent, text);
+  assert.deepEqual([...paragraph.querySelectorAll('a')].map(link => link.getAttribute('href')), [
+    'https://example.org/article', 'https://example.net/nested', 'https://example.org/wiki/Topic_(part)'
+  ]);
+});
+
 test('Japanese labels and hidden retained feed subtrees select only the visible profile tabs', async t => {
   const h = harness(t, { locale: 'ja', html: `<div hidden aria-hidden="true">${client('wrong')}</div><div>${client('viewer', ['ツイート', 'リプライ', 'リツイート'])}</div>` });
   await h.ready();

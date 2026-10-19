@@ -1,5 +1,9 @@
 # Changelog
 
+## All distributions v6.29.2 — 2026-10-19
+
+- Correct ordinary saved-post links wrapped in nested parentheses/brackets while preserving the entire original text. Retain the URL-card withdrawal and favorite synchronization fixes from 6.29.1.
+
 ## All distributions v6.29.1 — 2026-10-19
 
 Temporarily remove custom URL cards, public metadata/image fetching, manual preview controls and the automatic-preview setting. Preserve original post text, ordinary URL links, the independent Home links-only filter, native quotes/media/game cards, news and stored user data. Remove the card-only unrestricted destination permission.
