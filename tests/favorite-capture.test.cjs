@@ -5,6 +5,7 @@ const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/favorite-capture.js'), 'utf8');
 const timestampSource = fs.readFileSync(require('node:path').join(__dirname, '../src/timestamps.js'), 'utf8');
 const mediaSource = fs.readFileSync(require('node:path').join(__dirname, '../src/media.js'), 'utf8');
+const profileAltSource = fs.readFileSync(require('node:path').join(__dirname, '../src/profile.js'), 'utf8').match(/  function ctProfileAltText\(value\) \{[\s\S]*?\n  \}/)[0];
 const {galleryMarkup}=require('./helpers/native-media.cjs');
 const date = '2026-09-30T07:00:00.000Z';
 function native26Control(mode = 'idle') {
@@ -44,7 +45,7 @@ function harness(t) {
   w.ctProfilePostEdited = post => post.isEdited === true || typeof post.editedAt === 'string' && !!post.editedAt.trim();
   w.ctProfileURL = value => /^https:\/\//.test(value || '') ? value : '';
   w.eval(`const API_ORIGIN='https://api.tweet.app'; const ctNetworkState={authUID:'account-a'}; const CT_LOCALE='ja'; ${timestampSource}
-    let favoritesActive=false; ${mediaSource}
+    let favoritesActive=false; ${mediaSource} ${profileAltSource}
     ${source}; window.identity=ctNetworkState;
     window.qa={ctFavoriteCandidate,ctResolveFavorite,ctCaptureFavoriteClick,ctRestoreVisibleFavorites,ctFavoriteRelativeTimeMatches};`);
   f.article = f.doc.querySelector('article');
@@ -588,4 +589,24 @@ test('blocked native posts cannot resolve or restore a saved Favorite',async t=>
   const main=f.doc.createElement('main');f.article.before(main);main.append(f.article);f.button.setAttribute('aria-pressed','true');
   f.response={post:{...f.post(),hasLiked:true,status:'BLOCKED'}};
   const result=await f.w.qa.ctRestoreVisibleFavorites();assert.equal(result.saved,0);assert.equal(f.saves.length,0);
+});
+
+
+const {gallery290Markup,altPopoverMarkup,altText,escapeHTML}=require('./helpers/native-alt.cjs');
+test('Tweet 2.9 native button-wrapped photos retain exact ALT and reject quoted/nested/user images',t=>{
+  const f=harness(t); f.w.snapshotFavorite=()=>({id:'detail-290',text:'My post'});
+  f.article.insertAdjacentHTML('beforeend',gallery290Markup(2,'gallery-new'));
+  f.article.querySelector('[aria-label]').insertAdjacentHTML('beforeend',gallery290Markup(2,'quote-new'));
+  f.article.insertAdjacentHTML('beforeend','<div class="tl-user-text">'+gallery290Markup(2,'body-new')+'</div><article>'+gallery290Markup(2,'nested-new')+'</article>');
+  const before=f.article.innerHTML, result=f.candidate();
+  assert.equal(result.media.length,2); assert.ok([...result.media].every(asset=>asset.altText===altText));
+  assert.deepEqual([...result.media].map(asset=>asset.url),[...f.article.querySelectorAll('#gallery-new img')].map(image=>image.src));
+  assert.equal(f.article.innerHTML,before); assert.equal(f.requests.length,0);
+});
+test('Tweet 2.9 native single images preserve ALT only from the matching native popover',t=>{
+  const f=harness(t); f.w.snapshotFavorite=()=>({id:'single-290',text:'My post'});
+  f.article.insertAdjacentHTML('beforeend',`<div class="relative"><button type="button" class="block w-full cursor-pointer"><img class="w-full object-cover" src="https://media.tweet.app/single.jpg" alt="${escapeHTML(altText)}"></button>${altPopoverMarkup('single-alt',altText)}</div>`);
+  assert.equal(f.candidate().media[0].altText,altText);
+  f.doc.querySelector('#single-alt p').textContent='Another description';
+  assert.equal(f.candidate().media[0].altText,undefined); assert.equal(f.candidate().media[0].url,'https://media.tweet.app/single.jpg');
 });

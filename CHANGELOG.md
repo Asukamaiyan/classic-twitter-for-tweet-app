@@ -1,5 +1,48 @@
 # Changelog
 
+## 6.32.2 — Smoother photo scrolling (2026-11-22)
+
+- Align inline carousel updates to the browser’s rendering cadence. Skip repeated photo fitting during motion within the same active slide.
+- In the native fullscreen viewer, refresh the gallery when entering or leaving zoom or when its layout bounds change. Reuse those bounds during zoomed panning.
+- Keep each photo’s aspect ratio, ALT reader, native carousel controls and reduced-motion behavior.
+
+## 6.32.1 — Perch, pinned Nests, and mobile Chrome guidance (2026-11-22, local candidate)
+
+- Localize the native Perch and pinned Nest controls in Japanese editions. Keep feed names, mute values and existing settings.
+- Document launching the official site from a mobile Chrome home-screen shortcut and the supported browsers for running the userscript.
+
+## 6.32.0 — Nests and Perch / Tweet 2.11.6 (2026-11-22, local candidate)
+
+- Localize verified Nests interface labels in the Japanese editions. Community names, descriptions, tags, norms, and post content keep their original text.
+- In Tools, open Tweet’s native muting settings when the visible Perch control is available. Keep partial matching and per-post reveal as a browser-only collapse option, with existing configurations intact.
+
+## 6.31.0 — Per-photo sizing / Tweet 2.9.2 (2026-11-04, local candidate)
+
+- Inline single photos and carousels fit the currently displayed photo's decoded width/height, without the first-photo clamped ratio or fixed black frame. Preserve native scroll snap, dots, ALT, image URLs and click handlers.
+- Media/Favorites rows use the same per-photo fitting and keep their saved data unchanged. Fullscreen owned photo boxes preserve intrinsic aspect ratio instead of filling a larger rectangle. Very tall photos are bounded by the available viewport and small images are not enlarged.
+- Pending, failed and reused sources use a neutral bounded placeholder until their own load completes. Responsive srcset/sizes candidates are tracked independently from the fallback src. Resize preserves the selected page; pinch zoom keeps layout coordinates, and detach/pagehide cleans up fitting.
+- Native ALT popups temporarily get a readable clipped area, then return to photo height after closing. Coalesce ResizeObserver width updates to the next animation frame instead of synchronously resizing the observed layout.
+- Recheck official 2.9.2/build1793656820. Photo/ALT structure is unchanged; hashtag pagination and retries remain first-party-owned. Local source package only; no publication or installed-manager changes.
+
+
+## All distributions v6.30.0 candidate — 2026-10-29
+
+Follow verified Tweet 2.9.0 / build 1792965394. Recognize native button-wrapped, aspect-ratio-aware image slides while retaining image sources, handlers, native ALT controls and original text. Preserve exact optional `alt_text` descriptions as `altText` in read-only Media/Favorites, local backup/import and enlarged-photo accessibility labels. The native editor's 1,000-code-point input limit is not applied to API reads or stored descriptions. Invisible-only values stay raw in storage while displayed accessibility labels use photo fallbacks. Old archives remain valid; malformed optional backup values reject atomically without altering the stored archive.
+
+Japanese localization covers verified ALT editor/popup chrome, the device-language default option and the Child Safety action. Never translate image alt, descriptions or textarea values. Reserve natural fullscreen ALT space separately from the image and delivered-image controls. No extra ALT editing/post API, URL cards, permissions, remote assets or dependencies are added. Keep the existing Tools composition/focus, native translation and GIF behavior. Local candidate only; publication and physical-device acceptance remain separate.
+
+## Compatibility recheck — 2026-10-25
+
+Keep the unpublished 6.29.3 candidate and its six generated scripts unchanged. Newly fetched official HTML and main bundle still identify Tweet 2.8.0 / build 1792815884; the bundle is byte-identical to October 24. Public scripts and origin/main remain 6.29.2. Rebuild all six editions, rerun the 794 checks and retain the existing dependency majors after a fresh audit reports zero advisories. Update the dated compatibility and validation records only; no publication or installed-script update is performed.
+
+## All distributions v6.29.3 candidate — 2026-10-24
+
+Keep Tools open while an IME consumes Escape and suppress saving unfinished composition in search, note and keyword forms. Respect an already-handled child Escape. After keyboard removal, focus the next saved item, the previous one at the end, or the input when empty; failed saves and unrelated focused fields retain their focus and drafts. Keep Remove controls from shrinking beside long saved names. Retain the existing brief panel/press feedback and reduced-motion behavior.
+
+Inspect public Tweet 2.8.0 / build 1792815884. Localize only its verified native KLIPY picker’s search labels, loading/error/retry chrome and opener in Japanese. Preserve query values, result titles (including failed-image tiles), React nodes and native handlers; English labels stay native. Native GIF APIs and selection remain native, and new `klipy_gif` metadata is not yet reproduced in extension-owned Media/Favorites. No URL cards, account-write APIs, permissions or runtime dependencies are added. Update the compatible development parser Acorn to 8.19.0; retain jsdom’s current major.
+
+Generate all six editions as a local candidate. No GitHub push or Greasy Fork publication is performed. Validation and device limits are recorded separately.
+
 ## All distributions v6.29.2 — 2026-10-19
 
 - Correct ordinary saved-post links wrapped in nested parentheses/brackets while preserving the entire original text. Retain the URL-card withdrawal and favorite synchronization fixes from 6.29.1.

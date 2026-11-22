@@ -52,7 +52,8 @@ const localizationNames = [
   'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
   'nativeLocalization26Context', 'native26JapaneseText', 'patchNative26UI',
   'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText', 'nativeMediaUploadJapaneseText',
-  'nativeLocalizationMediaUpload', 'nativeLocalizationGIFMedia', 'nativeLocalizationBlockMenu',
+  'nativeLocalizationMediaUpload', 'nativeLocalizationGIFMedia', 'nativeGIFPickerJapaneseText', 'nativeAltJapaneseText',
+  'nativeNestJapaneseText', 'nativePerchJapaneseText', 'nativeLocalizationBlockMenu',
   'nativeLocalizationBlockDialog', 'nativeLocalizationBlockProfile', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError'
 ];
 assert.ok(shippedDeclarations.has('ctNativeNotificationRowSelector'), 'localization uses the shipped notification row selector');

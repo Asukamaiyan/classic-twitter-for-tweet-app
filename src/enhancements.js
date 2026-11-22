@@ -10,8 +10,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     links: 'リンク付き投稿',
     linksOnly: 'ホームでリンク付き投稿だけ表示する', linksOnlyHelp: '読み込み済みの投稿だけを絞り込みます。詳細・返信・通知・プロフィールには適用しません。',
     linksCount: (shown, total) => `リンク付きのみ · 確認済み ${shown} / ${total}件`, linksAll: 'すべて表示',
-    filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
-    words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
+    filters: 'キーワードで折りたたむ', enabled: 'このブラウザで投稿を折りたたむ',
+    muteControls: 'ミュートと折りたたみ',
+    nativeMute: 'Tweetのミュート設定を開く',
+    nativeMuteHelp: '人・ハッシュタグ・語句のミュートや期限は、Tweetのフィード設定（Perch）で変更できます。',
+    localCollapse: 'ブラウザ内の折りたたみ',
+    words: 'キーワード（1 行に 1 件）', help: '本文の一部に一致する投稿をこのブラウザで折りたたみ、必要なときだけ開けます。大小文字は区別しません。最大 30 件、各 80 文字。',
     save: 'フィルターを保存', saved: '設定を保存しました。', searches: '保存した検索',
     query: '保存する検索語', add: '検索を保存', remove: '削除', noSearches: '保存した検索はありません。',
     searchHelp: '最大 20 件。検索語を押すと検索画面で検索します。',
@@ -55,8 +59,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     links: 'Posts with links',
     linksOnly: 'Show only posts with links on Home', linksOnlyHelp: 'Filters only loaded posts. Does not filter details, replies, notifications or profiles.',
     linksCount: (shown, total) => `Links only · ${shown} / ${total} verified posts`, linksAll: 'Show all',
-    filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
-    words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
+    filters: 'Collapse by keyword', enabled: 'Collapse posts in this browser',
+    muteControls: 'Mute and collapse',
+    nativeMute: 'Open Tweet’s mute settings',
+    nativeMuteHelp: 'Use Tweet’s feed settings (Perch) to mute people, hashtags, or words and set an expiration.',
+    localCollapse: 'Browser-only post collapse',
+    words: 'Keywords (one per line)', help: 'Collapse posts when any part of their text matches, ignoring case. You can reveal each post as needed. Up to 30 keywords, 80 characters each.',
     save: 'Save filters', saved: 'Settings saved.', searches: 'Saved searches',
     query: 'Search to save', add: 'Save search', remove: 'Remove', noSearches: 'No saved searches yet.',
     searchHelp: 'Save up to 20 searches. Select a search to open it in Explore.',
@@ -161,9 +169,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     #ct-local-tools label:has(input[type=checkbox]) { display:flex; align-items:center; min-height:44px; margin:4px 0; cursor:pointer; }
     #ct-local-tools [aria-invalid=true] { border-color:var(--color-tl-app-danger, #c23636); }
     #ct-local-tools form > button { margin-top:8px; }
+    #ct-local-tools summary { cursor:pointer; min-height:44px; align-content:center; }
+    #ct-local-tools summary:focus-visible { outline:3px solid var(--color-tl-app-primary, #1688d4); outline-offset:2px; }
     #ct-local-tools ul { padding:0; margin:8px 0; list-style:none; }
     #ct-local-tools li { display:flex; align-items:center; gap:10px; padding:5px 0; }
     #ct-local-tools li a { display:flex; align-items:center; flex:1; min-width:0; min-height:44px; overflow-wrap:anywhere; color:inherit; text-decoration:underline; padding:5px 0; }
+    #ct-local-tools li button { flex-shrink:0; white-space:nowrap; }
     #ct-local-tools #ct-local-tools-status { margin:0; font-size:13px; overflow-wrap:anywhere; }
     #ct-local-tools-status[data-error=true] { color:var(--color-tl-app-danger, #c23636); }
     article.ct-keyword-collapsed > :not(.ct-keyword-notice) { display:none !important; }
@@ -187,7 +198,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   const title = element('h2', copy.title, { id: 'ct-local-tools-title' });
   const close = element('button', copy.close, { type: 'button' });
   header.append(title, close);
-  const status = element('p', loadError, { id: 'ct-local-tools-status', role: 'status', 'aria-live': 'polite' });
+  const status = element('p', loadError, { id: 'ct-local-tools-status', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   if (loadError) status.dataset.error = 'true';
   const body = element('div', undefined, { id: 'ct-local-tools-body' });
   const footer = element('footer', undefined, { tabindex: '0', 'aria-labelledby': 'ct-local-tools-status' });
@@ -199,7 +210,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   document.body.append(root);
 
   function openPanel(open, moveFocus = true) {
-    if (open) { updateBookmarkControl(); refreshAppearance(); }
+    if (open) { updateBookmarkControl(); refreshAppearance(); refreshMuteControls(); }
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open && moveFocus) close.focus({ preventScroll: true });
@@ -207,8 +218,15 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   toggle.addEventListener('click', () => openPanel(panel.hidden));
   close.addEventListener('click', () => openPanel(false));
+  const composingInputs = new WeakSet();
+  root.addEventListener('compositionstart', event => composingInputs.add(event.target));
+  root.addEventListener('compositionend', event => composingInputs.delete(event.target));
+  root.addEventListener('blur', event => composingInputs.delete(event.target), true);
   root.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !panel.hidden) { event.stopPropagation(); openPanel(false); }
+    // Escape first dismisses the input method's candidates. It must not hide
+    // the draft or override a child control that already handled the key.
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || composingInputs.has(event.target)) return;
+    if (event.key === 'Escape' && !panel.hidden) { event.preventDefault(); event.stopPropagation(); openPanel(false); }
   });
   function announce(message, error = false) {
     status.textContent = message;
@@ -237,6 +255,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     input.focus();
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
+  function focusAfterRemoval(list, index, fallback) {
+    const buttons = list.querySelectorAll('li button');
+    (buttons[Math.min(index, buttons.length - 1)] || fallback).focus({ preventScroll: true });
+  }
 
   let refreshBrowserNotifications = () => {};
   if (typeof browserNotifications?.getState === 'function' && typeof browserNotifications?.setEnabled === 'function') {
@@ -386,6 +408,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
 
   const filterSection = element('section');
+  const filterHeading = element('h3', copy.filters);
+  const nativeMute = element('div', undefined, { hidden: '' });
+  const nativeMuteButton = element('button', copy.nativeMute, { type: 'button', 'aria-describedby': 'ct-native-mute-help' });
+  nativeMute.append(element('p', copy.nativeMuteHelp, { id: 'ct-native-mute-help', class: 'ct-local-note' }), nativeMuteButton);
+  const collapseDetails = element('details', undefined, { open: '' });
+  const collapseSummary = element('summary', copy.localCollapse, { hidden: '' });
   const filterForm = element('form');
   const enabledLabel = element('label');
   const enabled = element('input', undefined, { type: 'checkbox', id: 'ct-local-filter-enabled' });
@@ -396,8 +424,37 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   keywords.value = state.keywords.join('\n');
   filterForm.append(enabledLabel, element('label', copy.words, { for: keywords.id }), keywords,
     element('p', copy.help, { id: 'ct-local-keyword-help', class: 'ct-local-note' }), element('button', copy.save, { type: 'submit' }));
-  filterSection.append(element('h3', copy.filters), filterForm);
+  collapseDetails.append(collapseSummary, filterForm);
+  filterSection.append(filterHeading, nativeMute, collapseDetails);
   body.append(filterSection);
+  function nativePerchButton() {
+    const button = document.querySelector('button[data-perch-pill][aria-haspopup="dialog"]');
+    if (button && !button.disabled && !button.closest('[hidden], [inert], [aria-hidden="true"]') &&
+        button.getClientRects().length) return button;
+  }
+  function refreshMuteControls() {
+    const hasPerch = Boolean(nativePerchButton());
+    if (hasPerch === !nativeMute.hidden) return;
+    nativeMute.hidden = !hasPerch;
+    collapseSummary.hidden = !hasPerch;
+    filterHeading.textContent = hasPerch ? copy.muteControls : copy.filters;
+    // Existing configurations stay directly accessible when Perch first appears.
+    if (!hasPerch || !collapseDetails.contains(document.activeElement)) {
+      collapseDetails.open = !hasPerch || state.enabled || state.keywords.length > 0 || keywords.value.trim().length > 0;
+    }
+  }
+  nativeMuteButton.addEventListener('click', () => {
+    const button = nativePerchButton();
+    if (!button) {
+      refreshMuteControls();
+      collapseDetails.open = true;
+      enabled.focus();
+      return;
+    }
+    openPanel(false);
+    button.focus({ preventScroll: true });
+    button.click();
+  });
 
   const searchSection = element('section');
   const searchForm = element('form');
@@ -410,7 +467,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   function renderSearches() {
     searches.replaceChildren();
     if (!state.searches.length) searches.append(element('li', copy.noSearches));
-    for (const query of state.searches) {
+    for (const [index, query] of state.searches.entries()) {
       const row = element('li');
       // The native route is /explore. ct_search is consumed by this script;
       // tweet.app itself does not currently support search query deep links.
@@ -434,9 +491,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
       });
       const remove = element('button', copy.remove, { type: 'button', 'aria-label': `${copy.remove}: ${query}` });
       remove.addEventListener('click', () => {
+        const restoreFocus = row.contains(document.activeElement);
         if (persist({ ...state, searches: state.searches.filter(item => item !== query) })) {
           renderSearches();
-          searchInput.focus();
+          if (restoreFocus) focusAfterRemoval(searches, index, searchInput);
         }
       });
       row.append(link, remove);
@@ -446,6 +504,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   renderSearches();
   searchForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(searchInput)) return;
     const query = searchInput.value.trim();
     if (!query || query.length > 200 || state.searches.length >= 20) { invalidInput(searchInput, copy.invalidSearch); return; }
     if (state.searches.some(item => normalize(item) === normalize(query))) { invalidInput(searchInput, copy.duplicate); return; }
@@ -483,14 +542,15 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   function renderBookmarks() {
     bookmarks.replaceChildren();
     if (!state.bookmarks.length) bookmarks.append(element('li', copy.noBookmarks));
-    for (const item of state.bookmarks) {
+    for (const [index, item] of state.bookmarks.entries()) {
       const row = element('li');
       const link = element('a', item.label, { href: item.path });
       const remove = element('button', copy.remove, { type: 'button', 'aria-label': `${copy.remove}: ${item.label}` });
       remove.addEventListener('click', () => {
+        const restoreFocus = row.contains(document.activeElement);
         if (persist({ ...state, bookmarks: state.bookmarks.filter(other => other.path !== item.path) })) {
           renderBookmarks();
-          bookmarkInput.focus();
+          if (restoreFocus) focusAfterRemoval(bookmarks, index, bookmarkInput);
         }
       });
       row.append(link, remove);
@@ -500,6 +560,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   renderBookmarks();
   bookmarkForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(bookmarkInput)) return;
     const current = currentPost();
     if (!current) { announce(copy.bookmarkMissing, true); return; }
     const label = bookmarkInput.value.trim() || current.label;
@@ -576,6 +637,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     refreshBrowserNotifications();
     refreshLinksFilter();
     updateBookmarkControl();
+    if (!panel.hidden) refreshMuteControls();
     for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);
     if (!state.enabled && collapsed.size === 0) return;
     for (const article of document.querySelectorAll('article')) {
@@ -607,6 +669,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   filterForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(keywords)) return;
     const words = keywords.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
     if (words.length > 30 || words.some(value => value.length > 80)) { invalidInput(keywords, copy.invalidWords); return; }
     keywords.removeAttribute('aria-invalid');

@@ -24,6 +24,17 @@
   function ctProfileUID() {
     return typeof ctNetworkState !== 'undefined' ? ctProfileId(ctNetworkState.authUID) : null;
   }
+  function ctProfileAltText(value) {
+    // Optional first-party image description; retain its exact text, not UI.
+    // 1,000 code points bounds the native editor, not read-only API/archives.
+    // The existing request/backup byte limits bound resources separately.
+    return typeof value === 'string' ? value : '';
+  }
+  function ctProfileVisibleAltText(value) {
+    // Match the native visible-content boundary for AX only. Keep the raw
+    // description unchanged in snapshots/backups, including whitespace.
+    return typeof value === 'string' && /[^\p{Cf}\p{Default_Ignorable_Code_Point}\p{Z}\p{M}\p{Cc}\s\u115F\u1160\u3164\uFFA0\u2800]/u.test(value) ? value : '';
+  }
   function ctProfilePostEdited(post) {
     return post?.isEdited === true || (typeof post?.editedAt === 'string' && !!post.editedAt.trim());
   }
@@ -33,7 +44,8 @@
       const url = ctProfileURL(asset?.public_url);
       if (url && ['image', 'video'].includes(asset?.media_type)) media.push({
         type: asset.media_type, url, poster: ctProfileURL(asset.thumbnail_url),
-        ...(asset.media_type === 'video' && asset.is_gif === true ? { isGIF: true } : {})
+        ...(asset.media_type === 'video' && asset.is_gif === true ? { isGIF: true } : {}),
+        ...(asset.media_type === 'image' && ctProfileAltText(asset.alt_text) ? { altText: asset.alt_text } : {})
       });
     }
     const image = ctProfileURL(post?.image);
@@ -58,7 +70,8 @@
       media: Array.isArray(item.media) ? item.media.slice(0, 16).filter(asset =>
         ['image', 'video'].includes(asset?.type) && ctProfileURL(asset.url)).map(asset => ({
           type: asset.type, url: ctProfileURL(asset.url), poster: ctProfileURL(asset.poster),
-          ...(asset.type === 'video' && asset.isGIF === true ? { isGIF: true } : {})
+          ...(asset.type === 'video' && asset.isGIF === true ? { isGIF: true } : {}),
+          ...(asset.type === 'image' && ctProfileAltText(asset.altText) ? { altText: asset.altText } : {})
         })) : []
       });
     }
@@ -279,7 +292,7 @@
       .ct-profile-viewer::backdrop{background:#000c}
       .ct-profile-viewer-stage{position:relative;box-sizing:border-box;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right));touch-action:pan-y pinch-zoom}
       .ct-profile-viewer-zoomed .ct-profile-viewer-stage{touch-action:pan-x pan-y pinch-zoom}
-      .ct-profile-viewer img{display:block;width:100%;height:100%;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
+      .ct-profile-viewer img{display:block;width:auto;height:auto;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
       .ct-profile-photo-covered{opacity:0}
       .ct-profile-photo-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none}
       .ct-profile-photo-track{display:flex;width:100%;height:100%;will-change:transform}
@@ -510,7 +523,7 @@
       gallery: trigger.closest('.ct-profile-gallery'), sources: images.map(image => image.url).join('\n') };
     const show = () => {
       img.src = images[viewer.index].url;
-      img.alt = ctProfileText(`写真 ${viewer.index + 1}/${images.length}`, `Photo ${viewer.index + 1}/${images.length}`);
+      img.alt = ctProfileVisibleAltText(images[viewer.index].altText) || ctProfileText(`写真 ${viewer.index + 1}/${images.length}`, `Photo ${viewer.index + 1}/${images.length}`);
       count.textContent = `${viewer.index + 1} / ${images.length}`;
       previous.disabled = viewer.index === 0; next.disabled = viewer.index === images.length - 1;
     };
@@ -546,6 +559,7 @@
     }
     ctProfileState.nativeSelection.clear();
     ctProfileState.panel?.remove(); ctProfileState.panel = null;
+    ctPhotoInlinePrune();
     ctProfileState.rendered = '';
     ctProfileCloseViewer();
   }
@@ -750,6 +764,7 @@
     if (panel.getAttribute('aria-labelledby') !== label) panel.setAttribute('aria-labelledby', label);
     if (ctProfileState.active === 'favorites') renderFavoritesPanel();
     else ctProfileRenderMedia();
+    ctProfileFitPhotos(panel);
   }
   function ctProfileStatus(text) {
     const el = document.createElement('div'); el.className = 'ct-profile-status'; el.textContent = text; return el;
@@ -825,9 +840,11 @@
       gallery.setAttribute('aria-label', ctProfileText('投稿の写真', 'Post photos'));
       for (const [index, asset] of images.entries()) {
         const photo = document.createElement('button'); photo.type = 'button'; photo.className = 'ct-profile-photo';
-        photo.setAttribute('aria-label', ctProfileText(`写真 ${index + 1}/${images.length}を拡大`, `Enlarge photo ${index + 1}/${images.length}`));
+        const action = ctProfileText(`写真 ${index + 1}/${images.length}を拡大`, `Enlarge photo ${index + 1}/${images.length}`);
+        const description = ctProfileVisibleAltText(asset.altText);
+        photo.setAttribute('aria-label', description ? `${action}: ${description}` : action);
         const image = document.createElement('img'); image.src = asset.url; image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
-        image.alt = ctProfileText(`投稿の写真 ${index + 1}/${images.length}`, `Post photo ${index + 1}/${images.length}`);
+        image.alt = description || ctProfileText(`投稿の写真 ${index + 1}/${images.length}`, `Post photo ${index + 1}/${images.length}`);
         photo.append(image); photo.onclick = () => ctProfileOpenViewer(images, index, photo); gallery.append(photo);
       }
       main.append(gallery);
@@ -870,7 +887,15 @@
     if (typeof ctMediaEnhanceVideo === 'function') {
       for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
     }
+    ctProfileFitPhotos(panel);
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  }
+  function ctProfileFitPhotos(panel) {
+    ctPhotoInlinePrune();
+    for (const gallery of panel.querySelectorAll('.ct-profile-gallery')) {
+      const slides = [...gallery.querySelectorAll(':scope > .ct-profile-photo')];
+      ctPhotoInlineFit(gallery, gallery, slides, slides, slides.map(slide => slide.querySelector(':scope > img')), 480);
+    }
   }
   function ctProfileFavoriteMuteState() {
     const uid = ctProfileUID();
@@ -1063,8 +1088,9 @@
           typeof item.createdAt !== 'string' || (item.createdAt && !ctTimestampParse(item.createdAt) && !Number.isFinite(Date.parse(item.createdAt))) ||
           (item.isEdited !== undefined && typeof item.isEdited !== 'boolean') ||
           !Array.isArray(item.media) || item.media.length > 16 || item.media.some(asset =>
-            !keys(asset, ['type', 'url', 'poster', 'isGIF']) || !['image', 'video'].includes(asset.type) ||
+            !keys(asset, ['type', 'url', 'poster', 'isGIF', 'altText']) || !['image', 'video'].includes(asset.type) ||
             (asset.isGIF !== undefined && (typeof asset.isGIF !== 'boolean' || (asset.isGIF && asset.type !== 'video'))) ||
+            (asset.altText !== undefined && (asset.type !== 'image' || typeof asset.altText !== 'string')) ||
             !asset.url || !safeURL(asset.url) || !safeURL(asset.poster))) throw new Error('format');
     }
     return ctProfileFavoriteItems(data.items);

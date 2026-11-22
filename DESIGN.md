@@ -10,6 +10,8 @@ The shared network module accepts GET requests to the established API origin onl
 
 Local tools store only user-entered search/filter settings. Native search is populated through ordinary input events. Keyword filters fold already-rendered post content with an explicit reveal control; they do not change server notifications or recommendations. Native post translation stays under user control and follows the service's browser-language behavior.
 
+Nests translations follow native controls and preserve community-authored text. When the native Perch is visible, Tools opens that dialog through its existing button. Browser-only keyword collapse keeps its own disclosure and preserves existing settings. The Perch and pinned Nest labels use verified native dialog and control markers. The feed title, entered mute value, and reorder targets stay authored by the user.
+
 The 6.7.1 tools panel remains non-modal. Its trigger precedes the panel in DOM order, opening moves focus to its close control, and Escape returns focus to the trigger. A fixed header and status footer surround the scrolling form sections. Verified tweet.app theme tokens supply surface, input, text and feedback colors; z-index stays below native z-50 dialogs. A short local entrance transition is disabled under reduced motion. VisualViewport resize/scroll updates panel bounds without changing page zoom or native navigation.
 
 
@@ -201,3 +203,30 @@ Version 6.29.1 separates native unlike synchronization from permission to captur
 ## 6.29.1 URL card withdrawal
 
 At the user's request, remove the extension-owned generic URL card, public metadata/image fetch pipeline, manual preview controls and automatic-preview settings. Preserve native post text, anchors and event handlers, quotes, image/video media, game cards and independent Home links-only filtering. Do not replace cards with a new card UI or eagerly fetch any link destination. Preserve previous stored settings as inactive data; existing saved Favorites and original URLs remain intact. Remove the card-only unrestricted destination permission and retain the bounded requests required by unrelated features. The earlier URL-card sections describe historical releases.
+
+
+## 6.29.3: input composition and native GIF picker boundaries
+
+Tools tracks composition only inside its owned panel. Escape consumed by IME candidates or a child control leaves focus and text intact; form submissions cannot store unfinished composition. Composition end and blur release that guard. Removing a focused saved search/post restores focus at the same list position, then the previous position or empty-list input, with preventScroll. Failed persistence does not redraw the list; unfocused removals do not steal unrelated focus. Long names wrap independently of non-shrinking 44px controls. Existing finite entrance/press feedback and reduced-motion rules remain unchanged.
+
+Tweet 2.8’s KLIPY sheet is recognized through its modal surface, direct search header, bounded type=search input, close control and separate scrolling status region. Only confirmed static chrome is localized. User queries, dynamic no-results sentences and result names/ARIA remain native, including result tiles whose thumbnail failed. No GIF search/selection API, keyboard handler or media source replacement is added. The new klipy_gif metadata is outside the existing Media/Favorites snapshot schema and is not represented as a tested archived attachment.
+
+
+## 6.30.0: Tweet 2.9 native image descriptions
+
+Native ALT editing, saving, cancellation and display stay under Tweet ownership. Japanese localization recognizes the editor through its labelled heading/textarea, described-by hint/counter, preview and action row, and the popup through its control/panel relation. It changes only verified static chrome. Image alt and description paragraphs are content, including values identical to UI words; neither them nor textarea values are translated. Keep user strings, line breaks and URLs intact.
+
+The media helper accepts both legacy button slides and 2.9 wrapper/opener slides with object-contain dimensions. ALT buttons do not become photo openers. In the fullscreen viewer, keep its native description in a separate bounded, scrollable flex region, reserve space for delivered-image controls, and retain the original image and native actions. Existing finite photo motion and reduced-motion cancellation remain. Read-only API/snapshot descriptions are optional and round-trip through account-local Favorites/backup without the editor's 1,000-code-point limit. Invisible-only descriptions stay raw in storage; only rendered image and button accessibility labels use a meaningful native-style fallback. No network metadata or new image/editor API is introduced. Current first-party structure and the existing design references guide this compatibility change; no new artwork or unrelated design system is used.
+
+
+## 6.31.0: Each photo owns its visible bounds
+
+The selected image's decoded natural width and height determine the inline height; never use another photo's metadata or an arbitrary common aspect-ratio box for loaded photos. Keep the native horizontal page width/scroll snap while the actual image fits at its own ratio without a surrounding black rectangle. Native and owned Media/Favorites photo areas share this rule. Limit very tall images by the current unzoomed viewport and do not upscale small originals. For tiny or extremely wide images, preserve the natural visual image while its transparent opener is at least 44px high. Unknown or failed loads use a bounded neutral area until real dimensions are available; a source change cannot reuse earlier dimensions.
+
+Keep native ALT popovers, fullscreen ALT, arrows/dots, keyboard controls and original URLs. Existing short swipe/press motion and Reduced Motion behavior remain; no continuous sizing animation or new artwork is introduced. Resize preserves photo selection; browser pinch uses existing layout coordinates. Clean up owned sizing listeners/observers on detach and pagehide and rebind through the normal page rendering lifecycle. The first-party 2.9.2 structure and WHATWG natural-image dimension definitions were actually inspected for this change; existing design references remain in use.
+
+Native ALT popovers stay in their original DOM with original actions. For a short/panoramic photo, opening its popup temporarily provides a transparent reader area up to 240px within the viewport limit; closing returns to the fitted image height. Observe the selected slide's expanded/hidden relationship, not another photo's popup. ResizeObserver callbacks only coalesce width changes into one cancellable next-frame fit, avoiding synchronous layout feedback and preserving the existing page selection.
+
+## 6.32.2: Photo scrolling and display cadence
+
+Use one pending animation-frame callback for inline scroll events. While the active slide remains the same, the callback only evaluates the position against the measured page width; it skips dimensions, ALT lookup and styling. The native scroll snap, loaded source, responsive width and ALT transitions continue to own fitting. In fullscreen, retain layout bounds while panning under zoom and only rescan on a zoom transition or a bounds change. This follows [Chrome’s input-handler guidance](https://web.dev/articles/debounce-your-input-handlers). The browser and display determine the actual update cadence.

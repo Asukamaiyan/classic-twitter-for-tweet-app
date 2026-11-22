@@ -117,6 +117,130 @@ test('filters are opt-in and tools are keyboard-accessible', t => {
   assert.equal(document.activeElement, toggle);
 });
 
+test('Tools prioritizes the visible native Perch without changing the browser collapse settings', t => {
+  const markup = '<button data-perch-pill aria-haspopup="dialog">Perch</button>';
+  for (const settings of [undefined, state({ enabled: true, keywords: ['sports'] })]) {
+    const { document, window, controller } = setup(t, { html: markup + post('a', 'Sports news'), settings });
+    const perch = document.querySelector('[data-perch-pill]');
+    perch.getClientRects = () => ({ length: 1 });
+    const current = window.localStorage.getItem(KEY);
+    const toggle = document.getElementById('ct-local-tools-toggle');
+    const panel = document.getElementById('ct-local-tools-panel');
+    const details = document.getElementById('ct-local-keywords').closest('details');
+    const nativeButton = document.querySelector('[aria-describedby="ct-native-mute-help"]');
+    let clicks = 0;
+    perch.addEventListener('click', () => clicks++);
+    toggle.click();
+    assert.equal(nativeButton.parentElement.hidden, false);
+    assert.equal(details.open, Boolean(settings));
+    nativeButton.click();
+    assert.equal(clicks, 1);
+    assert.equal(document.activeElement, perch);
+    assert.equal(panel.hidden, true);
+    assert.equal(window.localStorage.getItem(KEY), current);
+    assert.equal(document.getElementById('a').classList.contains('ct-keyword-collapsed'), Boolean(settings));
+    toggle.click();
+    perch.hidden = true;
+    controller.refresh();
+    assert.equal(nativeButton.parentElement.hidden, true);
+    assert.equal(details.open, true);
+  }
+});
+
+test('Escape keeps input-method candidates and an already-handled child key inside Tools', t => {
+  const { document, window } = setup(t);
+  const toggle = document.getElementById('ct-local-tools-toggle');
+  const panel = document.getElementById('ct-local-tools-panel');
+  const input = document.getElementById('ct-local-search-input');
+  toggle.click(); input.focus(); input.value = 'にゅーす';
+  const escape = options => new window.KeyboardEvent('keydown', { key:'Escape', bubbles:true, cancelable:true, ...options });
+  input.dispatchEvent(escape({ isComposing:true }));
+  assert.equal(panel.hidden, false);
+  input.dispatchEvent(escape({ keyCode:229 }));
+  assert.equal(panel.hidden, false);
+  input.dispatchEvent(new window.CompositionEvent('compositionstart', { bubbles:true }));
+  input.dispatchEvent(escape());
+  assert.equal(panel.hidden, false, 'composition lifecycle also protects managers that omit isComposing');
+  input.dispatchEvent(new window.CompositionEvent('compositionend', { bubbles:true }));
+  const handled = escape(); handled.preventDefault(); input.dispatchEvent(handled);
+  assert.equal(panel.hidden, false);
+  const closeKey = escape(); input.dispatchEvent(closeKey);
+  assert.equal(closeKey.defaultPrevented, true);
+  assert.equal(panel.hidden, true);
+  assert.equal(input.value, 'にゅーす');
+  assert.equal(document.activeElement, toggle);
+});
+
+test('IME composition cannot save unfinished searches, bookmark notes or keyword filters', t => {
+  const { document, window } = setup(t, { url:'https://tweet.app/post/fixture', html:post('a', 'Original text') });
+  document.getElementById('ct-local-tools-toggle').click();
+  for (const [id, value] of [
+    ['ct-local-search-input','けんさく'], ['ct-local-bookmark-input','めも'], ['ct-local-keywords','ふぃるたー']
+  ]) {
+    const input = document.getElementById(id);
+    input.focus(); input.value = value;
+    const before = window.localStorage.getItem(KEY);
+    input.dispatchEvent(new window.CompositionEvent('compositionstart', { bubbles:true }));
+    submit(window, input);
+    assert.equal(window.localStorage.getItem(KEY), before, `${id} cannot save an incomplete composition`);
+    assert.equal(input.value, value);
+    input.dispatchEvent(new window.CompositionEvent('compositionend', { bubbles:true }));
+    submit(window, input);
+    assert.notEqual(window.localStorage.getItem(KEY), before, `${id} can save once committed`);
+  }
+});
+
+test('leaving a composing field clears its guard so a later normal save remains available', t => {
+  const { document, window } = setup(t);
+  document.getElementById('ct-local-tools-toggle').click();
+  const input = document.getElementById('ct-local-search-input');
+  input.focus(); input.value = 'ニュース';
+  input.dispatchEvent(new window.CompositionEvent('compositionstart', { bubbles:true }));
+  document.querySelector('#ct-local-tools header button').focus();
+  submit(window, input);
+  assert.deepEqual(JSON.parse(window.localStorage.getItem(KEY)).searches, ['ニュース']);
+});
+
+test('removing saved items keeps keyboard focus beside that item and falls back only when empty', t => {
+  const searches = ['One', 'Two', 'Three'];
+  const bookmarks = searches.map((label, i) => ({ path:`/post/${i}`, label }));
+  const { document, window } = setup(t, { settings:state({ searches, bookmarks }) });
+  document.getElementById('ct-local-tools-toggle').click();
+  for (const [inputId, values] of [['ct-local-search-input',searches], ['ct-local-bookmark-input',searches]]) {
+    const input = document.getElementById(inputId);
+    const list = input.closest('section').querySelector('ul');
+    let buttons = list.querySelectorAll('button');
+    buttons[1].focus(); buttons[1].click();
+    assert.equal(document.activeElement.getAttribute('aria-label'), 'Remove: Three');
+    document.activeElement.click();
+    assert.equal(document.activeElement.getAttribute('aria-label'), 'Remove: One');
+    document.activeElement.click();
+    assert.equal(document.activeElement, input);
+    assert.equal(list.querySelector('button'), null);
+    assert.equal(values.length, 3, 'only saved state changes');
+  }
+  const saved = JSON.parse(window.localStorage.getItem(KEY));
+  assert.deepEqual(saved.searches, []); assert.deepEqual(saved.bookmarks, []);
+});
+
+test('removing items without focus or after a failed write does not steal focus or remove data', t => {
+  const { document, window } = setup(t, { settings:state({ searches:['Keep', 'Other'] }) });
+  document.getElementById('ct-local-tools-toggle').click();
+  const input = document.getElementById('ct-local-search-input');
+  input.focus(); input.value = 'Draft';
+  const list = input.closest('section').querySelector('ul');
+  list.querySelector('button').click();
+  assert.equal(document.activeElement, input);
+  const remove = list.querySelector('button'); remove.focus();
+  const external = state({ searches:['Saved elsewhere'] });
+  window.localStorage.setItem(KEY, JSON.stringify(external));
+  remove.click();
+  assert.equal(document.activeElement, remove);
+  assert.equal(list.querySelector('a').textContent, 'Other');
+  assert.equal(input.value, 'Draft');
+  assert.deepEqual(JSON.parse(window.localStorage.getItem(KEY)), external);
+});
+
 test('Favorites restoration is explicit and reports partial recovery or a retryable failure', async t => {
   let called=0,fail=false;
   const {document}=setup(t,{options:{restoreVisibleFavorites:async()=>{called++;if(fail) throw new Error('offline');return {saved:3,unresolved:1};}}});
@@ -389,6 +513,7 @@ test('deep link waits for asynchronously mounted native search field', async t =
 
 test('saved search retries native mount resets before consuming its URL parameter', async t => {
   let changes = 0;
+  let queryAfterReset;
   const { document, window } = setup(t, {
     html: '<input type="text" placeholder="Search Tweet">',
     url: 'https://tweet.app/explore?ct_search=cats',
@@ -396,14 +521,18 @@ test('saved search retries native mount resets before consuming its URL paramete
       const input = window.document.querySelector('main input');
       input.addEventListener('input', () => {
         changes++;
-        if (changes === 1) input.value = ''; // Native initial effect wins once.
-        else acknowledgeNativeSearch(input);
+        if (changes === 1) {
+          input.value = ''; // Native initial effect wins once.
+          queryAfterReset = window.location.search;
+        } else acknowledgeNativeSearch(input);
       });
     },
   });
-  await new Promise(resolve => window.setTimeout(resolve, 180));
-  assert.equal(window.location.search, '?ct_search=cats');
-  await new Promise(resolve => window.setTimeout(resolve, 420));
+  const deadline = Date.now() + 3000;
+  while (window.location.search && Date.now() < deadline) {
+    await new Promise(resolve => window.setTimeout(resolve, 25));
+  }
+  assert.equal(queryAfterReset, '?ct_search=cats');
   assert.equal(changes, 2);
   assert.equal(document.querySelector('main input').value, 'cats');
   assert.equal(window.location.search, '');

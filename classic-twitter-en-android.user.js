@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Android
 // @namespace    https://tweet.app/
-// @version      6.29.2
+// @version      6.32.2
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -681,8 +681,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     links: 'リンク付き投稿',
     linksOnly: 'ホームでリンク付き投稿だけ表示する', linksOnlyHelp: '読み込み済みの投稿だけを絞り込みます。詳細・返信・通知・プロフィールには適用しません。',
     linksCount: (shown, total) => `リンク付きのみ · 確認済み ${shown} / ${total}件`, linksAll: 'すべて表示',
-    filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
-    words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
+    filters: 'キーワードで折りたたむ', enabled: 'このブラウザで投稿を折りたたむ',
+    muteControls: 'ミュートと折りたたみ',
+    nativeMute: 'Tweetのミュート設定を開く',
+    nativeMuteHelp: '人・ハッシュタグ・語句のミュートや期限は、Tweetのフィード設定（Perch）で変更できます。',
+    localCollapse: 'ブラウザ内の折りたたみ',
+    words: 'キーワード（1 行に 1 件）', help: '本文の一部に一致する投稿をこのブラウザで折りたたみ、必要なときだけ開けます。大小文字は区別しません。最大 30 件、各 80 文字。',
     save: 'フィルターを保存', saved: '設定を保存しました。', searches: '保存した検索',
     query: '保存する検索語', add: '検索を保存', remove: '削除', noSearches: '保存した検索はありません。',
     searchHelp: '最大 20 件。検索語を押すと検索画面で検索します。',
@@ -726,8 +730,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     links: 'Posts with links',
     linksOnly: 'Show only posts with links on Home', linksOnlyHelp: 'Filters only loaded posts. Does not filter details, replies, notifications or profiles.',
     linksCount: (shown, total) => `Links only · ${shown} / ${total} verified posts`, linksAll: 'Show all',
-    filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
-    words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
+    filters: 'Collapse by keyword', enabled: 'Collapse posts in this browser',
+    muteControls: 'Mute and collapse',
+    nativeMute: 'Open Tweet’s mute settings',
+    nativeMuteHelp: 'Use Tweet’s feed settings (Perch) to mute people, hashtags, or words and set an expiration.',
+    localCollapse: 'Browser-only post collapse',
+    words: 'Keywords (one per line)', help: 'Collapse posts when any part of their text matches, ignoring case. You can reveal each post as needed. Up to 30 keywords, 80 characters each.',
     save: 'Save filters', saved: 'Settings saved.', searches: 'Saved searches',
     query: 'Search to save', add: 'Save search', remove: 'Remove', noSearches: 'No saved searches yet.',
     searchHelp: 'Save up to 20 searches. Select a search to open it in Explore.',
@@ -832,9 +840,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     #ct-local-tools label:has(input[type=checkbox]) { display:flex; align-items:center; min-height:44px; margin:4px 0; cursor:pointer; }
     #ct-local-tools [aria-invalid=true] { border-color:var(--color-tl-app-danger, #c23636); }
     #ct-local-tools form > button { margin-top:8px; }
+    #ct-local-tools summary { cursor:pointer; min-height:44px; align-content:center; }
+    #ct-local-tools summary:focus-visible { outline:3px solid var(--color-tl-app-primary, #1688d4); outline-offset:2px; }
     #ct-local-tools ul { padding:0; margin:8px 0; list-style:none; }
     #ct-local-tools li { display:flex; align-items:center; gap:10px; padding:5px 0; }
     #ct-local-tools li a { display:flex; align-items:center; flex:1; min-width:0; min-height:44px; overflow-wrap:anywhere; color:inherit; text-decoration:underline; padding:5px 0; }
+    #ct-local-tools li button { flex-shrink:0; white-space:nowrap; }
     #ct-local-tools #ct-local-tools-status { margin:0; font-size:13px; overflow-wrap:anywhere; }
     #ct-local-tools-status[data-error=true] { color:var(--color-tl-app-danger, #c23636); }
     article.ct-keyword-collapsed > :not(.ct-keyword-notice) { display:none !important; }
@@ -858,7 +869,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   const title = element('h2', copy.title, { id: 'ct-local-tools-title' });
   const close = element('button', copy.close, { type: 'button' });
   header.append(title, close);
-  const status = element('p', loadError, { id: 'ct-local-tools-status', role: 'status', 'aria-live': 'polite' });
+  const status = element('p', loadError, { id: 'ct-local-tools-status', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   if (loadError) status.dataset.error = 'true';
   const body = element('div', undefined, { id: 'ct-local-tools-body' });
   const footer = element('footer', undefined, { tabindex: '0', 'aria-labelledby': 'ct-local-tools-status' });
@@ -870,7 +881,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   document.body.append(root);
 
   function openPanel(open, moveFocus = true) {
-    if (open) { updateBookmarkControl(); refreshAppearance(); }
+    if (open) { updateBookmarkControl(); refreshAppearance(); refreshMuteControls(); }
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open && moveFocus) close.focus({ preventScroll: true });
@@ -878,8 +889,15 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   toggle.addEventListener('click', () => openPanel(panel.hidden));
   close.addEventListener('click', () => openPanel(false));
+  const composingInputs = new WeakSet();
+  root.addEventListener('compositionstart', event => composingInputs.add(event.target));
+  root.addEventListener('compositionend', event => composingInputs.delete(event.target));
+  root.addEventListener('blur', event => composingInputs.delete(event.target), true);
   root.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !panel.hidden) { event.stopPropagation(); openPanel(false); }
+    // Escape first dismisses the input method's candidates. It must not hide
+    // the draft or override a child control that already handled the key.
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || composingInputs.has(event.target)) return;
+    if (event.key === 'Escape' && !panel.hidden) { event.preventDefault(); event.stopPropagation(); openPanel(false); }
   });
   function announce(message, error = false) {
     status.textContent = message;
@@ -908,6 +926,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     input.focus();
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
+  function focusAfterRemoval(list, index, fallback) {
+    const buttons = list.querySelectorAll('li button');
+    (buttons[Math.min(index, buttons.length - 1)] || fallback).focus({ preventScroll: true });
+  }
 
   let refreshBrowserNotifications = () => {};
   if (typeof browserNotifications?.getState === 'function' && typeof browserNotifications?.setEnabled === 'function') {
@@ -1057,6 +1079,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
 
   const filterSection = element('section');
+  const filterHeading = element('h3', copy.filters);
+  const nativeMute = element('div', undefined, { hidden: '' });
+  const nativeMuteButton = element('button', copy.nativeMute, { type: 'button', 'aria-describedby': 'ct-native-mute-help' });
+  nativeMute.append(element('p', copy.nativeMuteHelp, { id: 'ct-native-mute-help', class: 'ct-local-note' }), nativeMuteButton);
+  const collapseDetails = element('details', undefined, { open: '' });
+  const collapseSummary = element('summary', copy.localCollapse, { hidden: '' });
   const filterForm = element('form');
   const enabledLabel = element('label');
   const enabled = element('input', undefined, { type: 'checkbox', id: 'ct-local-filter-enabled' });
@@ -1067,8 +1095,37 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   keywords.value = state.keywords.join('\n');
   filterForm.append(enabledLabel, element('label', copy.words, { for: keywords.id }), keywords,
     element('p', copy.help, { id: 'ct-local-keyword-help', class: 'ct-local-note' }), element('button', copy.save, { type: 'submit' }));
-  filterSection.append(element('h3', copy.filters), filterForm);
+  collapseDetails.append(collapseSummary, filterForm);
+  filterSection.append(filterHeading, nativeMute, collapseDetails);
   body.append(filterSection);
+  function nativePerchButton() {
+    const button = document.querySelector('button[data-perch-pill][aria-haspopup="dialog"]');
+    if (button && !button.disabled && !button.closest('[hidden], [inert], [aria-hidden="true"]') &&
+        button.getClientRects().length) return button;
+  }
+  function refreshMuteControls() {
+    const hasPerch = Boolean(nativePerchButton());
+    if (hasPerch === !nativeMute.hidden) return;
+    nativeMute.hidden = !hasPerch;
+    collapseSummary.hidden = !hasPerch;
+    filterHeading.textContent = hasPerch ? copy.muteControls : copy.filters;
+    // Existing configurations stay directly accessible when Perch first appears.
+    if (!hasPerch || !collapseDetails.contains(document.activeElement)) {
+      collapseDetails.open = !hasPerch || state.enabled || state.keywords.length > 0 || keywords.value.trim().length > 0;
+    }
+  }
+  nativeMuteButton.addEventListener('click', () => {
+    const button = nativePerchButton();
+    if (!button) {
+      refreshMuteControls();
+      collapseDetails.open = true;
+      enabled.focus();
+      return;
+    }
+    openPanel(false);
+    button.focus({ preventScroll: true });
+    button.click();
+  });
 
   const searchSection = element('section');
   const searchForm = element('form');
@@ -1081,7 +1138,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   function renderSearches() {
     searches.replaceChildren();
     if (!state.searches.length) searches.append(element('li', copy.noSearches));
-    for (const query of state.searches) {
+    for (const [index, query] of state.searches.entries()) {
       const row = element('li');
       // The native route is /explore. ct_search is consumed by this script;
       // tweet.app itself does not currently support search query deep links.
@@ -1105,9 +1162,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
       });
       const remove = element('button', copy.remove, { type: 'button', 'aria-label': `${copy.remove}: ${query}` });
       remove.addEventListener('click', () => {
+        const restoreFocus = row.contains(document.activeElement);
         if (persist({ ...state, searches: state.searches.filter(item => item !== query) })) {
           renderSearches();
-          searchInput.focus();
+          if (restoreFocus) focusAfterRemoval(searches, index, searchInput);
         }
       });
       row.append(link, remove);
@@ -1117,6 +1175,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   renderSearches();
   searchForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(searchInput)) return;
     const query = searchInput.value.trim();
     if (!query || query.length > 200 || state.searches.length >= 20) { invalidInput(searchInput, copy.invalidSearch); return; }
     if (state.searches.some(item => normalize(item) === normalize(query))) { invalidInput(searchInput, copy.duplicate); return; }
@@ -1154,14 +1213,15 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   function renderBookmarks() {
     bookmarks.replaceChildren();
     if (!state.bookmarks.length) bookmarks.append(element('li', copy.noBookmarks));
-    for (const item of state.bookmarks) {
+    for (const [index, item] of state.bookmarks.entries()) {
       const row = element('li');
       const link = element('a', item.label, { href: item.path });
       const remove = element('button', copy.remove, { type: 'button', 'aria-label': `${copy.remove}: ${item.label}` });
       remove.addEventListener('click', () => {
+        const restoreFocus = row.contains(document.activeElement);
         if (persist({ ...state, bookmarks: state.bookmarks.filter(other => other.path !== item.path) })) {
           renderBookmarks();
-          bookmarkInput.focus();
+          if (restoreFocus) focusAfterRemoval(bookmarks, index, bookmarkInput);
         }
       });
       row.append(link, remove);
@@ -1171,6 +1231,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   renderBookmarks();
   bookmarkForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(bookmarkInput)) return;
     const current = currentPost();
     if (!current) { announce(copy.bookmarkMissing, true); return; }
     const label = bookmarkInput.value.trim() || current.label;
@@ -1247,6 +1308,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     refreshBrowserNotifications();
     refreshLinksFilter();
     updateBookmarkControl();
+    if (!panel.hidden) refreshMuteControls();
     for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);
     if (!state.enabled && collapsed.size === 0) return;
     for (const article of document.querySelectorAll('article')) {
@@ -1278,6 +1340,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   filterForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(keywords)) return;
     const words = keywords.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
     if (words.length > 30 || words.some(value => value.length > 80)) { invalidInput(keywords, copy.invalidWords); return; }
     keywords.removeAttribute('aria-invalid');
@@ -2873,7 +2936,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.29.2';
+    document.documentElement.dataset.ctActiveVersion = '6.32.2';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -3386,6 +3449,209 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return { zoomed, changed };
   }
 
+  // An inline carousel keeps its native page width, while only the selected
+  // photo determines its height. The image's own box follows its decoded
+  // dimensions; the unused part of a portrait page has no background/frame.
+  const ctPhotoInlineFrames = new Map();
+  let ctPhotoInlineResize = null;
+  let ctPhotoInlineViewport = null;
+  let ctPhotoInlineLifecycleBound = false;
+  function ctPhotoInlineBindViewport() {
+    if (ctPhotoInlineViewport) return;
+    const update = () => { ctPhotoInlinePrune(); for (const current of ctPhotoInlineFrames.values()) current.update(true); };
+    const viewport = window.visualViewport;
+    ctPhotoInlineViewport = { update, viewport };
+    window.addEventListener('resize', update, { passive: true }); viewport?.addEventListener('resize', update, { passive: true });
+  }
+  function ctPhotoInlineSignature(image) {
+    return JSON.stringify(['src', 'srcset', 'sizes'].map(name => image.getAttribute(name) || ''));
+  }
+  function ctPhotoInlineDimensions(image, resource = null) {
+    if (image?.tagName !== 'IMG' || !image.complete) return null;
+    const source = image.getAttribute('src');
+    if (!source) return null;
+    if (resource && (!resource.ready || resource.signature !== ctPhotoInlineSignature(image) || resource.current !== image.currentSrc)) return null;
+    // Without srcset currentSrc must be the current src. Responsive candidates
+    // legitimately differ from that fallback; their completed load record is
+    // tied to all three resource attributes instead.
+    try {
+      if (!image.getAttribute('srcset')?.trim() && image.currentSrc &&
+          new URL(image.currentSrc, location.href).href !== new URL(source, location.href).href) return null;
+    } catch { return null; }
+    const width = image.naturalWidth, height = image.naturalHeight;
+    return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? { width, height } : null;
+  }
+  function ctPhotoInlineStyles() {
+    if (document.getElementById('ct-photo-inline-style')) return;
+    const style = document.createElement('style'); style.id = 'ct-photo-inline-style';
+    style.textContent = `
+      .ct-photo-fit-shell{box-sizing:border-box!important;width:100%!important;max-width:100%!important;height:var(--ct-photo-inline-height,240px)!important;max-height:none!important;aspect-ratio:auto!important;border:0!important;background:transparent!important;overflow:hidden!important}
+      .ct-photo-fit-scroll-shell{overflow-x:auto!important;overflow-y:hidden!important}
+      .ct-photo-fit-track{height:100%!important;align-items:flex-start!important;background:transparent!important}
+      .ct-photo-fit-slide{box-sizing:border-box!important;height:100%!important;min-height:0!important;aspect-ratio:auto!important;border:0!important;background:transparent!important}
+      .ct-photo-fit-opener{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:100%!important;min-height:0!important;padding:0!important;border:0!important;background:transparent!important}
+      .ct-photo-fit-image{display:block!important;width:auto!important;height:auto!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;margin:0 auto!important;border-radius:12px}
+    `;
+    document.head.append(style);
+  }
+  function ctPhotoInlineRemove(state) {
+    if (!state) return;
+    state.observer.disconnect(); ctPhotoInlineResize?.unobserve?.(state.track);
+    if (state.resizeFrame !== null) cancelAnimationFrame(state.resizeFrame);
+    if (state.scrollFrame !== null) cancelAnimationFrame(state.scrollFrame);
+    state.track.removeEventListener('scroll', state.onScroll);
+    for (const image of state.images) {
+      image.removeEventListener('load', state.onImage); image.removeEventListener('error', state.onImage);
+      image.classList.remove('ct-photo-fit-image');
+    }
+    for (const slide of state.slides) slide.classList.remove('ct-photo-fit-slide');
+    for (const opener of state.openers) opener.classList.remove('ct-photo-fit-opener');
+    state.shell.classList.remove('ct-photo-fit-shell', 'ct-photo-fit-scroll-shell'); state.track.classList.remove('ct-photo-fit-track');
+    state.shell.style.removeProperty('--ct-photo-inline-height');
+    if (!state.shellHadStyle && !state.shell.style.length) state.shell.removeAttribute('style');
+    for (const [node, hadClass] of state.classPresence) if (!hadClass && node.getAttribute('class') === '') node.removeAttribute('class');
+    ctPhotoInlineFrames.delete(state.track);
+    if (!ctPhotoInlineFrames.size && ctPhotoInlineViewport) {
+      window.removeEventListener('resize', ctPhotoInlineViewport.update);
+      ctPhotoInlineViewport.viewport?.removeEventListener('resize', ctPhotoInlineViewport.update);
+      ctPhotoInlineViewport = null;
+    }
+  }
+  function ctPhotoInlinePrune() {
+    for (const state of ctPhotoInlineFrames.values()) if (!state.shell.isConnected || !state.track.isConnected ||
+        state.images.some(image => !image.isConnected || !state.shell.contains(image))) ctPhotoInlineRemove(state);
+  }
+  function ctPhotoInlineAltOpen(state) {
+    const image = state.images[state.index], slide = state.slides[state.index];
+    const scope = slide?.contains(image) && slide !== state.openers[state.index] ? slide : state.shell;
+    for (const control of scope.querySelectorAll(':scope > div.contents > button[aria-controls][aria-expanded="true"]')) {
+      const panel = document.getElementById(control.getAttribute('aria-controls'));
+      if (panel?.parentElement === control.parentElement && !panel.hidden &&
+          panel.matches('div.absolute.overflow-y-auto') && panel.querySelector(':scope > p.whitespace-pre-wrap.break-words') &&
+          panel.querySelector(':scope > button[type="button"].absolute > svg')) return true;
+    }
+    return false;
+  }
+  function ctPhotoInlineFit(shell, track, slides, openers, images, maxHeight = 510) {
+    if (!shell?.isConnected || !track?.isConnected || !images.length ||
+        images.some(image => image?.tagName !== 'IMG' || !shell.contains(image))) return;
+    let state = ctPhotoInlineFrames.get(track);
+    if (state && (state.shell !== shell || state.images.length !== images.length ||
+        state.images.some((image, index) => image !== images[index]) ||
+        state.slides.some((slide, index) => slide !== slides[index]) ||
+        state.openers.some((opener, index) => opener !== openers[index]))) { ctPhotoInlineRemove(state); state = null; }
+    if (state) { state.update(false); return state; }
+    state = { shell, track, slides, openers, images, index: 0, width: 0, pageWidth: 0, maxHeight, resizeFrame: null, scrollFrame: null,
+      shellHadStyle: shell.hasAttribute('style'),
+      classPresence: new Map([...new Set([shell, track, ...slides, ...openers, ...images])].map(node => [node, node.hasAttribute('class')])),
+      resources: new Map(images.map(image => [image, { signature: ctPhotoInlineSignature(image), current: image.currentSrc,
+        ready: !!ctPhotoInlineDimensions(image) }])) };
+    const selectedIndex = pageWidth => Math.max(0, Math.min(images.length - 1, Math.round(Math.abs(track.scrollLeft) / pageWidth)));
+    state.update = preserveIndex => {
+      if (!shell.isConnected || !track.isConnected || images.some(image => !image.isConnected || !shell.contains(image))) { ctPhotoInlineRemove(state); return; }
+      // Browser pinch zoom must keep the layout-sized photo available to pan.
+      if (ctPhotoViewportZoomed()) return;
+      const width = track.clientWidth || track.getBoundingClientRect().width;
+      if (!(width > 0)) return;
+      ctPhotoInlineBindViewport();
+      const gap = Number.parseFloat(getComputedStyle(track).columnGap) || 0;
+      if (!preserveIndex) state.index = selectedIndex(width + gap);
+      else if (state.scrollFrame !== null && state.pageWidth > 0) {
+        // If resize/load arrives before the next frame, resolve the pending
+        // selection in the old page coordinates before realigning.
+        state.index = selectedIndex(state.pageWidth);
+      }
+      if (state.scrollFrame !== null) {
+        cancelAnimationFrame(state.scrollFrame);
+        state.scrollFrame = null;
+      }
+      if (state.resizeFrame !== null) {
+        cancelAnimationFrame(state.resizeFrame);
+        state.resizeFrame = null;
+      }
+      const changedWidth = !!state.width && Math.abs(state.width - width) > .5;
+      state.width = width; state.pageWidth = width + gap;
+      const dimensions = ctPhotoInlineDimensions(images[state.index], state.resources.get(images[state.index]));
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const limit = Math.max(1, Math.min(state.maxHeight, viewportHeight * .70));
+      // Unknown and broken resources have a bounded neutral placeholder. Do
+      // not claim the first photo's metadata is this photo's decoded size.
+      // Keep the actual tiny/panoramic image at its own size while the
+      // transparent surrounding opener retains a 44px pointer target.
+      let height = Math.max(44, dimensions ? dimensions.height * Math.min(1, width / dimensions.width, limit / dimensions.height) : Math.min(240, limit));
+      // The native ALT popup is clipped by the photo page. While it is open,
+      // give its unchanged reader enough space; closing returns to photo size.
+      if (ctPhotoInlineAltOpen(state)) height = Math.max(height, Math.min(240, limit));
+      ctPhotoInlineStyles(); shell.classList.add('ct-photo-fit-shell');
+      if (track === shell && images.length > 1) shell.classList.add('ct-photo-fit-scroll-shell');
+      if (track !== shell) track.classList.add('ct-photo-fit-track');
+      slides.forEach(slide => slide.classList.add('ct-photo-fit-slide'));
+      openers.forEach(opener => opener.classList.add('ct-photo-fit-opener'));
+      images.forEach(image => image.classList.add('ct-photo-fit-image'));
+      const pixels = height + 'px';
+      if (shell.style.getPropertyValue('--ct-photo-inline-height') !== pixels) shell.style.setProperty('--ct-photo-inline-height', pixels);
+      if (changedWidth && preserveIndex && images.length > 1) {
+        const direction = getComputedStyle(track).direction === 'rtl' ? -1 : 1;
+        const target = direction * state.index * (width + gap);
+        if (Math.abs(track.scrollLeft - target) > 1) track.scrollLeft = target;
+      }
+    };
+    state.onScroll = () => {
+      if (state.scrollFrame !== null) return;
+      state.scrollFrame = requestAnimationFrame(() => {
+        state.scrollFrame = null;
+        if (ctPhotoInlineFrames.get(track) !== state || !track.isConnected ||
+            !shell.isConnected || ctPhotoViewportZoomed()) return;
+        if (!(state.pageWidth > 0)) { state.update(false); return; }
+        // Native scroll/snap remains in control. A scroll burst just needs
+        // the latest offset; movement within the same page cannot change fit.
+        const index = selectedIndex(state.pageWidth);
+        if (index === state.index) return;
+        state.index = index;
+        state.update(true);
+      });
+    };
+    state.scheduleResize = () => {
+      if (state.resizeFrame !== null) return;
+      state.resizeFrame = requestAnimationFrame(() => {
+        state.resizeFrame = null;
+        if (ctPhotoInlineFrames.get(track) === state) state.update(true);
+      });
+    };
+    state.onImage = event => {
+      const image = event.target;
+      state.resources.set(image, { signature: ctPhotoInlineSignature(image), current: image.currentSrc,
+        ready: event.type === 'load' && !!ctPhotoInlineDimensions(image) });
+      if (images[state.index] === image) state.update(true);
+    };
+    state.observer = new MutationObserver(records => {
+      for (const { target: image } of records) {
+        const resource = state.resources.get(image), signature = ctPhotoInlineSignature(image);
+        if (resource && resource.signature !== signature) state.resources.set(image, { signature, current: '', ready: false });
+      }
+      state.update(true);
+    });
+    for (const image of images) {
+      image.addEventListener('load', state.onImage); image.addEventListener('error', state.onImage);
+      state.observer.observe(image, { attributes: true, attributeFilter: ['src', 'srcset', 'sizes', 'width', 'height'] });
+    }
+    state.observer.observe(shell, { subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'hidden'] });
+    track.addEventListener('scroll', state.onScroll, { passive: true }); ctPhotoInlineFrames.set(track, state);
+    if (!ctPhotoInlineResize && typeof ResizeObserver === 'function') ctPhotoInlineResize = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const current = ctPhotoInlineFrames.get(entry.target);
+        if (current && Math.abs(current.track.clientWidth - current.width) > .5) current.scheduleResize();
+      }
+    });
+    ctPhotoInlineResize?.observe(track);
+    if (!ctPhotoInlineLifecycleBound) {
+      ctPhotoInlineLifecycleBound = true;
+      window.addEventListener('pagehide', () => { for (const current of ctPhotoInlineFrames.values()) ctPhotoInlineRemove(current); });
+    }
+    state.update(false);
+    return state;
+  }
+
     // Profile additions use Tweet's verified posts GET. Favorites are browser-local
   // snapshots, scoped to the signed-in account; no favorite-history endpoint is assumed.
   const ctProfileState = {
@@ -3412,6 +3678,17 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctProfileUID() {
     return typeof ctNetworkState !== 'undefined' ? ctProfileId(ctNetworkState.authUID) : null;
   }
+  function ctProfileAltText(value) {
+    // Optional first-party image description; retain its exact text, not UI.
+    // 1,000 code points bounds the native editor, not read-only API/archives.
+    // The existing request/backup byte limits bound resources separately.
+    return typeof value === 'string' ? value : '';
+  }
+  function ctProfileVisibleAltText(value) {
+    // Match the native visible-content boundary for AX only. Keep the raw
+    // description unchanged in snapshots/backups, including whitespace.
+    return typeof value === 'string' && /[^\p{Cf}\p{Default_Ignorable_Code_Point}\p{Z}\p{M}\p{Cc}\s\u115F\u1160\u3164\uFFA0\u2800]/u.test(value) ? value : '';
+  }
   function ctProfilePostEdited(post) {
     return post?.isEdited === true || (typeof post?.editedAt === 'string' && !!post.editedAt.trim());
   }
@@ -3421,7 +3698,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const url = ctProfileURL(asset?.public_url);
       if (url && ['image', 'video'].includes(asset?.media_type)) media.push({
         type: asset.media_type, url, poster: ctProfileURL(asset.thumbnail_url),
-        ...(asset.media_type === 'video' && asset.is_gif === true ? { isGIF: true } : {})
+        ...(asset.media_type === 'video' && asset.is_gif === true ? { isGIF: true } : {}),
+        ...(asset.media_type === 'image' && ctProfileAltText(asset.alt_text) ? { altText: asset.alt_text } : {})
       });
     }
     const image = ctProfileURL(post?.image);
@@ -3446,7 +3724,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       media: Array.isArray(item.media) ? item.media.slice(0, 16).filter(asset =>
         ['image', 'video'].includes(asset?.type) && ctProfileURL(asset.url)).map(asset => ({
           type: asset.type, url: ctProfileURL(asset.url), poster: ctProfileURL(asset.poster),
-          ...(asset.type === 'video' && asset.isGIF === true ? { isGIF: true } : {})
+          ...(asset.type === 'video' && asset.isGIF === true ? { isGIF: true } : {}),
+          ...(asset.type === 'image' && ctProfileAltText(asset.altText) ? { altText: asset.altText } : {})
         })) : []
       });
     }
@@ -3667,7 +3946,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-viewer::backdrop{background:#000c}
       .ct-profile-viewer-stage{position:relative;box-sizing:border-box;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right));touch-action:pan-y pinch-zoom}
       .ct-profile-viewer-zoomed .ct-profile-viewer-stage{touch-action:pan-x pan-y pinch-zoom}
-      .ct-profile-viewer img{display:block;width:100%;height:100%;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
+      .ct-profile-viewer img{display:block;width:auto;height:auto;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
       .ct-profile-photo-covered{opacity:0}
       .ct-profile-photo-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none}
       .ct-profile-photo-track{display:flex;width:100%;height:100%;will-change:transform}
@@ -3898,7 +4177,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       gallery: trigger.closest('.ct-profile-gallery'), sources: images.map(image => image.url).join('\n') };
     const show = () => {
       img.src = images[viewer.index].url;
-      img.alt = ctProfileText(`写真 ${viewer.index + 1}/${images.length}`, `Photo ${viewer.index + 1}/${images.length}`);
+      img.alt = ctProfileVisibleAltText(images[viewer.index].altText) || ctProfileText(`写真 ${viewer.index + 1}/${images.length}`, `Photo ${viewer.index + 1}/${images.length}`);
       count.textContent = `${viewer.index + 1} / ${images.length}`;
       previous.disabled = viewer.index === 0; next.disabled = viewer.index === images.length - 1;
     };
@@ -3934,6 +4213,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     ctProfileState.nativeSelection.clear();
     ctProfileState.panel?.remove(); ctProfileState.panel = null;
+    ctPhotoInlinePrune();
     ctProfileState.rendered = '';
     ctProfileCloseViewer();
   }
@@ -4138,6 +4418,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (panel.getAttribute('aria-labelledby') !== label) panel.setAttribute('aria-labelledby', label);
     if (ctProfileState.active === 'favorites') renderFavoritesPanel();
     else ctProfileRenderMedia();
+    ctProfileFitPhotos(panel);
   }
   function ctProfileStatus(text) {
     const el = document.createElement('div'); el.className = 'ct-profile-status'; el.textContent = text; return el;
@@ -4213,9 +4494,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       gallery.setAttribute('aria-label', ctProfileText('投稿の写真', 'Post photos'));
       for (const [index, asset] of images.entries()) {
         const photo = document.createElement('button'); photo.type = 'button'; photo.className = 'ct-profile-photo';
-        photo.setAttribute('aria-label', ctProfileText(`写真 ${index + 1}/${images.length}を拡大`, `Enlarge photo ${index + 1}/${images.length}`));
+        const action = ctProfileText(`写真 ${index + 1}/${images.length}を拡大`, `Enlarge photo ${index + 1}/${images.length}`);
+        const description = ctProfileVisibleAltText(asset.altText);
+        photo.setAttribute('aria-label', description ? `${action}: ${description}` : action);
         const image = document.createElement('img'); image.src = asset.url; image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
-        image.alt = ctProfileText(`投稿の写真 ${index + 1}/${images.length}`, `Post photo ${index + 1}/${images.length}`);
+        image.alt = description || ctProfileText(`投稿の写真 ${index + 1}/${images.length}`, `Post photo ${index + 1}/${images.length}`);
         photo.append(image); photo.onclick = () => ctProfileOpenViewer(images, index, photo); gallery.append(photo);
       }
       main.append(gallery);
@@ -4258,7 +4541,15 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (typeof ctMediaEnhanceVideo === 'function') {
       for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
     }
+    ctProfileFitPhotos(panel);
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  }
+  function ctProfileFitPhotos(panel) {
+    ctPhotoInlinePrune();
+    for (const gallery of panel.querySelectorAll('.ct-profile-gallery')) {
+      const slides = [...gallery.querySelectorAll(':scope > .ct-profile-photo')];
+      ctPhotoInlineFit(gallery, gallery, slides, slides, slides.map(slide => slide.querySelector(':scope > img')), 480);
+    }
   }
   function ctProfileFavoriteMuteState() {
     const uid = ctProfileUID();
@@ -4451,8 +4742,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           typeof item.createdAt !== 'string' || (item.createdAt && !ctTimestampParse(item.createdAt) && !Number.isFinite(Date.parse(item.createdAt))) ||
           (item.isEdited !== undefined && typeof item.isEdited !== 'boolean') ||
           !Array.isArray(item.media) || item.media.length > 16 || item.media.some(asset =>
-            !keys(asset, ['type', 'url', 'poster', 'isGIF']) || !['image', 'video'].includes(asset.type) ||
+            !keys(asset, ['type', 'url', 'poster', 'isGIF', 'altText']) || !['image', 'video'].includes(asset.type) ||
             (asset.isGIF !== undefined && (typeof asset.isGIF !== 'boolean' || (asset.isGIF && asset.type !== 'video'))) ||
+            (asset.altText !== undefined && (asset.type !== 'image' || typeof asset.altText !== 'string')) ||
             !asset.url || !safeURL(asset.url) || !safeURL(asset.poster))) throw new Error('format');
     }
     return ctProfileFavoriteItems(data.items);
@@ -4900,6 +5192,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (typeof ctMediaSlides === 'function') for (const grid of article.querySelectorAll('div.flex.snap-x.snap-mandatory.overflow-x-auto')) {
       for (const slide of ctMediaSlides(grid)) nodes.push(slide.firstElementChild);
     }
+    // 2.9 single images use a native button plus an optional sibling ALT panel.
+    // Do not infer identity from author-provided alt text or its wording.
+    for (const image of article.querySelectorAll('button[type="button"].cursor-pointer > img')) {
+      const button = image.parentElement, shell = button.parentElement;
+      if (button.children.length === 1 && shell?.matches('div.relative') &&
+          (button.matches('.block.w-full') && image.matches('img.w-full.object-cover') ||
+            button.matches('.block.h-full.w-full') && image.matches('img.h-full.w-full.object-contain') &&
+              shell.matches('.overflow-hidden.rounded-2xl.border.bg-black')) &&
+          shell.children.length <= 2 && (!shell.children[1] || shell.children[1].matches('div.contents'))) nodes.push(image);
+    }
     // The current native legacy-image branch uses a different alt; accept only
     // its exact direct image container, never a similarly named user image.
     for (const image of article.querySelectorAll('img[alt="Post media"].w-full.object-cover.cursor-pointer')) {
@@ -4908,10 +5210,20 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     return [...new Set(nodes)].filter(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-user-content],.tl-user-text,[data-ct-owned],[data-ct-local-ui]'))
-      .slice(0, 16).map(el => ({type: el.tagName === 'VIDEO' ? 'video' : 'image',
-        url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : '',
-        ...(el.tagName === 'VIDEO' && /^(Animated GIF|GIFアニメーション|アニメーションGIF)$/.test(el.getAttribute('aria-label') || '')
-          ? {isGIF:true} : {})})).filter(asset => asset.url);
+      .slice(0, 16).map(el => {
+        const contents = el.tagName === 'IMG' && el.parentElement?.matches('button')
+          ? el.parentElement.parentElement?.querySelector(':scope > div.contents') : null;
+        const opener = contents?.querySelector(':scope > button[aria-controls][aria-expanded]');
+        const panel = opener && document.getElementById(opener.getAttribute('aria-controls'));
+        const description = panel && panel.parentElement === contents && panel.querySelector(':scope > p.whitespace-pre-wrap.break-words');
+        const altText = description && description.textContent === el.alt &&
+          /^(?:Show alt text|画像の説明文を表示)$/.test(opener.getAttribute('aria-label') || '') && ctProfileAltText(description.textContent);
+        return {type: el.tagName === 'VIDEO' ? 'video' : 'image',
+          url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : '',
+          ...(altText ? {altText} : {}),
+          ...(el.tagName === 'VIDEO' && /^(Animated GIF|GIFアニメーション|アニメーションGIF)$/.test(el.getAttribute('aria-label') || '')
+            ? {isGIF:true} : {})};
+      }).filter(asset => asset.url);
   }
 
   function ctFavoriteTranslationMetadataBlock(node) {
@@ -6426,10 +6738,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!grid?.matches('div.flex.w-full.snap-x.snap-mandatory.overflow-x-auto.overscroll-x-contain') ||
         !grid.closest('main,article') || grid.closest('[data-ct-local-ui],[data-ct-owned]') ||
         !grid.parentElement?.matches('div.relative.overflow-hidden.rounded-2xl.border.bg-black')) return [];
-    const slides = [...grid.children];
-    if (slides.length < 2 || slides.length > 16 || slides.some(slide =>
-        !slide.matches('button[type="button"].relative.w-full.min-w-full.shrink-0.snap-start.bg-black') ||
-        slide.children.length !== 1 || !slide.firstElementChild.matches('img.h-full.w-full.object-cover') ||
+    const wrappers = [...grid.children];
+    // 2.9 wraps each native opener and its independent ALT popover in a slide.
+    // Return the opener in both versions; never bind swipe/open to ALT controls.
+    const slides = wrappers.map(slide => slide.matches('div.relative.w-full.min-w-full.shrink-0.snap-start.bg-black') &&
+      slide.children.length <= 2 && (!slide.children[1] || slide.children[1].matches('div.contents'))
+      ? slide.firstElementChild : slide);
+    if (slides.length < 2 || slides.length > 16 || slides.some((slide, index) =>
+        !(slide?.matches('button[type="button"].relative.w-full.min-w-full.shrink-0.snap-start.bg-black') ||
+          slide?.matches('button[type="button"].h-full.w-full.cursor-pointer') && slide.parentElement === wrappers[index]) ||
+        slide.children.length !== 1 || !slide.firstElementChild.matches('img.h-full.w-full:is(.object-cover,.object-contain)') ||
         !ctMediaQualityURL(slide.firstElementChild.src))) return [];
     const sources = slides.map(slide => slide.firstElementChild.src);
     return new Set(sources).size === sources.length ? slides : [];
@@ -6438,7 +6756,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const slides = ctMediaSlides(grid);
     if (!slides.length) return;
     const existing = ctMediaGalleries.get(grid);
-    if (existing) { existing.slides = slides; existing.shell.classList.add('ct-media-native-gallery'); return; }
+    const fit = () => ctPhotoInlineFit(grid.parentElement, grid, [...grid.children], slides, slides.map(slide => slide.firstElementChild));
+    if (existing) { existing.slides = slides; existing.shell.classList.add('ct-media-native-gallery'); fit(); return; }
     // Record the native opener only. Its scroll snap, dots, keyboard/click
     // handlers and counts remain untouched; no second inline carousel is made.
     const state = { grid, slides, shell: grid.parentElement };
@@ -6450,12 +6769,32 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     };
     grid.addEventListener('click', state.onClick, true);
     ctMediaGalleries.set(grid, state);
+    fit();
   }
   function ctMediaRemoveGallery(state) {
+    ctPhotoInlineRemove(ctPhotoInlineFrames.get(state.grid));
     state.shell.classList.remove('ct-media-native-gallery');
     state.grid.removeEventListener('click', state.onClick, true);
     ctMediaGalleries.delete(state.grid);
     if (ctMediaPendingViewer?.state === state) ctMediaPendingViewer = null;
+  }
+  function ctMediaSinglePhotoParts(image) {
+    const fluid = image.matches('img.w-full.object-cover') && [...image.classList].some(name => name.startsWith('max-h-['));
+    const framed = image.matches('img.h-full.w-full.object-contain');
+    if ((!fluid && !framed) || !image.closest('main,article') ||
+        image.closest('[data-ct-local-ui],[data-ct-owned]') || !ctMediaQualityURL(image.src)) return null;
+    const opener = image.parentElement, shell = opener?.parentElement;
+    if (!opener?.matches('button[type="button"].block.w-full.cursor-pointer') || opener.children.length !== 1 ||
+        !shell?.matches('div.relative') || shell.children.length > 2 ||
+        shell.children.length === 2 && !shell.children[1].matches('div.contents') ||
+        framed && (!opener.classList.contains('h-full') || !shell.matches('div.relative.overflow-hidden.rounded-2xl.border.bg-black'))) return null;
+    return { shell, opener };
+  }
+  function ctMediaFitSinglePhoto(image) {
+    const parts = ctMediaSinglePhotoParts(image);
+    if (!parts) return;
+    const state = ctPhotoInlineFit(parts.shell, parts.shell, [parts.opener], [parts.opener], [image]);
+    if (state) state.kind = 'nativeSingle';
   }
   function ctMediaNativePhotoViewer(dialog) {
     if (!dialog?.matches('div[role="dialog"][aria-modal="true"]:is([aria-label="Media viewer"],[aria-label="写真・動画ビューア"])') ||
@@ -6688,18 +7027,22 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (touch.pointer != null) try { touch.capture?.releasePointerCapture(touch.pointer); } catch {}
   }
   function ctMediaViewport(dialog) {
+    const wasZoomed = dialog.classList.contains('ct-media-photo-zoomed');
     const fit = ctPhotoViewportFit(dialog, '--ct-media-view-');
     dialog.classList.toggle('ct-media-photo-zoomed', fit.zoomed);
-    if (ctMediaViewer?.dialog === dialog && (fit.zoomed || fit.changed)) {
+    // Once pinch has cancelled a swipe, subsequent zoomed pan events have
+    // fixed layout bounds and need no native gallery rescan.
+    if (ctMediaViewer?.dialog === dialog && (fit.zoomed !== wasZoomed || fit.changed)) {
       ctMediaCancelPhotoGesture(ctMediaViewer); ctMediaEnhanceViewer();
     }
   }
   function ctMediaCenterViewers() {
     for (const [dialog, state] of ctMediaCenteredViewers) {
       if (dialog.isConnected && ctMediaNativePhotoViewer(dialog)) continue;
-      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed');
+      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed', 'ct-media-native-alt-viewer');
       state.stage.classList.remove('ct-media-viewer-stage');
       state.header?.classList.remove('ct-media-viewer-header');
+      state.alt?.classList.remove('ct-media-viewer-alt');
       ctMediaReleasePhotoQuality(dialog);
       for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
       ctMediaCenteredViewers.delete(dialog);
@@ -6710,14 +7053,19 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const { image, stage, header } = native;
       const previous = ctMediaCenteredViewers.get(dialog);
       if (previous && previous.stage !== stage) previous.stage.classList.remove('ct-media-viewer-stage');
+      const alt = [...dialog.children].find(el => el.matches('p[aria-hidden="true"].whitespace-pre-wrap.break-words') &&
+        el.firstElementChild?.matches('span') && el.firstElementChild.textContent.trim() === 'ALT');
+      if (previous?.alt && previous.alt !== alt) previous.alt.classList.remove('ct-media-viewer-alt');
       dialog.classList.add('ct-media-centered-viewer');
+      dialog.classList.toggle('ct-media-native-alt-viewer', !!alt);
+      alt?.classList.add('ct-media-viewer-alt');
       // Contained native viewers remain inside their existing modal. Only the
       // verified fixed viewer follows the visible viewport on mobile browsers.
       dialog.classList.toggle('ct-media-viewport-viewer', dialog.classList.contains('fixed'));
       stage.classList.add('ct-media-viewer-stage');
       header?.classList.add('ct-media-viewer-header');
       ctMediaAttachPhotoQuality(dialog, image);
-      ctMediaCenteredViewers.set(dialog, { stage, header });
+      ctMediaCenteredViewers.set(dialog, { stage, header, alt });
       ctMediaViewport(dialog);
     }
     if (ctMediaViewportBound) return;
@@ -7130,6 +7478,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-media-photo-resolution { padding:5px 8px; background:#0009; border-radius:4px; white-space:nowrap; }
       .ct-media-photo-quality[hidden],.ct-media-photo-quality [hidden] { display:none!important; }
       .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
+      .ct-media-native-alt-viewer > .ct-media-viewer-stage { position:relative!important; inset:auto!important; height:auto!important; flex:1 1 0%; padding-bottom:12px!important; }
+      .ct-media-native-alt-viewer > .ct-media-viewer-alt { position:relative; z-index:2; box-sizing:border-box; width:100%; max-height:min(8rem,30%); flex-shrink:0; overflow-y:auto; margin-bottom:calc(96px + env(safe-area-inset-bottom))!important; }
+      .ct-media-native-alt-viewer .ct-media-photo-pane { padding-bottom:12px; }
       .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
       .ct-media-swipe-stage { touch-action:pan-y pinch-zoom; }
       .ct-media-photo-zoomed .ct-media-swipe-stage { touch-action:pan-x pan-y pinch-zoom; }
@@ -7158,6 +7509,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctMediaEnhance(root = document) {
     ctMediaStyles();
+    ctPhotoInlinePrune();
+    for (const state of ctPhotoInlineFrames.values()) if (state.kind === 'nativeSingle' && !ctMediaSinglePhotoParts(state.images[0])) ctPhotoInlineRemove(state);
     for (const [dialog, state] of ctMediaPhotoQuality) {
       if (!dialog.isConnected || !state.image.isConnected || !dialog.contains(state.image)) ctMediaReleasePhotoQuality(dialog);
     }
@@ -7174,6 +7527,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const grids = [...root.querySelectorAll?.('div.flex.snap-x.snap-mandatory.overflow-x-auto') || []];
     if (root.matches?.('div.flex.snap-x.snap-mandatory.overflow-x-auto')) grids.push(root);
     grids.forEach(ctMediaObserveGallery);
+    const singles = [...root.querySelectorAll?.('img.w-full:is(.object-cover,.object-contain)') || []];
+    if (root.matches?.('img.w-full:is(.object-cover,.object-contain)')) singles.push(root);
+    singles.forEach(ctMediaFitSinglePhoto);
     const videos = [...root.querySelectorAll?.('video[controls]') || []];
     if (root.matches?.('video[controls]')) videos.push(root);
     videos.forEach(ctMediaEnhanceVideo);
@@ -8704,5 +9060,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.29.2 loaded');
+  console.log('🐦 Classic Twitter EN v6.32.2 loaded');
 })();
