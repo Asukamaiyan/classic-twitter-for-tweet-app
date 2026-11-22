@@ -1,16 +1,26 @@
 # Classic Twitter for tweet.app
 
-**6.29.2** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
+**6.32.2** · 非公式ユーザースクリプト。昔のTwitter風の青い表示と星のお気に入りを追加します。日本語版は操作UIを日本語化し、英語版はClassic Twitterの用語に揃えます。本文・名前・下書き・サイトのテーマは保持します。
 
-**6.29.2の変更:** 独自URLカードとプレビュー取得をいったん削除し、元のURL・通常リンクを残しました。括弧で囲まれたURLも正しく開けます。 翻訳の処理中や状態を確認できない投稿で「いいね」を解除したとき、拡張のお気に入り一覧に残る問題を修正。復元処理の古い応答が、解除した投稿を戻す競合も防ぎます。時間を空けて再登録した場合も確認済み原文を保持します。投稿の同一性と確認済み原文を使って同期し、訳文を原文として保存しない処理を保持します。
+**6.32.2の変更（2026-11-22）:** 投稿内で写真を横に送るとき、表示中の写真が変わるまで同じ大きさを繰り返し計算しないようにしました。全画面のピンチ拡大中も、パンのたびにギャラリーを調べ直す処理を省きます。描画の間隔は端末とブラウザに合わせます。
 
-**Tweet 2.6.0への対応:** 公式配信 **2.6.0 / build 1792299140**（2026-10-18）を確認。自動翻訳はTweet標準へ一本化し、拡張の自動クリック・待ち行列・翻訳方法の切り替えを削除しました。新しい言語設定、翻訳アイコン、個別アカウントの投稿通知を日本語化し、元のボタン・設定値・本文を保持します。全6版を更新しています。
+**6.32.1の変更（2026-11-22）:** 日本語版で標準のフィード設定（Perch）とホームに固定したネストの操作名を日本語化しました。スマホChromeでは公式Webをホーム画面から開く方法を案内します。
+
+**6.32.0の変更（2026-11-22）:** 公式Web **2.11.6 / build 1795306956** で追加されたNestsの操作画面を日本語化しました。ホームの標準フィード設定（Perch）が使える場合は、便利ツールから標準ミュートを開けます。既存の部分一致の折りたたみはブラウザ内機能として引き続き使えます。
+
+**6.29.3の変更:** 便利ツールは日本語入力の変換中にEscapeで閉じたり、未確定の検索語・メモ・フィルターを保存したりしません。保存検索・投稿を削除した後は隣の削除ボタンへフォーカスを保ち、長い名前でも操作ボタンが縮みません。Tweet 2.8.0の標準GIF検索を構造限定で日本語化し、入力語・GIF名・選択操作を保持します。
+
+**写真表示の確認（2026-11-04）:** 公式Web **2.9.2 / build 1793656820** を公開HTML・bundleで確認。写真の構造とALTの契約は前回から同じです。6.31.0では、写真ごとの縦横比に合わせ、表示中の写真だけを根拠に高さを調整します。固定の黒い写真枠を外し、横長・縦長・正方形を切り取らずに表示。複数写真を切り替えると、その写真に合う高さへ変わります。極端に縦長の写真は画面内の上限に収め、小さい写真は元の大きさ以上へ拡大せず、透明な操作領域だけ44px以上を保ちます。未読込や失敗は寸法を推測せず、読み込み後に実寸へ合わせます。説明文を開いている間は読める領域を確保し、閉じると写真に合う高さへ戻ります。写真・動画／保存お気に入り、ALT原文とJSONバックアップ、元の画像操作を保持します。新しい `klipy_gif` 専用metadataの再現は未対応です。
+
+**6.29.2から保持:** 独自URLカードとプレビュー取得をいったん削除し、元のURL・通常リンクを残しました。括弧で囲まれたURLも正しく開けます。 翻訳の処理中や状態を確認できない投稿で「いいね」を解除したとき、拡張のお気に入り一覧に残る問題を修正。復元処理の古い応答が、解除した投稿を戻す競合も防ぎます。時間を空けて再登録した場合も確認済み原文を保持します。投稿の同一性と確認済み原文を使って同期し、訳文を原文として保存しない処理を保持します。
+
+**これまでのTweet 2.6.0への対応:** 公式配信 **2.6.0 / build 1792299140**（2026-10-18）を確認。自動翻訳はTweet標準へ一本化し、拡張の自動クリック・待ち行列・翻訳方法の切り替えを削除しました。新しい言語設定、翻訳アイコン、個別アカウントの投稿通知を日本語化し、元のボタン・設定値・本文を保持します。全6版を更新しています。
 
 **自動翻訳：** Tweetの **「設定」→「言語」** で設定してください。標準の自動翻訳はFounder・Fighter・Centurionプラン向けです。手動の翻訳アイコンは標準機能を使います。対応PC版Chromeでは「便利ツール」の **「端末内翻訳」** をオンにしてモデルを準備すると、追加の手動ボタンで端末内だけの翻訳も使えます。以前の拡張の自動翻訳設定から、標準設定を勝手にオンにすることはありません。
 
 **投稿通知：** フォロー中のプロフィールのベルからオンにでき、「設定」→「投稿通知するアカウント」で確認・解除できます。標準機能をそのまま使い、拡張独自の購読ボタンや通知取得処理は追加しません。
 
-**配布状況（2026-10-19）:** 6.29.2の全6版をGitHubのmainへ反映し、Greasy Forkへも公開しました（[PR #30](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/30)、[PR #31](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/31)）。通常の配布コード6本・導入案内6ページ・更新metadata6本を匿名取得し、全HTTP200・生成結果との全文一致を確認済みです。既存の限定公開設定を保持しています。Safari＋StayとAndroidの今回の実機確認は未実施です。
+**6.29.2の配布記録（2026-10-19）:** 6.29.2の全6版をGitHubのmainへ反映し、Greasy Forkへも公開しました（[PR #30](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/30)、[PR #31](https://github.com/Asukamaiyan/classic-twitter-for-tweet-app/pull/31)）。通常の配布コード6本・導入案内6ページ・更新metadata6本を匿名取得し、全HTTP200・生成結果との全文一致を確認済みです。既存の限定公開設定を保持しています。Safari＋StayとAndroidの今回の実機確認は未実施です。
 
 ## URLの表示
 
@@ -63,9 +73,15 @@
 2. Firefoxで上の表の日本語／英語のAndroid版を開き、**「スクリプトをインストール」** → Tampermonkeyの確認画面でも **「インストール」**。
 3. Firefoxの拡張機能でTampermonkeyをオンにし、Tampermonkey内でこのスクリプトを有効化。その後tweet.appを開く／再読み込み。
 
-**更新：** Tampermonkeyのメニュー → **「UserScript の更新を確認」** → 更新があれば案内に従って適用 → tweet.appを再読み込み。通常のAndroid版Chromeではこの拡張機能は使えません。
+**更新：** Tampermonkeyのメニュー → **「UserScript の更新を確認」** → 更新があれば案内に従って適用 → tweet.appを再読み込み。
 
 **有効にするのは1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。**
+
+### スマホのChromeでTweetを使う
+
+通常のiPhone／iPad版・Android版Chromeでは、このユーザースクリプトは動きません。Chromeウェブストアの「デスクトップに追加」は同じGoogleアカウントで使うPC向けです。拡張機能を使う場合は、iPhone／iPadならSafari＋Stay、AndroidならFirefox＋Tampermonkeyを選んでください。 [Chromeの拡張機能ヘルプ](https://support.google.com/chrome/answer/2664769?hl=ja)
+
+スマホのChromeでは[公式Web版のTweet](https://app.tweet.app/)をそのまま利用でき、ホーム画面からも開けます。iPhone／iPadは共有メニューの「ホーム画面に追加」、AndroidはChromeのメニューからホーム画面への追加やウェブアプリのインストールを選びます。ホーム画面のアイコンで利用できるのは公式Web版の機能です。 [iPhone／iPadの手順](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DiOS&hl=ja)、[Androidの手順](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DAndroid&hl=ja)
 
 6.27.0は確認できたTweet 2.4.1の固定ツイートに対応。通知アイコンはそれぞれのプロフィールへ移動し、GIF・動画追加やブロック関連のUIも日本語化します。保存したGIFのループ再生と「編集済み」表示を維持し、ブロック・ミュート相手の保存投稿は表示しません。標準の返信通知・投票・ブロック・写真の複数選択を使います。
 
@@ -93,13 +109,15 @@
 
 お気に入りはミュート・ブロック一覧を確認してから表示します。便利ツールの設定・保存検索・保存投稿は同じブラウザのアカウント間で共通です。自動同期はなく、サイトデータを消すと失われます。
 
-画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。今回の6.29.2では実機操作を行っていません。過去のStayの6.23.1更新は実機確認済み。6.23.0のニュース選択・再読み込み後の保持・プロフィール写真の左右スワイプも確認済みですが、6.23.1の画質表示と閉じるボタンは実機テストのタップ判定で止まり、最終確認待ちです。
+画像・動画の投稿上限とサイト翻訳の制限はtweet.app側の条件に従います。4K HDRの保持は保証できません。端末内翻訳は対応するPC版Chromeで利用できます。6.29.3候補では実機操作を行っていません。過去のStayの6.23.1更新は実機確認済み。6.23.0のニュース選択・再読み込み後の保持・プロフィール写真の左右スワイプも確認済みですが、6.23.1の画質表示と閉じるボタンは実機テストのタップ判定で止まり、最終確認待ちです。
 
 **6.22.0での実機記録：** iPhone 17 Pro Max＋Stay 2.9.24で更新、Yahoo!・NHKのニュース、写真の中央配置・前後切替、左右スワイプ、約2倍のピンチ拡大を確認しました。日刊スポーツは追加許可待ち、ITmediaは実機未確認。縮小の直前にXCTestの内部エラーが発生し、ピンチ縮小は未確認です。Safari再起動で通常倍率へ復元済み。長時間操作、Android＋Tampermonkeyは未検証です。
 
 [変更履歴](CHANGELOG.md) · [API調査](docs/API_RESEARCH.md) · [検証記録](docs/VALIDATION.md)
 
 ## English quick start
+
+Version **6.32.2** improves photo carousel scrolling, avoids repeated layout work during zoomed panning, and includes the per-photo sizing introduced in 6.31.0. On 2026-11-04, the public HTML and bundle identified Tweet **2.9.2 / build 1793656820**. Each selected photo now determines its own inline height from its loaded, orientation-aware natural dimensions. Remove the fixed black photo frame while keeping the complete portrait, landscape or square image, native page width and controls. Very tall photos fit a viewport-height limit; small photos keep their natural size within a transparent minimum 44px hit area. Unknown, failed or reused sources do not borrow an earlier photo's dimensions. Opening native ALT temporarily provides a readable area; closing returns to the photo's fitted height. Exact ALT descriptions, saved data, standard actions and reduced-motion behavior remain. `klipy_gif` snapshot support remains outside this release.
 
 You need **a browser, a userscript manager, and one English script** from the table above.
 
@@ -116,7 +134,7 @@ You need **a browser, a userscript manager, and one English script** from the ta
 3. On Chrome, open Tampermonkey’s extension Details and enable **Allow User Scripts**. On Firefox, enable Tampermonkey in Extensions settings, then enable this script inside Tampermonkey.
 4. Open or reload tweet.app in that browser.
 
-**Update:** Tampermonkey’s menu → **Check for userscript updates** → apply an available update when prompted → reload tweet.app. Standard Android Chrome cannot run this extension.
+**Update:** Tampermonkey’s menu → **Check for userscript updates** → apply an available update when prompted → reload tweet.app.
 
 **Safari**
 
@@ -130,6 +148,12 @@ You need **a browser, a userscript manager, and one English script** from the ta
 **If Japan news does not appear:** Safari’s page menu → Stay → allow only the news sites shown → Retry in News. Sites: `news.yahoo.co.jp` / `news.web.nhk` / `www.nikkansports.com` / `rss.itmedia.co.jp`.
 
 **Enable only one edition. Disable the previous edition when switching.**
+
+**Tweet in mobile Chrome**
+
+Standard Chrome on iPhone, iPad and Android does not run this userscript. The Chrome Web Store’s **Add to Desktop** option sends an extension to desktop Chrome. For this script, use Safari with Stay on iPhone or iPad, or Firefox with Tampermonkey on Android. [Chrome extensions help](https://support.google.com/chrome/answer/2664769?hl=en)
+
+Open the [official Tweet web app](https://app.tweet.app/) in mobile Chrome to use Tweet directly. On iPhone or iPad, choose **Add to Home Screen** from Share. On Android, use Chrome’s menu to add it to the home screen or install the web app. The home screen icon opens Tweet’s own web experience. [iPhone and iPad instructions](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DiOS&hl=en), [Android instructions](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DAndroid&hl=en)
 
 Version 6.29.2 temporarily removes custom URL cards, preview requests and their controls while retaining original post URLs and ordinary links. It also fixes local Favorites remaining after a native unlike during a busy or unknown translation state. Removal uses verified post identity and an original snapshot, with account, reused-card and native rollback guards. Older recovery responses cannot undo a newer favorite action. It supports verified Tweet 2.6.0 (build 1792299140, 2026-10-18). Automatic translation now belongs entirely to Tweet: the extension’s native-button queue, automatic device queue and engine selector have been removed. Use Settings → Language; native auto-translate is available with Founder, Fighter and Centurion plans. Optional on-device translation in supported desktop Chrome is manual only. The Japanese edition localizes verified language settings, icon translation states and per-account post notifications while preserving names, post text, target language values and native handlers. English editions keep native English. Profile bells and Settings → Notified accounts remain native; no subscription or translation-write API is added. New translation states preserve only independently verified original Favorites, and never infer precise reply timestamps from translated text. All six edition identities and saved data remain. Tools → Show only posts with links on Home still reports loaded coverage. News, native media, quotes and standard game cards remain available; custom URL-card network requests and the general destination permission are removed. Physical Safari/Stay and Android acceptance was not performed for this release; device checks below are historical. **Publishers** lets you select existing feeds per Japan news topic: Yahoo/NHK for National, Yahoo/Nikkan Sports for Sports and Entertainment, and Yahoo/ITmedia for Technology. At least one stays selected; failures name the unavailable publishers. Arbitrary RSS URLs and automatic article classification are not supported. Profile Media/Favorites photos now follow horizontal dragging, including safe direction reversal while an adjacent photo is still decoding. Pinch and zoom do not select another photo. Native uploads, inline slides, original image nodes, controls and delivered-source information remain intact. This cannot increase delivered resolution or guarantee 4K/HDR retention.
 

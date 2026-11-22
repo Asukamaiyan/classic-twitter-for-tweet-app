@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.29.2
+// @version      6.32.2
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -681,8 +681,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     links: 'リンク付き投稿',
     linksOnly: 'ホームでリンク付き投稿だけ表示する', linksOnlyHelp: '読み込み済みの投稿だけを絞り込みます。詳細・返信・通知・プロフィールには適用しません。',
     linksCount: (shown, total) => `リンク付きのみ · 確認済み ${shown} / ${total}件`, linksAll: 'すべて表示',
-    filters: 'キーワードで折りたたむ', enabled: 'キーワードフィルターを有効にする',
-    words: 'キーワード（1 行に 1 件）', help: '投稿本文に含まれる語句を、大文字・小文字を区別せず照合します。最大 30 件、各 80 文字。',
+    filters: 'キーワードで折りたたむ', enabled: 'このブラウザで投稿を折りたたむ',
+    muteControls: 'ミュートと折りたたみ',
+    nativeMute: 'Tweetのミュート設定を開く',
+    nativeMuteHelp: '人・ハッシュタグ・語句のミュートや期限は、Tweetのフィード設定（Perch）で変更できます。',
+    localCollapse: 'ブラウザ内の折りたたみ',
+    words: 'キーワード（1 行に 1 件）', help: '本文の一部に一致する投稿をこのブラウザで折りたたみ、必要なときだけ開けます。大小文字は区別しません。最大 30 件、各 80 文字。',
     save: 'フィルターを保存', saved: '設定を保存しました。', searches: '保存した検索',
     query: '保存する検索語', add: '検索を保存', remove: '削除', noSearches: '保存した検索はありません。',
     searchHelp: '最大 20 件。検索語を押すと検索画面で検索します。',
@@ -726,8 +730,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     links: 'Posts with links',
     linksOnly: 'Show only posts with links on Home', linksOnlyHelp: 'Filters only loaded posts. Does not filter details, replies, notifications or profiles.',
     linksCount: (shown, total) => `Links only · ${shown} / ${total} verified posts`, linksAll: 'Show all',
-    filters: 'Collapse by keyword', enabled: 'Enable keyword filters',
-    words: 'Keywords (one per line)', help: 'Matches phrases in post text, ignoring case. Up to 30 keywords, 80 characters each.',
+    filters: 'Collapse by keyword', enabled: 'Collapse posts in this browser',
+    muteControls: 'Mute and collapse',
+    nativeMute: 'Open Tweet’s mute settings',
+    nativeMuteHelp: 'Use Tweet’s feed settings (Perch) to mute people, hashtags, or words and set an expiration.',
+    localCollapse: 'Browser-only post collapse',
+    words: 'Keywords (one per line)', help: 'Collapse posts when any part of their text matches, ignoring case. You can reveal each post as needed. Up to 30 keywords, 80 characters each.',
     save: 'Save filters', saved: 'Settings saved.', searches: 'Saved searches',
     query: 'Search to save', add: 'Save search', remove: 'Remove', noSearches: 'No saved searches yet.',
     searchHelp: 'Save up to 20 searches. Select a search to open it in Explore.',
@@ -832,9 +840,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     #ct-local-tools label:has(input[type=checkbox]) { display:flex; align-items:center; min-height:44px; margin:4px 0; cursor:pointer; }
     #ct-local-tools [aria-invalid=true] { border-color:var(--color-tl-app-danger, #c23636); }
     #ct-local-tools form > button { margin-top:8px; }
+    #ct-local-tools summary { cursor:pointer; min-height:44px; align-content:center; }
+    #ct-local-tools summary:focus-visible { outline:3px solid var(--color-tl-app-primary, #1688d4); outline-offset:2px; }
     #ct-local-tools ul { padding:0; margin:8px 0; list-style:none; }
     #ct-local-tools li { display:flex; align-items:center; gap:10px; padding:5px 0; }
     #ct-local-tools li a { display:flex; align-items:center; flex:1; min-width:0; min-height:44px; overflow-wrap:anywhere; color:inherit; text-decoration:underline; padding:5px 0; }
+    #ct-local-tools li button { flex-shrink:0; white-space:nowrap; }
     #ct-local-tools #ct-local-tools-status { margin:0; font-size:13px; overflow-wrap:anywhere; }
     #ct-local-tools-status[data-error=true] { color:var(--color-tl-app-danger, #c23636); }
     article.ct-keyword-collapsed > :not(.ct-keyword-notice) { display:none !important; }
@@ -858,7 +869,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   const title = element('h2', copy.title, { id: 'ct-local-tools-title' });
   const close = element('button', copy.close, { type: 'button' });
   header.append(title, close);
-  const status = element('p', loadError, { id: 'ct-local-tools-status', role: 'status', 'aria-live': 'polite' });
+  const status = element('p', loadError, { id: 'ct-local-tools-status', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   if (loadError) status.dataset.error = 'true';
   const body = element('div', undefined, { id: 'ct-local-tools-body' });
   const footer = element('footer', undefined, { tabindex: '0', 'aria-labelledby': 'ct-local-tools-status' });
@@ -870,7 +881,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   document.body.append(root);
 
   function openPanel(open, moveFocus = true) {
-    if (open) { updateBookmarkControl(); refreshAppearance(); }
+    if (open) { updateBookmarkControl(); refreshAppearance(); refreshMuteControls(); }
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open && moveFocus) close.focus({ preventScroll: true });
@@ -878,8 +889,15 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   toggle.addEventListener('click', () => openPanel(panel.hidden));
   close.addEventListener('click', () => openPanel(false));
+  const composingInputs = new WeakSet();
+  root.addEventListener('compositionstart', event => composingInputs.add(event.target));
+  root.addEventListener('compositionend', event => composingInputs.delete(event.target));
+  root.addEventListener('blur', event => composingInputs.delete(event.target), true);
   root.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !panel.hidden) { event.stopPropagation(); openPanel(false); }
+    // Escape first dismisses the input method's candidates. It must not hide
+    // the draft or override a child control that already handled the key.
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || composingInputs.has(event.target)) return;
+    if (event.key === 'Escape' && !panel.hidden) { event.preventDefault(); event.stopPropagation(); openPanel(false); }
   });
   function announce(message, error = false) {
     status.textContent = message;
@@ -908,6 +926,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     input.focus();
   }
   function clearInvalid(event) { event.target.removeAttribute('aria-invalid'); }
+  function focusAfterRemoval(list, index, fallback) {
+    const buttons = list.querySelectorAll('li button');
+    (buttons[Math.min(index, buttons.length - 1)] || fallback).focus({ preventScroll: true });
+  }
 
   let refreshBrowserNotifications = () => {};
   if (typeof browserNotifications?.getState === 'function' && typeof browserNotifications?.setEnabled === 'function') {
@@ -1057,6 +1079,12 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
 
   const filterSection = element('section');
+  const filterHeading = element('h3', copy.filters);
+  const nativeMute = element('div', undefined, { hidden: '' });
+  const nativeMuteButton = element('button', copy.nativeMute, { type: 'button', 'aria-describedby': 'ct-native-mute-help' });
+  nativeMute.append(element('p', copy.nativeMuteHelp, { id: 'ct-native-mute-help', class: 'ct-local-note' }), nativeMuteButton);
+  const collapseDetails = element('details', undefined, { open: '' });
+  const collapseSummary = element('summary', copy.localCollapse, { hidden: '' });
   const filterForm = element('form');
   const enabledLabel = element('label');
   const enabled = element('input', undefined, { type: 'checkbox', id: 'ct-local-filter-enabled' });
@@ -1067,8 +1095,37 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   keywords.value = state.keywords.join('\n');
   filterForm.append(enabledLabel, element('label', copy.words, { for: keywords.id }), keywords,
     element('p', copy.help, { id: 'ct-local-keyword-help', class: 'ct-local-note' }), element('button', copy.save, { type: 'submit' }));
-  filterSection.append(element('h3', copy.filters), filterForm);
+  collapseDetails.append(collapseSummary, filterForm);
+  filterSection.append(filterHeading, nativeMute, collapseDetails);
   body.append(filterSection);
+  function nativePerchButton() {
+    const button = document.querySelector('button[data-perch-pill][aria-haspopup="dialog"]');
+    if (button && !button.disabled && !button.closest('[hidden], [inert], [aria-hidden="true"]') &&
+        button.getClientRects().length) return button;
+  }
+  function refreshMuteControls() {
+    const hasPerch = Boolean(nativePerchButton());
+    if (hasPerch === !nativeMute.hidden) return;
+    nativeMute.hidden = !hasPerch;
+    collapseSummary.hidden = !hasPerch;
+    filterHeading.textContent = hasPerch ? copy.muteControls : copy.filters;
+    // Existing configurations stay directly accessible when Perch first appears.
+    if (!hasPerch || !collapseDetails.contains(document.activeElement)) {
+      collapseDetails.open = !hasPerch || state.enabled || state.keywords.length > 0 || keywords.value.trim().length > 0;
+    }
+  }
+  nativeMuteButton.addEventListener('click', () => {
+    const button = nativePerchButton();
+    if (!button) {
+      refreshMuteControls();
+      collapseDetails.open = true;
+      enabled.focus();
+      return;
+    }
+    openPanel(false);
+    button.focus({ preventScroll: true });
+    button.click();
+  });
 
   const searchSection = element('section');
   const searchForm = element('form');
@@ -1081,7 +1138,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   function renderSearches() {
     searches.replaceChildren();
     if (!state.searches.length) searches.append(element('li', copy.noSearches));
-    for (const query of state.searches) {
+    for (const [index, query] of state.searches.entries()) {
       const row = element('li');
       // The native route is /explore. ct_search is consumed by this script;
       // tweet.app itself does not currently support search query deep links.
@@ -1105,9 +1162,10 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
       });
       const remove = element('button', copy.remove, { type: 'button', 'aria-label': `${copy.remove}: ${query}` });
       remove.addEventListener('click', () => {
+        const restoreFocus = row.contains(document.activeElement);
         if (persist({ ...state, searches: state.searches.filter(item => item !== query) })) {
           renderSearches();
-          searchInput.focus();
+          if (restoreFocus) focusAfterRemoval(searches, index, searchInput);
         }
       });
       row.append(link, remove);
@@ -1117,6 +1175,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   renderSearches();
   searchForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(searchInput)) return;
     const query = searchInput.value.trim();
     if (!query || query.length > 200 || state.searches.length >= 20) { invalidInput(searchInput, copy.invalidSearch); return; }
     if (state.searches.some(item => normalize(item) === normalize(query))) { invalidInput(searchInput, copy.duplicate); return; }
@@ -1154,14 +1213,15 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   function renderBookmarks() {
     bookmarks.replaceChildren();
     if (!state.bookmarks.length) bookmarks.append(element('li', copy.noBookmarks));
-    for (const item of state.bookmarks) {
+    for (const [index, item] of state.bookmarks.entries()) {
       const row = element('li');
       const link = element('a', item.label, { href: item.path });
       const remove = element('button', copy.remove, { type: 'button', 'aria-label': `${copy.remove}: ${item.label}` });
       remove.addEventListener('click', () => {
+        const restoreFocus = row.contains(document.activeElement);
         if (persist({ ...state, bookmarks: state.bookmarks.filter(other => other.path !== item.path) })) {
           renderBookmarks();
-          bookmarkInput.focus();
+          if (restoreFocus) focusAfterRemoval(bookmarks, index, bookmarkInput);
         }
       });
       row.append(link, remove);
@@ -1171,6 +1231,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   renderBookmarks();
   bookmarkForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(bookmarkInput)) return;
     const current = currentPost();
     if (!current) { announce(copy.bookmarkMissing, true); return; }
     const label = bookmarkInput.value.trim() || current.label;
@@ -1247,6 +1308,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
     refreshBrowserNotifications();
     refreshLinksFilter();
     updateBookmarkControl();
+    if (!panel.hidden) refreshMuteControls();
     for (const article of collapsed) if (!article.isConnected) collapsed.delete(article);
     if (!state.enabled && collapsed.size === 0) return;
     for (const article of document.querySelectorAll('article')) {
@@ -1278,6 +1340,7 @@ function installLocalEnhancements({ locale = 'ja', getClassicAppearance, setClas
   }
   filterForm.addEventListener('submit', event => {
     event.preventDefault();
+    if (composingInputs.has(keywords)) return;
     const words = keywords.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
     if (words.length > 30 || words.some(value => value.length > 80)) { invalidInput(keywords, copy.invalidWords); return; }
     keywords.removeAttribute('aria-invalid');
@@ -2873,7 +2936,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.29.2';
+    document.documentElement.dataset.ctActiveVersion = '6.32.2';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -3386,6 +3449,209 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     return { zoomed, changed };
   }
 
+  // An inline carousel keeps its native page width, while only the selected
+  // photo determines its height. The image's own box follows its decoded
+  // dimensions; the unused part of a portrait page has no background/frame.
+  const ctPhotoInlineFrames = new Map();
+  let ctPhotoInlineResize = null;
+  let ctPhotoInlineViewport = null;
+  let ctPhotoInlineLifecycleBound = false;
+  function ctPhotoInlineBindViewport() {
+    if (ctPhotoInlineViewport) return;
+    const update = () => { ctPhotoInlinePrune(); for (const current of ctPhotoInlineFrames.values()) current.update(true); };
+    const viewport = window.visualViewport;
+    ctPhotoInlineViewport = { update, viewport };
+    window.addEventListener('resize', update, { passive: true }); viewport?.addEventListener('resize', update, { passive: true });
+  }
+  function ctPhotoInlineSignature(image) {
+    return JSON.stringify(['src', 'srcset', 'sizes'].map(name => image.getAttribute(name) || ''));
+  }
+  function ctPhotoInlineDimensions(image, resource = null) {
+    if (image?.tagName !== 'IMG' || !image.complete) return null;
+    const source = image.getAttribute('src');
+    if (!source) return null;
+    if (resource && (!resource.ready || resource.signature !== ctPhotoInlineSignature(image) || resource.current !== image.currentSrc)) return null;
+    // Without srcset currentSrc must be the current src. Responsive candidates
+    // legitimately differ from that fallback; their completed load record is
+    // tied to all three resource attributes instead.
+    try {
+      if (!image.getAttribute('srcset')?.trim() && image.currentSrc &&
+          new URL(image.currentSrc, location.href).href !== new URL(source, location.href).href) return null;
+    } catch { return null; }
+    const width = image.naturalWidth, height = image.naturalHeight;
+    return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? { width, height } : null;
+  }
+  function ctPhotoInlineStyles() {
+    if (document.getElementById('ct-photo-inline-style')) return;
+    const style = document.createElement('style'); style.id = 'ct-photo-inline-style';
+    style.textContent = `
+      .ct-photo-fit-shell{box-sizing:border-box!important;width:100%!important;max-width:100%!important;height:var(--ct-photo-inline-height,240px)!important;max-height:none!important;aspect-ratio:auto!important;border:0!important;background:transparent!important;overflow:hidden!important}
+      .ct-photo-fit-scroll-shell{overflow-x:auto!important;overflow-y:hidden!important}
+      .ct-photo-fit-track{height:100%!important;align-items:flex-start!important;background:transparent!important}
+      .ct-photo-fit-slide{box-sizing:border-box!important;height:100%!important;min-height:0!important;aspect-ratio:auto!important;border:0!important;background:transparent!important}
+      .ct-photo-fit-opener{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:100%!important;min-height:0!important;padding:0!important;border:0!important;background:transparent!important}
+      .ct-photo-fit-image{display:block!important;width:auto!important;height:auto!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;margin:0 auto!important;border-radius:12px}
+    `;
+    document.head.append(style);
+  }
+  function ctPhotoInlineRemove(state) {
+    if (!state) return;
+    state.observer.disconnect(); ctPhotoInlineResize?.unobserve?.(state.track);
+    if (state.resizeFrame !== null) cancelAnimationFrame(state.resizeFrame);
+    if (state.scrollFrame !== null) cancelAnimationFrame(state.scrollFrame);
+    state.track.removeEventListener('scroll', state.onScroll);
+    for (const image of state.images) {
+      image.removeEventListener('load', state.onImage); image.removeEventListener('error', state.onImage);
+      image.classList.remove('ct-photo-fit-image');
+    }
+    for (const slide of state.slides) slide.classList.remove('ct-photo-fit-slide');
+    for (const opener of state.openers) opener.classList.remove('ct-photo-fit-opener');
+    state.shell.classList.remove('ct-photo-fit-shell', 'ct-photo-fit-scroll-shell'); state.track.classList.remove('ct-photo-fit-track');
+    state.shell.style.removeProperty('--ct-photo-inline-height');
+    if (!state.shellHadStyle && !state.shell.style.length) state.shell.removeAttribute('style');
+    for (const [node, hadClass] of state.classPresence) if (!hadClass && node.getAttribute('class') === '') node.removeAttribute('class');
+    ctPhotoInlineFrames.delete(state.track);
+    if (!ctPhotoInlineFrames.size && ctPhotoInlineViewport) {
+      window.removeEventListener('resize', ctPhotoInlineViewport.update);
+      ctPhotoInlineViewport.viewport?.removeEventListener('resize', ctPhotoInlineViewport.update);
+      ctPhotoInlineViewport = null;
+    }
+  }
+  function ctPhotoInlinePrune() {
+    for (const state of ctPhotoInlineFrames.values()) if (!state.shell.isConnected || !state.track.isConnected ||
+        state.images.some(image => !image.isConnected || !state.shell.contains(image))) ctPhotoInlineRemove(state);
+  }
+  function ctPhotoInlineAltOpen(state) {
+    const image = state.images[state.index], slide = state.slides[state.index];
+    const scope = slide?.contains(image) && slide !== state.openers[state.index] ? slide : state.shell;
+    for (const control of scope.querySelectorAll(':scope > div.contents > button[aria-controls][aria-expanded="true"]')) {
+      const panel = document.getElementById(control.getAttribute('aria-controls'));
+      if (panel?.parentElement === control.parentElement && !panel.hidden &&
+          panel.matches('div.absolute.overflow-y-auto') && panel.querySelector(':scope > p.whitespace-pre-wrap.break-words') &&
+          panel.querySelector(':scope > button[type="button"].absolute > svg')) return true;
+    }
+    return false;
+  }
+  function ctPhotoInlineFit(shell, track, slides, openers, images, maxHeight = 510) {
+    if (!shell?.isConnected || !track?.isConnected || !images.length ||
+        images.some(image => image?.tagName !== 'IMG' || !shell.contains(image))) return;
+    let state = ctPhotoInlineFrames.get(track);
+    if (state && (state.shell !== shell || state.images.length !== images.length ||
+        state.images.some((image, index) => image !== images[index]) ||
+        state.slides.some((slide, index) => slide !== slides[index]) ||
+        state.openers.some((opener, index) => opener !== openers[index]))) { ctPhotoInlineRemove(state); state = null; }
+    if (state) { state.update(false); return state; }
+    state = { shell, track, slides, openers, images, index: 0, width: 0, pageWidth: 0, maxHeight, resizeFrame: null, scrollFrame: null,
+      shellHadStyle: shell.hasAttribute('style'),
+      classPresence: new Map([...new Set([shell, track, ...slides, ...openers, ...images])].map(node => [node, node.hasAttribute('class')])),
+      resources: new Map(images.map(image => [image, { signature: ctPhotoInlineSignature(image), current: image.currentSrc,
+        ready: !!ctPhotoInlineDimensions(image) }])) };
+    const selectedIndex = pageWidth => Math.max(0, Math.min(images.length - 1, Math.round(Math.abs(track.scrollLeft) / pageWidth)));
+    state.update = preserveIndex => {
+      if (!shell.isConnected || !track.isConnected || images.some(image => !image.isConnected || !shell.contains(image))) { ctPhotoInlineRemove(state); return; }
+      // Browser pinch zoom must keep the layout-sized photo available to pan.
+      if (ctPhotoViewportZoomed()) return;
+      const width = track.clientWidth || track.getBoundingClientRect().width;
+      if (!(width > 0)) return;
+      ctPhotoInlineBindViewport();
+      const gap = Number.parseFloat(getComputedStyle(track).columnGap) || 0;
+      if (!preserveIndex) state.index = selectedIndex(width + gap);
+      else if (state.scrollFrame !== null && state.pageWidth > 0) {
+        // If resize/load arrives before the next frame, resolve the pending
+        // selection in the old page coordinates before realigning.
+        state.index = selectedIndex(state.pageWidth);
+      }
+      if (state.scrollFrame !== null) {
+        cancelAnimationFrame(state.scrollFrame);
+        state.scrollFrame = null;
+      }
+      if (state.resizeFrame !== null) {
+        cancelAnimationFrame(state.resizeFrame);
+        state.resizeFrame = null;
+      }
+      const changedWidth = !!state.width && Math.abs(state.width - width) > .5;
+      state.width = width; state.pageWidth = width + gap;
+      const dimensions = ctPhotoInlineDimensions(images[state.index], state.resources.get(images[state.index]));
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const limit = Math.max(1, Math.min(state.maxHeight, viewportHeight * .70));
+      // Unknown and broken resources have a bounded neutral placeholder. Do
+      // not claim the first photo's metadata is this photo's decoded size.
+      // Keep the actual tiny/panoramic image at its own size while the
+      // transparent surrounding opener retains a 44px pointer target.
+      let height = Math.max(44, dimensions ? dimensions.height * Math.min(1, width / dimensions.width, limit / dimensions.height) : Math.min(240, limit));
+      // The native ALT popup is clipped by the photo page. While it is open,
+      // give its unchanged reader enough space; closing returns to photo size.
+      if (ctPhotoInlineAltOpen(state)) height = Math.max(height, Math.min(240, limit));
+      ctPhotoInlineStyles(); shell.classList.add('ct-photo-fit-shell');
+      if (track === shell && images.length > 1) shell.classList.add('ct-photo-fit-scroll-shell');
+      if (track !== shell) track.classList.add('ct-photo-fit-track');
+      slides.forEach(slide => slide.classList.add('ct-photo-fit-slide'));
+      openers.forEach(opener => opener.classList.add('ct-photo-fit-opener'));
+      images.forEach(image => image.classList.add('ct-photo-fit-image'));
+      const pixels = height + 'px';
+      if (shell.style.getPropertyValue('--ct-photo-inline-height') !== pixels) shell.style.setProperty('--ct-photo-inline-height', pixels);
+      if (changedWidth && preserveIndex && images.length > 1) {
+        const direction = getComputedStyle(track).direction === 'rtl' ? -1 : 1;
+        const target = direction * state.index * (width + gap);
+        if (Math.abs(track.scrollLeft - target) > 1) track.scrollLeft = target;
+      }
+    };
+    state.onScroll = () => {
+      if (state.scrollFrame !== null) return;
+      state.scrollFrame = requestAnimationFrame(() => {
+        state.scrollFrame = null;
+        if (ctPhotoInlineFrames.get(track) !== state || !track.isConnected ||
+            !shell.isConnected || ctPhotoViewportZoomed()) return;
+        if (!(state.pageWidth > 0)) { state.update(false); return; }
+        // Native scroll/snap remains in control. A scroll burst just needs
+        // the latest offset; movement within the same page cannot change fit.
+        const index = selectedIndex(state.pageWidth);
+        if (index === state.index) return;
+        state.index = index;
+        state.update(true);
+      });
+    };
+    state.scheduleResize = () => {
+      if (state.resizeFrame !== null) return;
+      state.resizeFrame = requestAnimationFrame(() => {
+        state.resizeFrame = null;
+        if (ctPhotoInlineFrames.get(track) === state) state.update(true);
+      });
+    };
+    state.onImage = event => {
+      const image = event.target;
+      state.resources.set(image, { signature: ctPhotoInlineSignature(image), current: image.currentSrc,
+        ready: event.type === 'load' && !!ctPhotoInlineDimensions(image) });
+      if (images[state.index] === image) state.update(true);
+    };
+    state.observer = new MutationObserver(records => {
+      for (const { target: image } of records) {
+        const resource = state.resources.get(image), signature = ctPhotoInlineSignature(image);
+        if (resource && resource.signature !== signature) state.resources.set(image, { signature, current: '', ready: false });
+      }
+      state.update(true);
+    });
+    for (const image of images) {
+      image.addEventListener('load', state.onImage); image.addEventListener('error', state.onImage);
+      state.observer.observe(image, { attributes: true, attributeFilter: ['src', 'srcset', 'sizes', 'width', 'height'] });
+    }
+    state.observer.observe(shell, { subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'hidden'] });
+    track.addEventListener('scroll', state.onScroll, { passive: true }); ctPhotoInlineFrames.set(track, state);
+    if (!ctPhotoInlineResize && typeof ResizeObserver === 'function') ctPhotoInlineResize = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const current = ctPhotoInlineFrames.get(entry.target);
+        if (current && Math.abs(current.track.clientWidth - current.width) > .5) current.scheduleResize();
+      }
+    });
+    ctPhotoInlineResize?.observe(track);
+    if (!ctPhotoInlineLifecycleBound) {
+      ctPhotoInlineLifecycleBound = true;
+      window.addEventListener('pagehide', () => { for (const current of ctPhotoInlineFrames.values()) ctPhotoInlineRemove(current); });
+    }
+    state.update(false);
+    return state;
+  }
+
     // Profile additions use Tweet's verified posts GET. Favorites are browser-local
   // snapshots, scoped to the signed-in account; no favorite-history endpoint is assumed.
   const ctProfileState = {
@@ -3412,6 +3678,17 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function ctProfileUID() {
     return typeof ctNetworkState !== 'undefined' ? ctProfileId(ctNetworkState.authUID) : null;
   }
+  function ctProfileAltText(value) {
+    // Optional first-party image description; retain its exact text, not UI.
+    // 1,000 code points bounds the native editor, not read-only API/archives.
+    // The existing request/backup byte limits bound resources separately.
+    return typeof value === 'string' ? value : '';
+  }
+  function ctProfileVisibleAltText(value) {
+    // Match the native visible-content boundary for AX only. Keep the raw
+    // description unchanged in snapshots/backups, including whitespace.
+    return typeof value === 'string' && /[^\p{Cf}\p{Default_Ignorable_Code_Point}\p{Z}\p{M}\p{Cc}\s\u115F\u1160\u3164\uFFA0\u2800]/u.test(value) ? value : '';
+  }
   function ctProfilePostEdited(post) {
     return post?.isEdited === true || (typeof post?.editedAt === 'string' && !!post.editedAt.trim());
   }
@@ -3421,7 +3698,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const url = ctProfileURL(asset?.public_url);
       if (url && ['image', 'video'].includes(asset?.media_type)) media.push({
         type: asset.media_type, url, poster: ctProfileURL(asset.thumbnail_url),
-        ...(asset.media_type === 'video' && asset.is_gif === true ? { isGIF: true } : {})
+        ...(asset.media_type === 'video' && asset.is_gif === true ? { isGIF: true } : {}),
+        ...(asset.media_type === 'image' && ctProfileAltText(asset.alt_text) ? { altText: asset.alt_text } : {})
       });
     }
     const image = ctProfileURL(post?.image);
@@ -3446,7 +3724,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       media: Array.isArray(item.media) ? item.media.slice(0, 16).filter(asset =>
         ['image', 'video'].includes(asset?.type) && ctProfileURL(asset.url)).map(asset => ({
           type: asset.type, url: ctProfileURL(asset.url), poster: ctProfileURL(asset.poster),
-          ...(asset.type === 'video' && asset.isGIF === true ? { isGIF: true } : {})
+          ...(asset.type === 'video' && asset.isGIF === true ? { isGIF: true } : {}),
+          ...(asset.type === 'image' && ctProfileAltText(asset.altText) ? { altText: asset.altText } : {})
         })) : []
       });
     }
@@ -3667,7 +3946,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-profile-viewer::backdrop{background:#000c}
       .ct-profile-viewer-stage{position:relative;box-sizing:border-box;display:grid;place-items:center;min-width:0;min-height:0;overflow:hidden;padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(env(safe-area-inset-left),env(safe-area-inset-right));touch-action:pan-y pinch-zoom}
       .ct-profile-viewer-zoomed .ct-profile-viewer-stage{touch-action:pan-x pan-y pinch-zoom}
-      .ct-profile-viewer img{display:block;width:100%;height:100%;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
+      .ct-profile-viewer img{display:block;width:auto;height:auto;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;margin:0}
       .ct-profile-photo-covered{opacity:0}
       .ct-profile-photo-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none}
       .ct-profile-photo-track{display:flex;width:100%;height:100%;will-change:transform}
@@ -3898,7 +4177,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       gallery: trigger.closest('.ct-profile-gallery'), sources: images.map(image => image.url).join('\n') };
     const show = () => {
       img.src = images[viewer.index].url;
-      img.alt = ctProfileText(`写真 ${viewer.index + 1}/${images.length}`, `Photo ${viewer.index + 1}/${images.length}`);
+      img.alt = ctProfileVisibleAltText(images[viewer.index].altText) || ctProfileText(`写真 ${viewer.index + 1}/${images.length}`, `Photo ${viewer.index + 1}/${images.length}`);
       count.textContent = `${viewer.index + 1} / ${images.length}`;
       previous.disabled = viewer.index === 0; next.disabled = viewer.index === images.length - 1;
     };
@@ -3934,6 +4213,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     ctProfileState.nativeSelection.clear();
     ctProfileState.panel?.remove(); ctProfileState.panel = null;
+    ctPhotoInlinePrune();
     ctProfileState.rendered = '';
     ctProfileCloseViewer();
   }
@@ -4138,6 +4418,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (panel.getAttribute('aria-labelledby') !== label) panel.setAttribute('aria-labelledby', label);
     if (ctProfileState.active === 'favorites') renderFavoritesPanel();
     else ctProfileRenderMedia();
+    ctProfileFitPhotos(panel);
   }
   function ctProfileStatus(text) {
     const el = document.createElement('div'); el.className = 'ct-profile-status'; el.textContent = text; return el;
@@ -4213,9 +4494,11 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       gallery.setAttribute('aria-label', ctProfileText('投稿の写真', 'Post photos'));
       for (const [index, asset] of images.entries()) {
         const photo = document.createElement('button'); photo.type = 'button'; photo.className = 'ct-profile-photo';
-        photo.setAttribute('aria-label', ctProfileText(`写真 ${index + 1}/${images.length}を拡大`, `Enlarge photo ${index + 1}/${images.length}`));
+        const action = ctProfileText(`写真 ${index + 1}/${images.length}を拡大`, `Enlarge photo ${index + 1}/${images.length}`);
+        const description = ctProfileVisibleAltText(asset.altText);
+        photo.setAttribute('aria-label', description ? `${action}: ${description}` : action);
         const image = document.createElement('img'); image.src = asset.url; image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
-        image.alt = ctProfileText(`投稿の写真 ${index + 1}/${images.length}`, `Post photo ${index + 1}/${images.length}`);
+        image.alt = description || ctProfileText(`投稿の写真 ${index + 1}/${images.length}`, `Post photo ${index + 1}/${images.length}`);
         photo.append(image); photo.onclick = () => ctProfileOpenViewer(images, index, photo); gallery.append(photo);
       }
       main.append(gallery);
@@ -4258,7 +4541,15 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (typeof ctMediaEnhanceVideo === 'function') {
       for (const video of panel.querySelectorAll('video.ct-profile-video[controls]')) ctMediaEnhanceVideo(video);
     }
+    ctProfileFitPhotos(panel);
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  }
+  function ctProfileFitPhotos(panel) {
+    ctPhotoInlinePrune();
+    for (const gallery of panel.querySelectorAll('.ct-profile-gallery')) {
+      const slides = [...gallery.querySelectorAll(':scope > .ct-profile-photo')];
+      ctPhotoInlineFit(gallery, gallery, slides, slides, slides.map(slide => slide.querySelector(':scope > img')), 480);
+    }
   }
   function ctProfileFavoriteMuteState() {
     const uid = ctProfileUID();
@@ -4451,8 +4742,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
           typeof item.createdAt !== 'string' || (item.createdAt && !ctTimestampParse(item.createdAt) && !Number.isFinite(Date.parse(item.createdAt))) ||
           (item.isEdited !== undefined && typeof item.isEdited !== 'boolean') ||
           !Array.isArray(item.media) || item.media.length > 16 || item.media.some(asset =>
-            !keys(asset, ['type', 'url', 'poster', 'isGIF']) || !['image', 'video'].includes(asset.type) ||
+            !keys(asset, ['type', 'url', 'poster', 'isGIF', 'altText']) || !['image', 'video'].includes(asset.type) ||
             (asset.isGIF !== undefined && (typeof asset.isGIF !== 'boolean' || (asset.isGIF && asset.type !== 'video'))) ||
+            (asset.altText !== undefined && (asset.type !== 'image' || typeof asset.altText !== 'string')) ||
             !asset.url || !safeURL(asset.url) || !safeURL(asset.poster))) throw new Error('format');
     }
     return ctProfileFavoriteItems(data.items);
@@ -4900,6 +5192,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (typeof ctMediaSlides === 'function') for (const grid of article.querySelectorAll('div.flex.snap-x.snap-mandatory.overflow-x-auto')) {
       for (const slide of ctMediaSlides(grid)) nodes.push(slide.firstElementChild);
     }
+    // 2.9 single images use a native button plus an optional sibling ALT panel.
+    // Do not infer identity from author-provided alt text or its wording.
+    for (const image of article.querySelectorAll('button[type="button"].cursor-pointer > img')) {
+      const button = image.parentElement, shell = button.parentElement;
+      if (button.children.length === 1 && shell?.matches('div.relative') &&
+          (button.matches('.block.w-full') && image.matches('img.w-full.object-cover') ||
+            button.matches('.block.h-full.w-full') && image.matches('img.h-full.w-full.object-contain') &&
+              shell.matches('.overflow-hidden.rounded-2xl.border.bg-black')) &&
+          shell.children.length <= 2 && (!shell.children[1] || shell.children[1].matches('div.contents'))) nodes.push(image);
+    }
     // The current native legacy-image branch uses a different alt; accept only
     // its exact direct image container, never a similarly named user image.
     for (const image of article.querySelectorAll('img[alt="Post media"].w-full.object-cover.cursor-pointer')) {
@@ -4908,10 +5210,20 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     }
     return [...new Set(nodes)].filter(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-user-content],.tl-user-text,[data-ct-owned],[data-ct-local-ui]'))
-      .slice(0, 16).map(el => ({type: el.tagName === 'VIDEO' ? 'video' : 'image',
-        url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : '',
-        ...(el.tagName === 'VIDEO' && /^(Animated GIF|GIFアニメーション|アニメーションGIF)$/.test(el.getAttribute('aria-label') || '')
-          ? {isGIF:true} : {})})).filter(asset => asset.url);
+      .slice(0, 16).map(el => {
+        const contents = el.tagName === 'IMG' && el.parentElement?.matches('button')
+          ? el.parentElement.parentElement?.querySelector(':scope > div.contents') : null;
+        const opener = contents?.querySelector(':scope > button[aria-controls][aria-expanded]');
+        const panel = opener && document.getElementById(opener.getAttribute('aria-controls'));
+        const description = panel && panel.parentElement === contents && panel.querySelector(':scope > p.whitespace-pre-wrap.break-words');
+        const altText = description && description.textContent === el.alt &&
+          /^(?:Show alt text|画像の説明文を表示)$/.test(opener.getAttribute('aria-label') || '') && ctProfileAltText(description.textContent);
+        return {type: el.tagName === 'VIDEO' ? 'video' : 'image',
+          url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : '',
+          ...(altText ? {altText} : {}),
+          ...(el.tagName === 'VIDEO' && /^(Animated GIF|GIFアニメーション|アニメーションGIF)$/.test(el.getAttribute('aria-label') || '')
+            ? {isGIF:true} : {})};
+      }).filter(asset => asset.url);
   }
 
   function ctFavoriteTranslationMetadataBlock(node) {
@@ -6426,10 +6738,16 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (!grid?.matches('div.flex.w-full.snap-x.snap-mandatory.overflow-x-auto.overscroll-x-contain') ||
         !grid.closest('main,article') || grid.closest('[data-ct-local-ui],[data-ct-owned]') ||
         !grid.parentElement?.matches('div.relative.overflow-hidden.rounded-2xl.border.bg-black')) return [];
-    const slides = [...grid.children];
-    if (slides.length < 2 || slides.length > 16 || slides.some(slide =>
-        !slide.matches('button[type="button"].relative.w-full.min-w-full.shrink-0.snap-start.bg-black') ||
-        slide.children.length !== 1 || !slide.firstElementChild.matches('img.h-full.w-full.object-cover') ||
+    const wrappers = [...grid.children];
+    // 2.9 wraps each native opener and its independent ALT popover in a slide.
+    // Return the opener in both versions; never bind swipe/open to ALT controls.
+    const slides = wrappers.map(slide => slide.matches('div.relative.w-full.min-w-full.shrink-0.snap-start.bg-black') &&
+      slide.children.length <= 2 && (!slide.children[1] || slide.children[1].matches('div.contents'))
+      ? slide.firstElementChild : slide);
+    if (slides.length < 2 || slides.length > 16 || slides.some((slide, index) =>
+        !(slide?.matches('button[type="button"].relative.w-full.min-w-full.shrink-0.snap-start.bg-black') ||
+          slide?.matches('button[type="button"].h-full.w-full.cursor-pointer') && slide.parentElement === wrappers[index]) ||
+        slide.children.length !== 1 || !slide.firstElementChild.matches('img.h-full.w-full:is(.object-cover,.object-contain)') ||
         !ctMediaQualityURL(slide.firstElementChild.src))) return [];
     const sources = slides.map(slide => slide.firstElementChild.src);
     return new Set(sources).size === sources.length ? slides : [];
@@ -6438,7 +6756,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const slides = ctMediaSlides(grid);
     if (!slides.length) return;
     const existing = ctMediaGalleries.get(grid);
-    if (existing) { existing.slides = slides; existing.shell.classList.add('ct-media-native-gallery'); return; }
+    const fit = () => ctPhotoInlineFit(grid.parentElement, grid, [...grid.children], slides, slides.map(slide => slide.firstElementChild));
+    if (existing) { existing.slides = slides; existing.shell.classList.add('ct-media-native-gallery'); fit(); return; }
     // Record the native opener only. Its scroll snap, dots, keyboard/click
     // handlers and counts remain untouched; no second inline carousel is made.
     const state = { grid, slides, shell: grid.parentElement };
@@ -6450,12 +6769,32 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     };
     grid.addEventListener('click', state.onClick, true);
     ctMediaGalleries.set(grid, state);
+    fit();
   }
   function ctMediaRemoveGallery(state) {
+    ctPhotoInlineRemove(ctPhotoInlineFrames.get(state.grid));
     state.shell.classList.remove('ct-media-native-gallery');
     state.grid.removeEventListener('click', state.onClick, true);
     ctMediaGalleries.delete(state.grid);
     if (ctMediaPendingViewer?.state === state) ctMediaPendingViewer = null;
+  }
+  function ctMediaSinglePhotoParts(image) {
+    const fluid = image.matches('img.w-full.object-cover') && [...image.classList].some(name => name.startsWith('max-h-['));
+    const framed = image.matches('img.h-full.w-full.object-contain');
+    if ((!fluid && !framed) || !image.closest('main,article') ||
+        image.closest('[data-ct-local-ui],[data-ct-owned]') || !ctMediaQualityURL(image.src)) return null;
+    const opener = image.parentElement, shell = opener?.parentElement;
+    if (!opener?.matches('button[type="button"].block.w-full.cursor-pointer') || opener.children.length !== 1 ||
+        !shell?.matches('div.relative') || shell.children.length > 2 ||
+        shell.children.length === 2 && !shell.children[1].matches('div.contents') ||
+        framed && (!opener.classList.contains('h-full') || !shell.matches('div.relative.overflow-hidden.rounded-2xl.border.bg-black'))) return null;
+    return { shell, opener };
+  }
+  function ctMediaFitSinglePhoto(image) {
+    const parts = ctMediaSinglePhotoParts(image);
+    if (!parts) return;
+    const state = ctPhotoInlineFit(parts.shell, parts.shell, [parts.opener], [parts.opener], [image]);
+    if (state) state.kind = 'nativeSingle';
   }
   function ctMediaNativePhotoViewer(dialog) {
     if (!dialog?.matches('div[role="dialog"][aria-modal="true"]:is([aria-label="Media viewer"],[aria-label="写真・動画ビューア"])') ||
@@ -6688,18 +7027,22 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (touch.pointer != null) try { touch.capture?.releasePointerCapture(touch.pointer); } catch {}
   }
   function ctMediaViewport(dialog) {
+    const wasZoomed = dialog.classList.contains('ct-media-photo-zoomed');
     const fit = ctPhotoViewportFit(dialog, '--ct-media-view-');
     dialog.classList.toggle('ct-media-photo-zoomed', fit.zoomed);
-    if (ctMediaViewer?.dialog === dialog && (fit.zoomed || fit.changed)) {
+    // Once pinch has cancelled a swipe, subsequent zoomed pan events have
+    // fixed layout bounds and need no native gallery rescan.
+    if (ctMediaViewer?.dialog === dialog && (fit.zoomed !== wasZoomed || fit.changed)) {
       ctMediaCancelPhotoGesture(ctMediaViewer); ctMediaEnhanceViewer();
     }
   }
   function ctMediaCenterViewers() {
     for (const [dialog, state] of ctMediaCenteredViewers) {
       if (dialog.isConnected && ctMediaNativePhotoViewer(dialog)) continue;
-      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed');
+      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed', 'ct-media-native-alt-viewer');
       state.stage.classList.remove('ct-media-viewer-stage');
       state.header?.classList.remove('ct-media-viewer-header');
+      state.alt?.classList.remove('ct-media-viewer-alt');
       ctMediaReleasePhotoQuality(dialog);
       for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
       ctMediaCenteredViewers.delete(dialog);
@@ -6710,14 +7053,19 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       const { image, stage, header } = native;
       const previous = ctMediaCenteredViewers.get(dialog);
       if (previous && previous.stage !== stage) previous.stage.classList.remove('ct-media-viewer-stage');
+      const alt = [...dialog.children].find(el => el.matches('p[aria-hidden="true"].whitespace-pre-wrap.break-words') &&
+        el.firstElementChild?.matches('span') && el.firstElementChild.textContent.trim() === 'ALT');
+      if (previous?.alt && previous.alt !== alt) previous.alt.classList.remove('ct-media-viewer-alt');
       dialog.classList.add('ct-media-centered-viewer');
+      dialog.classList.toggle('ct-media-native-alt-viewer', !!alt);
+      alt?.classList.add('ct-media-viewer-alt');
       // Contained native viewers remain inside their existing modal. Only the
       // verified fixed viewer follows the visible viewport on mobile browsers.
       dialog.classList.toggle('ct-media-viewport-viewer', dialog.classList.contains('fixed'));
       stage.classList.add('ct-media-viewer-stage');
       header?.classList.add('ct-media-viewer-header');
       ctMediaAttachPhotoQuality(dialog, image);
-      ctMediaCenteredViewers.set(dialog, { stage, header });
+      ctMediaCenteredViewers.set(dialog, { stage, header, alt });
       ctMediaViewport(dialog);
     }
     if (ctMediaViewportBound) return;
@@ -7130,6 +7478,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
       .ct-media-photo-resolution { padding:5px 8px; background:#0009; border-radius:4px; white-space:nowrap; }
       .ct-media-photo-quality[hidden],.ct-media-photo-quality [hidden] { display:none!important; }
       .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
+      .ct-media-native-alt-viewer > .ct-media-viewer-stage { position:relative!important; inset:auto!important; height:auto!important; flex:1 1 0%; padding-bottom:12px!important; }
+      .ct-media-native-alt-viewer > .ct-media-viewer-alt { position:relative; z-index:2; box-sizing:border-box; width:100%; max-height:min(8rem,30%); flex-shrink:0; overflow-y:auto; margin-bottom:calc(96px + env(safe-area-inset-bottom))!important; }
+      .ct-media-native-alt-viewer .ct-media-photo-pane { padding-bottom:12px; }
       .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
       .ct-media-swipe-stage { touch-action:pan-y pinch-zoom; }
       .ct-media-photo-zoomed .ct-media-swipe-stage { touch-action:pan-x pan-y pinch-zoom; }
@@ -7158,6 +7509,8 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
   function ctMediaEnhance(root = document) {
     ctMediaStyles();
+    ctPhotoInlinePrune();
+    for (const state of ctPhotoInlineFrames.values()) if (state.kind === 'nativeSingle' && !ctMediaSinglePhotoParts(state.images[0])) ctPhotoInlineRemove(state);
     for (const [dialog, state] of ctMediaPhotoQuality) {
       if (!dialog.isConnected || !state.image.isConnected || !dialog.contains(state.image)) ctMediaReleasePhotoQuality(dialog);
     }
@@ -7174,6 +7527,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     const grids = [...root.querySelectorAll?.('div.flex.snap-x.snap-mandatory.overflow-x-auto') || []];
     if (root.matches?.('div.flex.snap-x.snap-mandatory.overflow-x-auto')) grids.push(root);
     grids.forEach(ctMediaObserveGallery);
+    const singles = [...root.querySelectorAll?.('img.w-full:is(.object-cover,.object-contain)') || []];
+    if (root.matches?.('img.w-full:is(.object-cover,.object-contain)')) singles.push(root);
+    singles.forEach(ctMediaFitSinglePhoto);
     const videos = [...root.querySelectorAll?.('video[controls]') || []];
     if (root.matches?.('video[controls]')) videos.push(root);
     videos.forEach(ctMediaEnhanceVideo);
@@ -7953,6 +8309,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     ['Profile', 'プロフィール'],
     ['Settings', '設定'],
     ['Terms', '利用規約'],
+    ['Child Safety', '子どもの安全'],
     ['Rules', 'ルール'],
     ['About', 'サービスについて'],
     ['Change', '変更'],
@@ -8425,6 +8782,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
 
   function ctLocalizationRecordAllowed(record) {
     const el = record.attribute ? record.node : record.node.parentElement;
+    // Tweet 2.9 uses image alt for author-provided descriptions, including text
+    // that looks exactly like an old native placeholder. Never localize it.
+    if (record.attribute === 'alt' && el?.matches('img')) return false;
     if (el?.closest('[aria-label="Post preview"],[aria-label="投稿プレビュー"]') &&
         !(record.attribute === 'aria-label' && nativeLocalizationGameContext(el, record.attribute)?.kind === 'share-preview')) return false;
     return !!el && !el.closest('[id^="ct-"],[data-ct-owned],[data-ct-local-ui],[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],[contenteditable]:not([contenteditable="false"]),.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]') &&
@@ -9242,7 +9602,7 @@ if (/^just\s+now$/i.test(t)) {
     }
     let match;
     if (context.kind === 'translation-message' && (match = text.match(/^Translated from (.{1,80})$/))) return `${languages.find(entry => entry[1] === match[1])?.[2] || JP.get(match[1]) || match[1]}から翻訳`;
-    if (context.kind === 'language' && el.matches('option[value=""]') && (match = text.match(/^Browser language \((.{1,80})\)$/))) return `ブラウザの言語（${languages.find(entry => entry[1] === match[1])?.[2] || JP.get(match[1]) || match[1]}）`;
+    if (context.kind === 'language' && el.matches('option[value=""]') && (match = text.match(/^(Browser|Device) language \((.{1,80})\)$/))) return `${match[1] === 'Device' ? '端末' : 'ブラウザ'}の言語（${languages.find(entry => entry[1] === match[2])?.[2] || JP.get(match[2]) || match[2]}）`;
     if (context.kind === 'notified' && el === context.header.querySelector(':scope > p') &&
         (match = text.match(/^You get a notification when these accounts post\. Turn it on from the bell on a profile you follow, for up to (\d{1,5}) accounts\.$/))) return `このアカウントがツイートすると通知します。フォロー中のプロフィールのベルから、最大${match[1]}アカウントまで設定できます。`;
     if (context.kind === 'notified' && attr === 'aria-label' &&
@@ -9728,11 +10088,14 @@ if (/^just\s+now$/i.test(t)) {
 
   function isProtectedLocalizationElement(el) {
     if (!el?.isConnected || isOwnedLocalizationElement(el)) return true;
+    if (el.closest('button[data-nest-pill]') ||
+        el.closest('h3[id$="-feed"]')?.closest('[role="dialog"][aria-modal="true"]')?.querySelector('a[data-guide-link="perchOverview"]')) return true;
     if (el.closest(
       'textarea,input,select,option,script,style,code,pre,kbd,samp,svg,' +
       '[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,' +
       '[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"],' +
       '[aria-label="Post preview"],[aria-label="投稿プレビュー"],' +
+      'ul[aria-label="Choose a GIF"] li,ul[aria-label="GIFを選択"] li,' +
       '.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"]'
     )) return true;
     // Native settings navigation also truncates its static labels. Keep the
@@ -9845,6 +10208,365 @@ if (/^just\s+now$/i.test(t)) {
       button.querySelector(':scope > svg[aria-hidden="true"]') && clean(badge?.textContent) === 'GIF' ? root : null;
   }
 
+  // Tweet 2.8 owns the KLIPY picker, its query and all selected GIF metadata.
+  // Translate only the verified sheet chrome, never result titles or queries.
+  function nativeGIFPickerJapaneseText(el, text, attr = null) {
+    if (!el || typeof text !== 'string' || isOwnedLocalizationElement(el) || el.closest(
+      '[data-user-content],[translate="no"],.notranslate,.tl-user-text,[data-testid="tweet-text"],' +
+      '[data-testid="profile-bio"],blockquote,[aria-label^="Quoted post"]')) return null;
+    const opener = el.closest('button[aria-haspopup="dialog"]');
+    if (opener && nativeLocalizationMediaUpload(opener) &&
+        /^(?:Add a GIF|GIFを追加)$/.test(opener.getAttribute('aria-label') || '') &&
+        clean(opener.querySelector(':scope > span[aria-hidden="true"]')?.textContent) === 'GIF') {
+      return (el === opener && attr === 'aria-label' && text === 'Add a GIF') ||
+        (el.parentElement === opener && !el.hasAttribute('aria-hidden') && !attr && text === 'Add GIF') ? 'GIFを追加' : null;
+    }
+    const dialog = el.closest('div[role="dialog"][aria-modal="true"].relative.flex.flex-col.border.border-tl-app-border.bg-tl-app-card');
+    if (!dialog || !/^(?:Choose a GIF|GIFを選択)$/.test(dialog.getAttribute('aria-label') || '')) return null;
+    const search = dialog.querySelector(':scope > div.border-b > label.relative.flex-1 > input[type="search"][maxlength="100"]');
+    const header = search?.parentElement?.parentElement;
+    const scroller = dialog.querySelector(':scope > div.flex-1.overflow-y-auto');
+    const close = header?.querySelector(':scope > button.h-11.w-11');
+    if (!search || !scroller || !close || !/^(?:Close|閉じる)$/.test(close.getAttribute('aria-label') || '') ||
+        !/^(?:Search KLIPY|KLIPYでGIFを検索)$/.test(search.getAttribute('placeholder') || '')) return null;
+    if (attr === 'placeholder') return el === search && text === 'Search KLIPY' ? 'KLIPYでGIFを検索' : null;
+    if (attr === 'aria-label') {
+      if (el === dialog || el.matches('ul') && el.parentElement === scroller) return text === 'Choose a GIF' ? 'GIFを選択' : null;
+      if (el === close) return text === 'Close' ? '閉じる' : null;
+      if (el.matches('button') && el.parentElement === search.parentElement) return text === 'Clear search' ? '検索をクリア' : null;
+      return null;
+    }
+    if (attr || el.closest('ul')) return null;
+    if (el.matches('span.sr-only') && el.parentElement === search.parentElement) return text === 'Search GIFs' ? 'GIFを検索' : null;
+    if (el.matches('h3') && el.parentElement === scroller) return text === 'Trending' ? '人気のGIF' : null;
+    const status = el.closest('div[role="status"][aria-live="polite"]');
+    if (!status || status.parentElement !== scroller) return null;
+    return new Map([
+      ['Loading GIFs…', 'GIFを読み込み中…'],
+      ['GIF search is busy. Try again in a moment.', 'GIF検索が混み合っています。少し待ってからお試しください。'],
+      ["You're offline. Connect to search for GIFs.", 'オフラインです。GIFを検索するには接続してください。'],
+      ["Couldn't load GIFs.", 'GIFを読み込めませんでした。'], ['Try again', '再試行']
+    ]).get(text) || null;
+  }
+
+  // Verified 2.9 ALT chrome only. Description text, image alt and textarea
+  // values remain user content even when they equal a known UI label.
+  function nativeAltJapaneseText(el, text, attr = null) {
+    if (!el || typeof text !== 'string' || isOwnedLocalizationElement(el) || el.closest(
+      '[data-user-content],[translate="no"],.notranslate,.tl-user-text,[data-testid="tweet-text"],[data-testid="profile-bio"],blockquote,[aria-label^="Quoted post"]')) return null;
+    if (attr === 'aria-label' && el.matches('button[type="button"].absolute.bottom-2.right-2') &&
+        el.parentElement?.querySelector(':scope > img.w-full.h-full.object-cover') && nativeLocalizationMediaUpload(el)) {
+      const match = /^(Add alt text to|Edit alt text for) image ([1-5])$/.exec(text);
+      if (match) return `写真${match[2]}の説明文を${match[1] === 'Add alt text to' ? '追加' : '編集'}`;
+    }
+    const contents = el.closest('div.contents');
+    const opener = contents?.querySelector(':scope > button[aria-controls][aria-expanded]');
+    const panel = opener && document.getElementById(opener.getAttribute('aria-controls'));
+    const close = panel?.querySelector(':scope > button[type="button"].absolute.right-1\\.5.top-1\\.5');
+    if (panel?.parentElement === contents && panel.matches('div.absolute.overflow-y-auto') &&
+        panel.querySelector(':scope > p.whitespace-pre-wrap.break-words') && close?.querySelector(':scope > svg') &&
+        /^(?:Show alt text|画像の説明文を表示)$/.test(opener.getAttribute('aria-label') || '')) {
+      if (attr === 'aria-label' && el === opener && text === 'Show alt text') return '画像の説明文を表示';
+      if (attr === 'aria-label' && el === close && text === 'Close alt text') return '画像の説明文を閉じる';
+      return null;
+    }
+    const dialog = el.closest('div[role="dialog"][aria-modal="true"].flex.max-h-full.w-full.max-w-lg.flex-col.border.border-tl-app-border.bg-tl-app-card');
+    const heading = dialog && document.getElementById(dialog.getAttribute('aria-labelledby'));
+    const textarea = dialog?.querySelector(':scope > textarea');
+    const label = dialog?.querySelector(':scope > label');
+    const descriptions = textarea?.getAttribute('aria-describedby')?.split(/\s+/).map(id => document.getElementById(id));
+    const actions = dialog?.querySelector(':scope > div.mt-4.flex.justify-end.gap-2');
+    if (!heading?.matches('h3') || heading.parentElement !== dialog ||
+        !/^(?:Describe this image|画像の説明を追加)$/.test(clean(heading.textContent)) ||
+        textarea?.id !== `${heading.id}-text` || label?.htmlFor !== textarea.id ||
+        descriptions?.length !== 2 || descriptions.some(node => !node || !dialog.contains(node)) ||
+        !dialog.querySelector(':scope > div.bg-black > img.object-contain') ||
+        actions?.children.length !== 2 || ![...actions.children].every(button => button.matches('button[type="button"]'))) return null;
+    if (attr || el.closest('textarea,input') || el === descriptions[1]) return null;
+    if (el === heading && text === 'Describe this image') return '画像の説明を追加';
+    if (el === label && text === 'Alt text') return '画像の説明文';
+    if (el === descriptions[0] && text === "Describe what's in the image for people who can't see it.") return '画像を見ることができない人に伝わるよう、写っている内容を説明してください。';
+    if (el.matches('p.sr-only[aria-live="polite"]') && el.parentElement === dialog && text === 'Limit of 1,000 characters reached.') return '1,000文字の上限に達しました。';
+    if (el.parentElement === actions) return new Map([['Cancel', 'キャンセル'], ['Save', '保存']]).get(text) || null;
+    return null;
+  }
+
+  // Nest names, descriptions, norms and hashtags belong to their authors.
+  // Identify Tweet 2.11's own controls and metadata before matching its labels.
+  function nativeNestJapaneseText(el, text, attr = null, node = null) {
+    if (!el?.isConnected || typeof text !== 'string') return null;
+    const words = nativeNestJapaneseText.words ||= new Map([
+      ['Nests', 'ネスト'], ['Nest', 'ネスト'], ['All Nests', 'すべてのネスト'], ['Your Nests', '参加中のネスト'],
+      ['More Nests', 'ほかのネスト'], ['Nests to explore', 'ネストを探す'], ['Nests for you', 'おすすめのネスト'],
+      ['See all Nests', 'すべてのネストを見る'], ['How Nests work', 'ネストの使い方'], ['Learn more', '詳しく見る'],
+      ['A Nest is a home for a Flock: people who share a topic. Joining is always optional, and your feed works the same without it.',
+        'ネストは、同じ話題を楽しむ仲間が集まる場所です。参加は自由で、参加しなくてもタイムラインはこれまでどおり使えます。'],
+      ['Create a Nest', 'ネストを作成'], ['Loading Nest…', 'ネストを読み込み中…'], ['Loading Nests…', 'ネストを読み込み中…'],
+      ['Loading your Nests…', '参加中のネストを読み込み中…'], ['No Nests yet.', 'まだネストがありません。'],
+      ["You're in every Nest listed.", '一覧のネストにはすべて参加しています。'],
+      ["Couldn't load Nests", 'ネストを読み込めませんでした'], ["Couldn't load this Nest", 'ネストを読み込めませんでした'],
+      ["Couldn't load Nests. Try again later.", 'ネストを読み込めませんでした。しばらくしてからお試しください。'],
+      ["This Nest doesn't exist", 'このネストは見つかりません'], ['Draft Nest', 'ネストの下書き'], ['Drafts', '下書き'],
+      ['Show pinned Nests', '固定したネストを表示'], ['Hide pinned Nests', '固定したネストを隠す'],
+      ['Pinned Nests', '固定したネスト'], ['Your pinned Nests', '固定したネスト'], ['(new posts)', '（新着あり）'],
+      ['Nest sections', 'ネストのタブ'], ['Tweets', 'ツイート'], ['Flock', 'メンバー'], ['Norms', 'ルール'], ['Events', 'イベント'],
+      ['Nest norms', 'ネストのルール'], ['Coming up', '今後の予定'], ['Coming later', '今後追加予定'],
+      ['Events in a Nest come later.', 'ネストのイベント機能は今後追加予定です。'], ['Flock you may know', '知り合いかもしれないメンバー'],
+      ["This Nest hasn't added norms of its own.", 'このネスト独自のルールはまだありません。'],
+      ["Only members see this Nest's norms.", 'このネストのルールはメンバーだけに表示されます。'],
+      ["Tweet's rules apply here like everywhere else. Norms can add, never loosen.", 'ここでもTweetのルールが適用されます。ネスト独自のルールは追加できますが、Tweetのルールを緩めることはできません。'],
+      ['Public', '公開'], ['Private', '非公開'], ['Hidden', '非表示'], ['Owner', '管理者'], ['Invite only', '招待制'],
+      ['Invite', '招待する'], ['Edit Nest', 'ネストを編集'], ['Join', '参加する'], ['Joined', '参加済み'], ['Leave', '退出する'],
+      ['Request to join', '参加を申請する'], ['Requested', '申請済み'], ['Cancel', 'キャンセル'], ['Report this Nest', 'このネストを報告'],
+      ['Pin to Home', 'ホームに固定'], ['Pinned', '固定済み'], ['Unpin from Home', 'ホームの固定を解除'],
+      ['Pin', '固定'], ['Unpin', '固定を解除'], ['Open Nest', 'ネストを開く'],
+      ['Description', '説明'], ['Images', '画像'], ['Cover photo', 'カバー画像'], ['Nest picture', 'ネストのアイコン'],
+      ['Change cover photo', 'カバー画像を変更'], ['Change nest picture', 'ネストのアイコンを変更'],
+      ['Remove cover photo', 'カバー画像を削除'], ['Remove nest picture', 'ネストのアイコンを削除'],
+      ['Uploading cover photo…', 'カバー画像をアップロード中…'], ['Uploading nest picture…', 'ネストのアイコンをアップロード中…'],
+      ['Name', '名前'], ['Hashtags', 'ハッシュタグ'], ['Hashtags (optional)', 'ハッシュタグ（任意）'],
+      ['Norms (optional)', 'ルール（任意）'], ['Add a norm', 'ルールを追加'], ['Who can see it', '公開範囲'],
+      ['Who it\'s for and what people do there.', 'どんな人が集まり、どんな話をする場所か。'],
+      ['1 to 5, separated by spaces. Public posts with any of them also show in the Nest. Other Nests can use the same hashtags.',
+        '1〜5個を空白で区切って入力します。このハッシュタグの公開投稿もネストに表示され、ほかのネストでも同じタグを使えます。'],
+      ['Up to 5. Only labels that help people find it: posts with these tags stay out of the Nest.',
+        '5個まで。ネストを見つけるための目印です。このタグを付けた投稿はネストに表示されません。'],
+      ['Anyone can see and join. Posts also show in the main feed.', '誰でも閲覧・参加できます。投稿はメインのタイムラインにも表示されます。'],
+      ['Invite only. People can find it and ask to be invited, but only members see posts.', '招待制。ネストの検索と参加申請は誰でもでき、投稿はメンバーだけが閲覧できます。'],
+      ['Invite only, and only members know it exists.', '招待制。ネストの存在が分かるのはメンバーだけです。'],
+      ['(now)', '（現在）'], ['A Nest needs a description.', 'ネストの説明を入力してください。'],
+      ['A public Nest needs at least one.', '公開ネストにはハッシュタグが1個以上必要です。'],
+      ['Use up to 5 hashtags.', 'ハッシュタグは5個までです。'],
+      ['A Nest can have up to 5 hashtags. Remove the extras.', 'ハッシュタグは5個までです。余分なタグを削除してください。'],
+      ["The Nest's web address stays the same, so old links keep working.", 'ネストのURLは変わらないため、以前のリンクも使えます。'],
+      ['You can make a Nest more private, never less. Members joined on that promise.', '公開範囲は狭められます。後から広げることはできません。'],
+      ["Choose carefully. Once it's live you can make it more private, but never less: a private or hidden Nest can't be made public again.",
+        '公開後は公開範囲を狭めることだけができます。非公開や非表示にすると、公開には戻せません。'],
+      ['Show public posts with these hashtags', 'このハッシュタグの公開ツイートを表示'],
+      ['Posts from anyone that use one of the hashtags also show in the Nest, labeled with the tag. Members can still choose to see only posts made here.',
+        '対象のハッシュタグが付いた公開ツイートもタグ付きで表示します。メンバーはネスト内の投稿だけに絞れます。'],
+      ['Members can invite people', 'メンバーも招待できる'], ['Off means only you can invite.', 'オフにすると招待できるのはあなたのみです。'],
+      ['Off means only you can invite. You can change this later.', 'オフにすると招待できるのはあなたのみです。後から変更できます。'],
+      ['Private and hidden don\'t mean unmoderated. Tweet\'s rules still apply: posts here are checked like any other, and moderators can remove posts and block accounts that break them.',
+        '非公開・非表示でもTweetのルールが適用されます。投稿は確認の対象となり、違反した投稿の削除やアカウントのブロックが行われることがあります。'],
+      ['Changes to the name, description, images, norms and hashtags are checked like any post before they show.',
+        '名前・説明・画像・ルール・ハッシュタグの変更は、表示前に通常の投稿と同様に確認されます。'],
+      ['Preview how it will look', '見え方をプレビュー'], ['Publish', '公開する'], ['Publishing…', '公開中…'],
+      ['Save draft', '下書きを保存'], ['Save', '保存'], ['Saving…', '保存中…'], ['Delete draft', '下書きを削除'],
+      ['Delete this Nest', 'このネストを削除'], ['Delete Nest', 'ネストを削除'], ['Leave this Nest', 'このネストから退出'],
+      ['Hand this Nest over', 'ネストの管理を引き継ぐ'],
+      ['Anyone can see this. It also shows in the main feed.', '誰でも閲覧でき、メインのタイムラインにも表示されます。'],
+      ["Only members see this, and Tweet's rules still apply. It can't be reposted or quoted outside the Nest.",
+        'メンバーだけが閲覧でき、Tweetのルールが適用されます。ネストの外ではリツイートや引用はできません。'],
+      ['Nest invites', 'ネストへの招待'], ['Choose who can invite you to a Nest.', 'ネストに招待できる相手を選びます。'],
+      ['Choose who can invite you to join a Nest.', 'ネストに招待できる相手を選びます。'],
+      ['Who can invite you to a Nest', 'ネストに招待できる相手'], ['No one', '誰からも受け取らない'],
+      ['Nobody can invite you to a Nest. You can still join public Nests.', '招待は届きませんが、公開ネストには参加できます。'],
+      ["Couldn't load your Nest invite setting.", 'ネストの招待設定を読み込めませんでした。']
+    ]);
+    if (!words.has(text) && !/^(?:Edit|Join|Joined|Pinned\. Unpin|Pin to Home:|Norm|Remove norm|Yes, delete|Public Nest|Private Nest|Hidden Nest|Post in|Posting in|Started|Always shown|Up to|, up to|characters each\.|in the Flock|new$|"$|For anyone keeping|[\d,]+ in the Flock|[A-Za-z]{3} \d{4}$)/u.test(text)) return null;
+    if (isOwnedLocalizationElement(el) || el.closest(
+      'article,blockquote,.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[data-user-content],[translate="no"],.notranslate,' +
+      '[contenteditable]:not([contenteditable="false"]),[data-testid="tweet-text"],[data-testid="profile-bio"]')) return null;
+    const path = location.pathname.replace(/\/$/, '');
+    const listing = path === '/nests';
+    const creation = /^\/nests\/new(?:\/|$)/.test(path);
+    const detail = path.startsWith('/nests/') && !creation;
+    const main = el.closest('main');
+    const truncated = el.closest('.truncate,[class*="line-clamp-"]');
+    const edit = el.closest('[role="dialog"][aria-modal="true"][aria-labelledby="nest-settings-title"]');
+    const form = el.closest('form');
+    const nestForm = form && ((edit && form.querySelector('textarea[data-nest-field="description"][maxlength="500"]')) ||
+      (creation && main && form.querySelector('input[name="nest-visibility"]') && form.querySelector('textarea[maxlength="500"]')));
+    if (nestForm && !truncated && !el.closest('details > div[inert]')) {
+      if (attr === 'placeholder' && el.matches('textarea[maxlength="500"]') && text === 'For anyone keeping something green alive indoors…') return 'どんなネストか、気軽に紹介してみよう…';
+      if (attr === 'aria-label') {
+        const norm = /^(Remove norm|Norm) ([1-5])$/.exec(text);
+        if (norm && el.closest('fieldset')?.querySelector('textarea[maxlength="200"]')) return norm[1] === 'Norm' ? `ルール ${norm[2]}` : `ルール ${norm[2]}を削除`;
+        if (el.matches('button') && /^Remove (?:cover photo|nest picture)$/.test(text) &&
+            el.parentElement?.querySelector('input[type="file"][accept="image/*"]')) return words.get(text);
+      }
+      if (attr || el.matches('textarea,input,option') || el.closest('button:has(img)')) return null;
+      if (text === 'Up to' && node?.nextSibling?.nodeValue === '5' && node.parentElement.previousElementSibling?.matches('legend')) return '最大';
+      if (text === ', up to' && node?.previousSibling?.nodeValue === '5' && node.nextSibling?.nodeValue === '200') return '項目、各';
+      if (text === "characters each. They add to Tweet's rules." && node?.previousSibling?.nodeValue === '200') return '文字まで。Tweetのルールに加えて適用されます。';
+      if (text === 'Always shown: "' && node?.previousSibling?.nodeName?.toLowerCase() === 'svg') return '常に表示：「';
+      if (text === '"' && clean(node?.previousSibling?.nodeValue) === words.get("Tweet's rules apply here like everywhere else. Norms can add, never loosen.")) return '」';
+      if (/^Yes, delete .+$/u.test(text) && el.matches('button') && el.closest('fieldset.border-t')) return `「${text.slice(12)}」を削除する`;
+      return words.get(text) || null;
+    }
+    if (edit && el.matches('h2#nest-settings-title') && !attr && node === el.firstChild && /^Edit\s/.test(node.nodeValue)) {
+      // The heading contains a separate React text node for the original name.
+      return node.nextSibling ? 'ネストを編集：' : `ネストを編集：${node.nodeValue.slice(5)}`;
+    }
+    const pinGroup = el.closest('#sidebar-pinned-nests,#menu-pinned-nests');
+    if (pinGroup && !truncated) {
+      if (attr === 'aria-label' && el === pinGroup) return words.get(text) || null;
+      if (!attr && (text === 'All Nests' && el.matches('#menu-pinned-nests > li:first-child > button') || text === 'new' && el.matches('span.sr-only'))) return text === 'new' ? '件の新着' : words.get(text);
+    }
+    if (el.matches('button[data-testid="sidebar-pinned-nests-toggle"]') && (attr === 'title' || attr === 'aria-label')) return words.get(text) || null;
+    const nav = el.closest('aside nav button,button[data-testid="menu-nests-row"]');
+    if (!attr && nav?.querySelector(':scope > span > svg:is([data-icon="nest"],[data-icon="nest-filled"])') && el.parentElement === nav && el.matches('span')) {
+      return words.get(text) || null;
+    }
+    const guide = el.closest('a[data-guide-link="nestsOverview"],a[data-guide-link="nestsOneWay"]');
+    if (guide && (!attr || attr === 'title' || attr === 'aria-label')) return words.get(text) || null;
+    if (!attr && listing && main && el.matches('p') && el.querySelector(':scope > a[data-guide-link="nestsOverview"]')) return words.get(text) || null;
+    const composer = el.closest('[data-nest-composer]');
+    if (composer && !truncated) {
+      const post = /^(?:Post in) (.+)$/u.exec(text);
+      if (post && (attr === 'placeholder' || attr === 'aria-label') && el.matches('textarea')) return `「${post[1]}」にツイート`;
+      if (!attr && text === 'Posting in' && node?.nextSibling?.matches?.('strong')) return 'ツイート先：';
+      if (!attr && el.parentElement?.matches('p.flex.items-start.text-tl-app-text-muted') && el.matches('span')) return words.get(text) || null;
+    }
+    if (path === '/settings' && main) {
+      const settingsRow = el.closest('nav button');
+      const hint = settingsRow?.querySelector('span.truncate.text-tl-app-text-muted');
+      const inviteOptions = el.closest('fieldset')?.querySelector('input[name="nest-invites-from"]');
+      if (!attr && (inviteOptions || hint && /^(?:Choose who can invite you to a Nest\.|ネストに招待できる相手を選びます。)$/.test(clean(hint.textContent)) ||
+          !truncated && /^(?:Nest invites|Choose who can invite you to join a Nest\.|Couldn't load your Nest invite setting\.)$/.test(text))) return words.get(text) || null;
+    }
+    const tabs = el.closest('[role="tablist"][aria-label="Nest sections"],[role="tablist"][aria-label="ネストのタブ"]');
+    if (tabs && (attr === 'aria-label' && el === tabs || !attr && el.closest('[role="tab"][aria-controls^="nest-"]'))) return words.get(text) || null;
+    const directory = el.closest('section[aria-labelledby="nests-your-nests"],section[aria-labelledby="nests-more-nests"],section[aria-labelledby="nests-nests-to-explore"]');
+    const rail = el.closest('section[aria-labelledby^="nest-norms-"],section[aria-labelledby^="nest-coming-up-"],section[aria-labelledby^="nest-flock-"]');
+    const header = detail && main && el.closest('div.overflow-x-clip')?.querySelector(':scope > div.px-4 > p.tl-user-text');
+    if (attr && (directory || header)) {
+      if (attr === 'title' && el.matches('button') && /^(?:Pin to Home|Unpin from Home|Report this Nest)$/.test(text)) return words.get(text);
+      if (attr === 'aria-label' && el.matches('button[aria-pressed]')) {
+        const join = /^(?:Join (.+)|Joined (.+)\. Leave)$/u.exec(text);
+        if (join) return join[1] ? `「${join[1]}」に参加` : `「${join[2]}」から退出`;
+        const pin = /^(?:Pin to Home: (.+)|Pinned\. Unpin (.+) from Home)$/u.exec(text);
+        if (pin) return pin[1] ? `「${pin[1]}」をホームに固定` : `「${pin[2]}」の固定を解除`;
+      }
+    }
+    if (attr) return null;
+    if (header && el.matches('p.inline-flex.items-center.text-tl-app-text-muted')) {
+      const visibility = /^(Public|Private|Hidden) Nest · (?:Owner (@[^\s]+)|(Waiting for a new owner))$/u.exec(text);
+      if (visibility) return `${words.get(visibility[1])}ネスト · ${visibility[2] ? `管理者 ${visibility[2]}` : '管理者の引き継ぎ待ち'}`;
+    }
+    if (directory && el.matches('span.truncate.text-tl-app-text-muted')) {
+      const count = /^([\d,]+) in the Flock · (Public|Private|Hidden)$/.exec(text);
+      if (count) return `メンバー${count[1]}人 · ${words.get(count[2])}`;
+    }
+    if (header && text === 'in the Flock' && el.matches('button') && node?.previousSibling?.matches?.('strong')) return '人のメンバー';
+    if (header && text === 'Started' && el.matches('span.inline-flex') && node?.nextSibling?.nodeType === Node.TEXT_NODE) return '開設：';
+    if (header && el.matches('span.inline-flex') && /^(?:Started|開設：)$/.test(clean(node?.previousSibling?.nodeValue))) {
+      const date = /^([A-Za-z]{3}) (\d{4})$/.exec(text);
+      const month = date && nativeLocalizationMonthNumber(date[1]);
+      if (month) return `${date[2]}年${month}月`;
+    }
+    if (!truncated && (directory || rail || header)) return words.get(text) || null;
+    if (main && listing && el.matches('h2.truncate') && el.closest('.sticky') && text === 'Nests') return words.get(text);
+    if (main && creation && el.matches('h2.truncate') && el.closest('.sticky') && /^(?:Create a Nest|Draft Nest)$/.test(text)) return words.get(text);
+    if (main && (listing || creation || detail) && !truncated && !el.closest('button:has(img)') &&
+        /^(?:Create a Nest|Drafts|Loading (?:your )?Nests?…|Couldn't load (?:this Nest|Nests)|Couldn't load Nests\. Try again later\.|This Nest doesn't exist)$/.test(text)) return words.get(text) || null;
+    return null;
+  }
+
+  function nativePerchJapaneseText(el, text, attr = null) {
+    if (!el?.isConnected || typeof text !== 'string') return null;
+    const words = nativePerchJapaneseText.words ||= new Map([
+      ['Your Perch', 'フィード設定'], ['How Perch works', 'フィード設定の使い方'],
+      ['This feed only', 'このフィードのみ'], ['Everywhere on Tweet', 'Tweet全体'],
+      ['Every feed, replies and search', 'すべてのフィード・返信・検索'],
+      ['Posts from everyone on Tweet, newest first, leaving out what you’ve muted.', 'すべてのユーザーの投稿を新しい順に表示します。ミュートした内容は表示されません。'],
+      ['Your posts and posts from the people and hashtags you follow, newest first, leaving out what you’ve muted.',
+        '自分の投稿と、フォロー中のユーザー・ハッシュタグの投稿を新しい順に表示します。ミュートした内容は表示されません。'],
+      ['Posts in this Nest, newest first, as on its page. Your mutes and blocks apply here too.',
+        'ネスト内の投稿を新しい順に表示します。ミュートとブロックはここにも適用されます。'],
+      ['When I open Tweet', 'Tweetを開いたとき'], ['For You', 'おすすめ'], ['Following', 'フォロー中'],
+      ['Muted', 'ミュート中'], ['Add a mute', 'ミュートを追加'], ['Video', '動画'],
+      ['Autoplay', '自動再生'], ['On', 'オン'], ['Wi-Fi only', 'Wi-Fi接続時のみ'], ['Off', 'オフ'],
+      ['Format', '表示形式'], ['Normal', '標準'], ['Less video', '動画を減らす'],
+      ['Reset filters', 'フィルターをリセット'], ['Reset', 'リセット'], ['Keep', 'そのままにする'],
+      ['Reset your filters? Your mutes stay, and so does the feed Tweet opens to.',
+        'フィルターをリセットしますか？ ミュートと、Tweetを開いたときのフィード設定は保持されます。'],
+      ['Loading', '読み込み中'], ['Back', '戻る'], ['Close', '閉じる'], ['Save', '保存'], ['Cancel', 'キャンセル'],
+      ['Mute', 'ミュートする'], ['Unmute', 'ミュートを解除'], ['Change how long', '期間を変更'], ['Always', '無期限'],
+      ['Mute a word or phrase', '語句をミュートする'], ['Mute a word or hashtag', '語句やハッシュタグをミュートする'],
+      ['Word or phrase', '単語やフレーズ'], ['A word or phrase', '単語やフレーズを入力'],
+      ['Hashtag', 'ハッシュタグ'], ['#hashtag', '#ハッシュタグ'],
+      ['Whole words only: muting “apple” does not hide “pineapple”.', '単語単位で一致します。「apple」をミュートしても「pineapple」は表示されます。'],
+      ['For how long?', 'ミュートする期間'], ['24 hours', '24時間'], ['7 days', '7日間'], ['Until a date', '日付を指定'],
+      ['Mute until the end of', 'この日が終わるまでミュート'],
+      ['Choose a date within a year, or Always.', '1年以内の日付か「無期限」を選んでください。'],
+      ['Choose today or a later date.', '今日以降の日付を選んでください。'],
+      ['People, hashtags and words you mute are left out of For You, Following, replies, search and Explore. A mute with an end stops on its own.',
+        'ミュートした人・ハッシュタグ・語句は、おすすめ、フォロー中、返信、検索、話題を検索に表示されません。期限が来ると自動で解除されます。'],
+      ["You haven't muted anything.", 'ミュート中の項目はありません。'],
+      ['Loading what you muted...', 'ミュート中の項目を読み込み中…'],
+      ['Something went wrong. Please try again.', '問題が発生しました。もう一度お試しください。'],
+      ['Something went wrong loading what you muted.', 'ミュート中の項目を読み込めませんでした。'],
+      ['Couldn’t save that. Please try again.', '保存できませんでした。もう一度お試しください。'],
+      ['Your Perch was changed somewhere else. It’s up to date now; try again.', '別の場所でフィード設定が変更されました。最新の状態で再度お試しください。'],
+      ['Open Nest', 'ネストを開く'], ['Unpin from Home', 'ホームの固定を解除'], ['Arrange tabs', 'タブを並べ替え'],
+      ['Home tabs', 'ホームのタブ'], ['Drag to move', 'ドラッグで移動'],
+      ['Lists and pinned Nests, in the order they sit after Following.', '「フォロー中」の後に並ぶリストと固定ネストです。'],
+      ["Make a list, or pin a Nest you're in, and it shows here.", 'リストを作るか、参加中のネストを固定すると、ここに表示されます。'],
+      ['Add a tab', 'タブを追加'], ['Pin a Nest', 'ネストを固定'], ['New list', 'リストを作成']
+    ]);
+    if (!words.has(text) && !/^(?:Your Perch:|Muted |Change how long: |Unmute |Move |Unpin |Mute [@#]|\d+ more muted$|.+, Nest(?:, |$))/.test(text)) return null;
+    if (isOwnedLocalizationElement(el) ||
+        el.closest('article,blockquote,.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,.truncate,[class*="line-clamp-"],[data-user-content],[translate="no"],.notranslate,[contenteditable]:not([contenteditable="false"])')) return null;
+
+    if (attr === 'aria-label' && el.matches('button[data-perch-pill][aria-haspopup="dialog"]')) {
+      const count = /^Your Perch: (\d+) muted$/.exec(text);
+      return count ? `フィード設定（${count[1]}件をミュート中）` : text === 'Your Perch' ? words.get(text) : null;
+    }
+    if (attr === 'aria-label' && el.matches('button[data-nest-pill]')) {
+      const name = /^(.+), Nest(?:, ([\d,]+\+?) new)?$/.exec(text);
+      return name ? `${name[1]}、ネスト${name[2] ? `、新着${name[2]}件` : ''}` : null;
+    }
+    if (!/^\/feed\/?$/.test(location.pathname)) return null;
+    if (text === 'Open Nest' && !attr && el.matches('[data-home-nest-tab] > div:first-child > button')) return words.get(text);
+    const menu = el.closest('[role="menu"]:is([aria-label="Add a tab"],[aria-label="タブを追加"])');
+    if (menu && menu.querySelector('button[role="menuitem"]')) {
+      if (el === menu && attr === 'aria-label' && text === 'Add a tab' ||
+          !attr && el.matches('button[role="menuitem"]') && /^(?:Pin a Nest|New list)$/.test(text)) return words.get(text);
+    }
+    if (attr === 'aria-label' && el.matches('button[aria-haspopup="menu"]') && text === 'Add a tab' &&
+        el.parentElement?.querySelector('button[data-nest-pill]')) return words.get(text);
+
+    const dialog = el.closest('[role="dialog"][aria-modal="true"][aria-labelledby]');
+    if (!dialog) return null;
+    if (!attr && el.matches('ul.list-none > li > button') && /^(?:Open Nest|Unpin from Home|Arrange tabs)$/.test(text) &&
+        dialog.parentElement?.matches('[role="presentation"].z-140') &&
+        [...el.closest('ul').querySelectorAll('button')].some(button => /^(?:Open Nest|ネストを開く)$/.test(clean(button.textContent)))) return words.get(text);
+    const perch = dialog.querySelector('a[data-guide-link="perchOverview"]');
+    const muteForm = el.closest('form');
+    const formTitle = muteForm?.querySelector(':scope > h3');
+    const standaloneMute = formTitle?.id && dialog.getAttribute('aria-labelledby') === formTitle.id &&
+      /^(?:Mute a word or phrase|語句をミュートする|Mute [@#].+|「.+」をミュートする)$/.test(clean(formTitle.textContent)) &&
+      !!muteForm.querySelector('fieldset input[type="radio"][value="24h"]') &&
+      !!muteForm.querySelector('fieldset input[type="radio"][value="always"]');
+    if (!perch && !standaloneMute) return null;
+
+    if (attr === 'aria-label' && el.matches('button')) {
+      const mute = /^Muted (.+), (always|until .+), change$/.exec(text);
+      if (mute) return `${mute[1]}をミュート中（${mute[2] === 'always' ? '無期限' : mute[2].slice(6) + 'まで'}）、変更`;
+      const verb = /^(Change how long: |Unmute )(.+)$/.exec(text);
+      if (verb) return `${verb[2]}のミュート${verb[1] === 'Unmute ' ? 'を解除' : '期間を変更'}`;
+      const more = /^(\d+) more muted$/.exec(text);
+      if (more) return `ほか${more[1]}件をミュート中`;
+      if (el.closest('section[aria-labelledby="perch-home-tabs"]')) {
+        const move = /^Move (.+) (up|down)$/.exec(text);
+        if (move) return `「${move[1]}」を${move[2] === 'up' ? '上' : '下'}に移動`;
+        const unpin = /^Unpin (.+) from Home$/.exec(text);
+        if (unpin) return `「${unpin[1]}」のホーム固定を解除`;
+      }
+    }
+    if (!attr && el === formTitle) {
+      const target = /^Mute ([@#].+)$/.exec(text);
+      if (target) return `「${target[1]}」をミュートする`;
+    }
+    if (!attr && (el.matches('h3[id$="-feed"]') ||
+        el.closest('section[aria-labelledby="perch-home-tabs"] ol') && !el.matches('button,button *'))) return null;
+    if (attr === 'placeholder' && !el.matches('input[type="text"][maxlength="100"]')) return null;
+    if (attr === 'title' && text !== 'Drag to move' && el !== perch && !el.matches('button')) return null;
+    return words.get(text) || null;
+  }
+
   function isLocalizationUI(node) {
     const el = node?.parentElement;
     if (isProtectedLocalizationElement(el)) return false;
@@ -9852,6 +10574,8 @@ if (/^just\s+now$/i.test(t)) {
     if (nativePinJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeGameJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeMediaUploadJapaneseText(el, node.nodeValue)) return true;
+    if (nativeGIFPickerJapaneseText(el, clean(node.nodeValue))) return true;
+    if (nativeAltJapaneseText(el, clean(node.nodeValue))) return true;
     if (nativeLocalizationBlockMenu(el) || nativeLocalizationBlockDialog(el)) return true;
     const blockedProfile = nativeLocalizationBlockProfile(el);
     if (blockedProfile) return el !== blockedProfile.firstElementChild || node === el.firstChild;
@@ -10006,7 +10730,10 @@ if (/^just\s+now$/i.test(t)) {
   function patchUIAttributes(root = document) {
     const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
     const controls = [];
-    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],div[aria-label="Choose image"],a[aria-label^="Open the post by @"],img[alt="Media in the post this replies to"],section[aria-label="Pinned posts"]';
+    const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],[role="dialog"][aria-modal="true"][aria-label="Choose a GIF"],ul[aria-label="Choose a GIF"],div[aria-label="Choose image"],a[aria-label^="Open the post by @"],section[aria-label="Pinned posts"],' +
+      '#sidebar-pinned-nests,#menu-pinned-nests,[role="tablist"][aria-label="Nest sections"],a[data-guide-link^="nests"],' +
+      'a[data-guide-link="perchOverview"],[role="menu"][aria-label="Add a tab"],ul[aria-label="Your Perch"],' +
+      '[role="dialog"][aria-modal="true"]:has(a[data-guide-link="perchOverview"]) :is([role="group"],[role="radiogroup"],[role="status"])[aria-label], #perch-home-tabs ~ ol [draggable][title]';
     if (host instanceof Element && host.matches(selector)) controls.push(host);
     host?.querySelectorAll?.(selector).forEach(el => controls.push(el));
     // Tweet 2.2.3 owns these photo controls. Match their actual structure so an
@@ -10023,10 +10750,14 @@ if (/^just\s+now$/i.test(t)) {
       const gallery = el.closest('div.relative.overflow-hidden.rounded-2xl.border.bg-black');
       const track = gallery?.querySelector(':scope > div.snap-x.snap-mandatory.overflow-x-auto');
       if (!track || !gallery.closest('article')) return null;
-      const photos = [...track.children];
-      if (photos.length < 2 || photos.length > 5 || !photos.every(button => button.matches('button.w-full.min-w-full.shrink-0.snap-start') &&
-          button.children.length === 1 && button.firstElementChild.matches('img.h-full.w-full.object-cover'))) return null;
-      if (el.parentElement === track) return { count: photos.length, index: photos.indexOf(el) + 1, open: true };
+      const wrappers = [...track.children];
+      const photos = wrappers.map(slide => slide.matches('div.relative.w-full.min-w-full.shrink-0.snap-start.bg-black') &&
+        slide.children.length <= 2 && (!slide.children[1] || slide.children[1].matches('div.contents')) ? slide.firstElementChild : slide);
+      if (photos.length < 2 || photos.length > 5 || !photos.every((button, index) =>
+          (button?.matches('button.w-full.min-w-full.shrink-0.snap-start') ||
+            button?.matches('button[type="button"].h-full.w-full.cursor-pointer') && button.parentElement === wrappers[index]) &&
+          button.children.length === 1 && button.firstElementChild.matches('img.h-full.w-full:is(.object-cover,.object-contain)'))) return null;
+      if (photos.includes(el)) return { count: photos.length, index: photos.indexOf(el) + 1, open: true };
       if (el.parentElement === gallery && el.matches('button') && el.querySelector(':scope > svg.lucide-chevron-left,:scope > svg.lucide-chevron-right')) return { count: photos.length };
       const dots = [...gallery.children].find(child => /^(?:Choose image|画像を選択)$/.test(child.getAttribute('aria-label') || '') &&
         child.children.length === photos.length && [...child.children].every(button => button.matches('button[aria-current]')));
@@ -10034,17 +10765,19 @@ if (/^just\s+now$/i.test(t)) {
       return el.parentElement === dots ? { count: photos.length, index: [...dots.children].indexOf(el) + 1, show: true } : null;
     };
     for (const el of controls) {
+      if (el.closest('ul[aria-label="Choose a GIF"] li,ul[aria-label="GIFを選択"] li')) continue;
       const photo = nativePhotoUI(el);
       const pin = nativeLocalizationPinContext(el);
+      const gifPicker = nativeGIFPickerJapaneseText(el, el.getAttribute('aria-label'), 'aria-label');
       if (!photo && isOwnedLocalizationElement(el) ||
           el.closest('[aria-label="Post preview"],[aria-label="投稿プレビュー"]') ||
           el.closest('[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,.tl-user-text,[data-user-content],[data-testid="tweet-text"],[data-testid="profile-bio"]') ||
-          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || !photo && !pin && el.querySelector('img')) continue;
+          el.closest('.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[class*="line-clamp-"],.truncate') || !photo && !pin && !gifPicker && el.querySelector('img')) continue;
       if (!el.hasAttribute('aria-label') && el.matches('button.absolute.top-4.right-4') &&
           el.querySelector(':scope > svg.lucide-x') &&
           el.parentElement?.matches('div.bg-tl-app-card.border.rounded-3xl.max-w-lg') &&
           el.parentElement.querySelector('textarea#public-modal-tweet-input')) el.setAttribute('aria-label', '閉じる');
-      for (const attr of ['aria-label', 'title', ...(el.matches('img') && nativeLocalizationParentPostPreview(el) ? ['alt'] : [])]) {
+      for (const attr of ['aria-label', 'title']) {
         const value = el.getAttribute(attr);
         const parent = attr === 'aria-label' && isNativeParentPostTimestamp(el) &&
           value?.match(/^Open the post by (@[A-Za-z0-9_.-]+) that this replies to$/);
@@ -10066,7 +10799,7 @@ if (/^just\s+now$/i.test(t)) {
         const image = photo && value?.match(/^(Open|Show) image ([1-5]) of ([2-5])$/);
         const imageLabel = image && Number(image[2]) === photo.index && Number(image[3]) === photo.count &&
           (image[1] === 'Open' ? photo.open : photo.show) ? `${image[3]}枚中${image[2]}枚目の画像を${image[1] === 'Open' ? '開く' : '表示'}` : null;
-        const out = nativePinJapaneseText(el, value, attr) || (parent ? `${parent[1]}への返信元のツイートを開く` : null) ||
+        const out = nativePerchJapaneseText(el, value, attr) || nativeNestJapaneseText(el, value, attr) || nativeAltJapaneseText(el, value, attr) || nativeGIFPickerJapaneseText(el, value, attr) || nativePinJapaneseText(el, value, attr) || (parent ? `${parent[1]}への返信元のツイートを開く` : null) ||
           (session ? `${session[1]}からログアウト` : null) || gif || (unblockLabel ? unblockLabel[1] === 'Unblocking' ? `${unblockLabel[2]}のブロックを解除中…` : `${unblockLabel[2]}のブロックを解除` : null) || imageLabel || (value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
           choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
@@ -10077,9 +10810,14 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   function translateTextNode(node) {
-    if (!isLocalizationUI(node)) return;
     const text = clean(node.nodeValue);
     if (!text || text.length > 500) return;
+    const communityText = nativePerchJapaneseText(node.parentElement, text) || nativeNestJapaneseText(node.parentElement, text, null, node);
+    if (communityText) {
+      ctRememberLocalization(node, null, communityText, communityText);
+      return;
+    }
+    if (!isLocalizationUI(node)) return;
     // Dynamic replacements belong to their specific UI contexts. In particular,
     // never parse actor names or dates from arbitrary text that resembles a UI.
     const el = node.parentElement;
@@ -10088,7 +10826,7 @@ if (/^just\s+now$/i.test(t)) {
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
     const parentPoll = nativeLocalizationParentPostPreview(el) && el.matches('p.mt-1.text-tl-app-text-muted') && text.match(/^Poll · ([2-5]) choices$/);
-    let out = native26JapaneseText(el, text) || nativePinJapaneseText(el, text) || nativeGameJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
+    let out = nativeAltJapaneseText(el, text) || nativeGIFPickerJapaneseText(el, text) || native26JapaneseText(el, text) || nativePinJapaneseText(el, text) || nativeGameJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
       (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
@@ -10222,7 +10960,7 @@ if (/^just\s+now$/i.test(t)) {
         (/^What['’]s happening(?:, [\s\S]+)?[?!]+$/.test(value || '') ||
           /^(?:[\s\S]+、)?いまどうしてる？$/.test(value || ''));
       const choice = nativeLocalizationPoll(el)?.compose && value?.match(/^Choice (\d+)$/);
-      const out = choice ? `選択肢 ${choice[1]}` : composerPrompt ? 'いまどうしてる？' : placeholders.get(value) || JP.get(value);
+      const out = nativePerchJapaneseText(el, value, 'placeholder') || nativeNestJapaneseText(el, value, 'placeholder') || nativeGIFPickerJapaneseText(el, value, 'placeholder') || (choice ? `選択肢 ${choice[1]}` : composerPrompt ? 'いまどうしてる？' : placeholders.get(value) || JP.get(value));
       if (out && out !== value) ctRememberLocalization(el, 'placeholder', out);
     }
   }
@@ -10824,6 +11562,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.29.2 loaded'
+    '🐦 Classic Twitter JP v6.32.2 loaded'
   );
 })();

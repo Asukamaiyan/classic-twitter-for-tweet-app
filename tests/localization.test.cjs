@@ -47,7 +47,7 @@ function fixture(language, html, route = '/feed') {
     'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber', 'nativeTimestampJapaneseText',
     'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
     'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
-    'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia',
+    'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia', 'nativeGIFPickerJapaneseText', 'nativeAltJapaneseText', 'nativeNestJapaneseText', 'nativePerchJapaneseText',
     'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError',
     'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
     'nativeLocalization26Context', 'native26JapaneseText', 'patchNative26UI',
@@ -1427,11 +1427,11 @@ test('ja: session confirmation keeps device text and password input intact', () 
   assert.equal(f.text('user-text'), 'Safari on iOS will be signed out and will need your password to sign back in.'); f.dom.window.close();
 });
 
-test('ja: native parent media and deleted metadata translate without changing unrelated descriptions', () => {
+test('ja: native deleted metadata translates while every image description remains original', () => {
   const f = fixture('ja', `<main><div class="border-b border-tl-app-border"><div class="flex w-full items-start gap-3 px-4 pt-3 pb-2 text-left"><div class="min-w-0 flex-1"><div class="flex min-w-0 flex-wrap items-center gap-1 leading-4"><span class="font-semibold truncate">Alice</span><span class="text-tl-app-text-muted truncate">@alice</span></div><img id="parent-media" alt="Media in the post this replies to" src="https://images.example/a.png"></div></div><article></article></div>
   <div class="min-h-0 flex-1 overflow-y-auto"><div class="flex w-full items-start gap-3 px-4 pt-3 pb-0 text-left"><span aria-hidden="true" class="h-8 w-8"></span><p class="min-w-0 flex-1 self-center italic leading-5 text-tl-app-text-muted" id="deleted-parent">This post is no longer available</p></div><article><p class="whitespace-pre-wrap" id="deleted-body">This post is no longer available</p></article></div>
   <img id="unscoped-media" alt="Media in the post this replies to" src="https://images.example/b.png"></main>`, '/post/reply-id');
-  f.run(); assert.equal(f.document.getElementById('parent-media').alt, '返信先のツイートの写真・動画');
+  f.run(); assert.equal(f.document.getElementById('parent-media').alt, 'Media in the post this replies to');
   assert.equal(f.document.getElementById('unscoped-media').alt, 'Media in the post this replies to');
   assert.equal(f.text('deleted-parent'), 'このツイートは表示できません'); assert.equal(f.text('deleted-body'), 'This post is no longer available'); f.dom.window.close();
 });
@@ -1745,5 +1745,300 @@ test('ja: verified native translation languages use Japanese labels even with En
   assert.equal(browser.textContent, 'ブラウザの言語（ドイツ語）'); assert.equal(select.options[1].textContent, 'アラビア語');
   assert.equal(select.options[3].textContent, 'ドイツ語'); assert.equal(select.options[28].textContent, '中国語（繁体字）');
   assert.ok([...select.options].slice(1).every(o => /語/.test(o.textContent))); assert.equal(f.text('foreign-source'), 'フランス語から翻訳'); assert.equal(f.text('foreign-body'), 'French / Arabic / German');
+  f.dom.window.close();
+});
+
+function nativeGIFPicker280() {
+  return `<div id="gif-sheet" role="dialog" aria-modal="true" aria-label="Choose a GIF" class="relative flex w-full flex-col overflow-hidden border border-tl-app-border bg-tl-app-card">
+    <div class="flex items-center border-b"><label class="relative flex-1"><span class="sr-only" id="gif-search-label">Search GIFs</span>
+      <input id="gif-search" type="search" maxlength="100" placeholder="Search KLIPY" value="Try again &amp; Loading GIFs…">
+      <button id="gif-clear" aria-label="Clear search"><svg></svg></button></label>
+      <button id="gif-close" class="h-11 w-11" aria-label="Close"><svg></svg></button></div>
+    <div class="flex-1 overflow-y-auto"><h3 id="gif-trending">Trending</h3>
+      <ul id="gif-results" aria-label="Choose a GIF"><li><button id="gif-title" title="Close" aria-label="Close"></button></li>
+        <li><button id="gif-title-image" title="Search GIFs" aria-label="Search GIFs"><img alt="" src="fixture.gif"></button></li></ul>
+      <div role="status" aria-live="polite"><span id="gif-status">Loading GIFs…</span><button id="gif-retry">Try again</button></div>
+    </div></div>`;
+}
+
+for (const language of ['ja','en']) test(`${language}: Tweet 2.8 GIF picker chrome preserves native query, result titles, nodes and actions`, () => {
+  const f = fixture(language, `<main>${nativeUpload230({compact:true})}</main>${nativeGIFPicker280()}
+    <article><p class="whitespace-pre-wrap" id="gif-user-content">Loading GIFs…</p></article>`);
+  const upload = f.document.querySelector('main div.w-full.space-y-3');
+  const opener = f.document.createElement('button');
+  opener.id='gif-open-picker'; opener.setAttribute('aria-haspopup','dialog'); opener.setAttribute('aria-label','Add a GIF');
+  opener.innerHTML='<span aria-hidden="true">GIF</span><span id="gif-add-label">Add GIF</span>'; upload.append(opener);
+  const input=f.document.getElementById('gif-search'), sheet=f.document.getElementById('gif-sheet');
+  const value=input.value, result=f.document.getElementById('gif-title');
+  const label=f.document.getElementById('gif-search-label').firstChild;
+  let closeClicks=0, selections=0, clearClicks=0;
+  f.document.getElementById('gif-close').addEventListener('click',()=>closeClicks++);
+  result.addEventListener('click',()=>selections++);
+  f.document.getElementById('gif-clear').addEventListener('click',()=>clearClicks++);
+  f.run(); f.run();
+  assert.equal(sheet.getAttribute('aria-label'),language==='ja'?'GIFを選択':'Choose a GIF');
+  assert.equal(f.document.getElementById('gif-results').getAttribute('aria-label'),language==='ja'?'GIFを選択':'Choose a GIF');
+  assert.equal(input.placeholder,language==='ja'?'KLIPYでGIFを検索':'Search KLIPY');
+  assert.equal(f.text('gif-search-label'),language==='ja'?'GIFを検索':'Search GIFs');
+  assert.equal(f.text('gif-trending'),language==='ja'?'人気のGIF':'Trending');
+  assert.equal(f.text('gif-status'),language==='ja'?'GIFを読み込み中…':'Loading GIFs…');
+  assert.equal(f.text('gif-retry'),language==='ja'?'再試行':'Try again');
+  assert.equal(f.text('gif-add-label'),language==='ja'?'GIFを追加':'Add GIF');
+  assert.equal(opener.getAttribute('aria-label'),language==='ja'?'GIFを追加':'Add a GIF');
+  assert.equal(input.value,value); assert.equal(f.document.getElementById('gif-search'),input);
+  assert.equal(f.document.getElementById('gif-search-label').firstChild,label);
+  for (const [id,title] of [['gif-title','Close'],['gif-title-image','Search GIFs']]) {
+    assert.equal(f.document.getElementById(id).title,title);
+    assert.equal(f.document.getElementById(id).getAttribute('aria-label'),title);
+  }
+  assert.equal(f.text('gif-user-content'),'Loading GIFs…');
+  f.document.getElementById('gif-close').click(); result.click(); f.document.getElementById('gif-clear').click();
+  assert.deepEqual([closeClicks,selections,clearClicks],[1,1,1]);
+  f.dom.window.close();
+});
+
+test('ja: native GIF search errors translate on React node updates while dynamic query messages remain exact', () => {
+  const f=fixture('ja',nativeGIFPicker280()), status=f.document.getElementById('gif-status');
+  const node=status.firstChild;
+  for (const [english,japanese] of [
+    ['GIF search is busy. Try again in a moment.','GIF検索が混み合っています。少し待ってからお試しください。'],
+    ["You're offline. Connect to search for GIFs.",'オフラインです。GIFを検索するには接続してください。'],
+    ["Couldn't load GIFs.",'GIFを読み込めませんでした。']
+  ]) { node.nodeValue=english; f.run(status); assert.equal(status.firstChild,node); assert.equal(node.nodeValue,japanese); }
+  const dynamic='No GIFs found for “Close & Loading GIFs…”.'; node.nodeValue=dynamic; f.run(status);
+  assert.equal(node.nodeValue,dynamic,'user query is never parsed or rewritten');
+  f.dom.window.close();
+});
+
+test('ja: a GIF picker label alone cannot translate unknown or protected controls', () => {
+  const f=fixture('ja',nativeGIFPicker280());
+  const sheet=f.document.getElementById('gif-sheet'); sheet.classList.remove('border-tl-app-border');
+  f.run();
+  assert.equal(f.document.getElementById('gif-search').placeholder,'Search KLIPY');
+  assert.equal(f.text('gif-status'),'Loading GIFs…');
+  sheet.classList.add('border-tl-app-border'); sheet.setAttribute('data-user-content',''); f.run();
+  assert.equal(f.document.getElementById('gif-search').placeholder,'Search KLIPY');
+  assert.equal(f.text('gif-status'),'Loading GIFs…');
+  f.dom.window.close();
+});
+
+
+const {altText, altEditorMarkup, altUploadMarkup, gallery290Markup} = require('./helpers/native-alt.cjs');
+for (const language of ['ja','en']) test(`${language}: Tweet 2.9 ALT chrome preserves descriptions, inputs, nodes and native handlers`, () => {
+  const f = fixture(language, `<main>${altUploadMarkup()}<article>${gallery290Markup()}</article></main>${altEditorMarkup()}`);
+  const input = f.document.getElementById('alt-heading-text'), image = f.document.getElementById('native-upload-image');
+  const value = input.value, imageAlt = image.alt, nodes = [...f.document.querySelectorAll('img,textarea,button')];
+  let save = 0, cancel = 0, toggle = 0;
+  f.document.getElementById('alt-save').onclick = () => save++;
+  f.document.getElementById('alt-cancel').onclick = () => cancel++;
+  const opener = f.document.querySelector('button[aria-controls]'); opener.onclick = () => { toggle++; opener.setAttribute('aria-expanded','true'); };
+  f.run(); f.run();
+  assert.equal(input.value,value); assert.equal(image.alt,imageAlt); assert.equal(image.alt,altText);
+  assert.deepEqual([...f.document.querySelectorAll('img,textarea,button')],nodes);
+  assert.equal(f.text('alt-heading'),language==='ja'?'画像の説明を追加':'Describe this image');
+  assert.equal(f.document.querySelector('label[for="alt-heading-text"]').textContent,language==='ja'?'画像の説明文':'Alt text');
+  assert.equal(opener.getAttribute('aria-label'),language==='ja'?'画像の説明文を表示':'Show alt text');
+  assert.equal(f.document.querySelector('#gallery-290-alt-0 p').textContent,altText);
+  assert.equal(f.document.getElementById('alt-edit').getAttribute('aria-label'),language==='ja'?'写真1の説明文を追加':'Add alt text to image 1');
+  assert.equal(f.document.querySelector('#gallery-290-alt-0 button').getAttribute('aria-label'),language==='ja'?'画像の説明文を閉じる':'Close alt text');
+  assert.equal(f.text('alt-count'),'20 / 1,000');
+  f.document.getElementById('alt-limit').firstChild?.remove();
+  f.document.getElementById('alt-limit').textContent='Limit of 1,000 characters reached.';
+  f.run(f.document.getElementById('alt-limit'));
+  assert.equal(f.text('alt-limit'),language==='ja'?'1,000文字の上限に達しました。':'Limit of 1,000 characters reached.');
+  f.document.getElementById('alt-save').click(); f.document.getElementById('alt-cancel').click(); opener.click();
+  assert.deepEqual([save,cancel,toggle],[1,1,1]); assert.equal(opener.getAttribute('aria-expanded'),'true');
+  input.value='Home\nClose Like https://example.org/?q=保存'; f.run(); assert.equal(input.value,'Home\nClose Like https://example.org/?q=保存');
+  f.dom.window.close();
+});
+
+test('ja: Device language uses the native empty option without altering selected values', () => {
+  const f = fixture('ja',native26LanguageSettings().replace('Browser language (English)','Device language (English)'),'/settings');
+  const select=f.document.getElementById('target-lang'), options=[...select.options];
+  f.run(); assert.equal(select.options[0].textContent,'端末の言語（英語）'); assert.equal(select.value,'en'); assert.deepEqual([...select.options],options);
+  f.dom.window.close();
+});
+
+test('ja: native Nests list and detail chrome localize without changing names, hashtags or norms', () => {
+  const f = fixture('ja', `
+    <aside><nav><div class="relative"><button id="nav"><span><svg data-icon="nest"></svg></span><span>Nests</span></button>
+      <button id="pinned-toggle" data-testid="sidebar-pinned-nests-toggle" aria-expanded="false" aria-controls="sidebar-pinned-nests" aria-label="Show pinned Nests" title="Show pinned Nests"></button></div>
+      <ul id="sidebar-pinned-nests" aria-label="Pinned Nests"><li><button><span id="pinned-name" class="truncate">Nests</span></button></li></ul></nav></aside>
+    <main><div><div class="sticky"><div><h2 id="nest-name" class="truncate">Nests</h2></div></div>
+      <div class="overflow-x-clip"><div class="px-4 pb-4"><div><button id="edit">Edit Nest</button><button id="join" aria-pressed="false" aria-label="Join Nests">Join</button></div>
+      <div class="mt-3"><p class="inline-flex items-center text-tl-app-text-muted" id="visibility"><svg></svg>Public Nest · Owner @sample</p></div>
+      <p id="description" class="tl-user-text">Description</p><span id="hashtag">#Norms</span></div></div>
+      <div role="tablist" aria-label="Nest sections"><button id="flock" role="tab" aria-selected="false" aria-controls="nest-example-panel-flock"><span>Flock</span></button></div>
+      <div data-nest-composer><textarea placeholder="Post in Nests" aria-label="Post in Nests">Events</textarea></div>
+      <section aria-labelledby="nest-norms-example"><h3 id="nest-norms-example">Nest norms</h3><ol><li><span class="tl-user-text" id="norm">Norms</span></li></ol></section>
+    </div></main>`, '/nests/example');
+  const { document } = f;
+  const compose = document.querySelector('textarea');
+  const edit = document.getElementById('edit');
+  let edits = 0;
+  edit.addEventListener('click', () => edits++);
+  f.run();
+  for (const [id, value] of Object.entries({nav:'ネスト', 'pinned-name':'Nests', 'nest-name':'Nests', edit:'ネストを編集', join:'参加する',
+    visibility:'公開ネスト · 管理者 @sample', description:'Description', hashtag:'#Norms', flock:'メンバー', 'nest-norms-example':'ネストのルール', norm:'Norms'})) {
+    assert.equal(f.text(id), value, id);
+  }
+  assert.equal(document.querySelector('[role="tablist"]').getAttribute('aria-label'), 'ネストのタブ');
+  assert.equal(document.getElementById('join').getAttribute('aria-label'), '「Nests」に参加');
+  assert.equal(document.getElementById('pinned-toggle').getAttribute('title'), '固定したネストを表示');
+  assert.equal(compose.placeholder, '「Nests」にツイート');
+  assert.equal(compose.getAttribute('aria-label'), '「Nests」にツイート');
+  assert.equal(compose.value, 'Events');
+  assert.equal(document.getElementById('edit'), edit);
+  edit.click();
+  assert.equal(edits, 1);
+  const join = document.getElementById('join');
+  join.setAttribute('aria-pressed', 'true');
+  join.setAttribute('aria-label', 'Joined Nests. Leave');
+  join.firstChild.nodeValue = 'Joined';
+  f.run(join);
+  assert.equal(join.textContent, '参加済み');
+  assert.equal(join.getAttribute('aria-label'), '「Nests」から退出');
+});
+
+test('ja: Nest settings retain original inputs, visibility option values, split title and handlers', () => {
+  const f = fixture('ja', `<div role="dialog" aria-modal="true" aria-labelledby="nest-settings-title">
+    <h2 class="truncate" id="nest-settings-title">Edit </h2><form><label><span id="desc-label">Description</span><textarea data-nest-field="description" maxlength="500">Images</textarea></label>
+      <label><span id="tag-label">Hashtags</span><input data-nest-field="hashtags" value="#Description #Images"></label>
+      <fieldset><legend id="image-label">Images</legend><div><span><label><svg></svg>Change cover photo<input type="file" accept="image/*"></label><button aria-label="Remove cover photo" id="remove-cover"></button></span></div></fieldset>
+      <fieldset><legend id="norm-label">Norms (optional)</legend><p id="norm-limits"></p><ol><li><textarea maxlength="200" aria-label="Norm 1">Add a norm</textarea><button type="button" aria-label="Remove norm 1" id="remove-norm"></button></li></ol>
+        <button id="add" type="button"><svg></svg> Add a norm</button></fieldset>
+      <fieldset><legend id="scope">Who can see it</legend><label><input type="radio" name="nest-settings-visibility" value="public" checked><span id="public">Public</span></label></fieldset>
+      <label><input type="checkbox" checked><span id="include">Show public posts with these hashtags</span></label>
+      <button id="save" type="button">Save</button>
+    </form></div><article><h3>Norms</h3><p class="tl-user-text">Edit Nest</p></article>`, '/nests/hololive');
+  const { document } = f;
+  const title = document.getElementById('nest-settings-title');
+  const name = document.createTextNode('HOLOLIVE');
+  title.append(name);
+  const limits = document.getElementById('norm-limits');
+  limits.append('Up to ', '5', ', up to ', '200', " characters each. They add to Tweet's rules.");
+  const limitNodes = [...limits.childNodes];
+  const save = document.getElementById('save');
+  let saves = 0, changes = 0;
+  save.addEventListener('click', () => saves++);
+  document.querySelector('form').addEventListener('change', () => changes++);
+  f.run();
+  assert.equal(title.textContent, 'ネストを編集：HOLOLIVE');
+  assert.equal(title.lastChild, name);
+  assert.equal(limits.textContent, '最大5項目、各200文字まで。Tweetのルールに加えて適用されます。');
+  assert.deepEqual([...limits.childNodes], limitNodes);
+  for (const [id, value] of Object.entries({'desc-label':'説明', 'tag-label':'ハッシュタグ', 'image-label':'画像', 'norm-label':'ルール（任意）',
+    add:'ルールを追加', scope:'公開範囲', public:'公開', include:'このハッシュタグの公開ツイートを表示', save:'保存'})) assert.equal(f.text(id), value);
+  assert.equal(document.querySelector('textarea[data-nest-field="description"]').value, 'Images');
+  assert.equal(document.querySelector('textarea[maxlength="200"]').value, 'Add a norm');
+  assert.equal(document.querySelector('input[data-nest-field="hashtags"]').value, '#Description #Images');
+  assert.equal(document.getElementById('remove-cover').getAttribute('aria-label'), 'カバー画像を削除');
+  assert.equal(document.getElementById('remove-norm').getAttribute('aria-label'), 'ルール 1を削除');
+  assert.equal(document.querySelector('[type="radio"]').value, 'public');
+  assert.equal(document.querySelector('[type="radio"]').checked, true);
+  assert.equal(document.querySelector('[type="checkbox"]').checked, true);
+  assert.equal(document.querySelector('article h3').textContent, 'Norms');
+  assert.equal(document.querySelector('article p').textContent, 'Edit Nest');
+  save.click();
+  assert.equal(saves, 1);
+  assert.equal(changes, 0, 'display localization does not change form values');
+});
+
+test('ja: create and browse Nests localize known forms and leave lookalikes alone', () => {
+  const f = fixture('ja', `<main><div class="sticky"><h2 class="truncate" id="title">Create a Nest</h2></div>
+    <form><label><input type="radio" name="nest-visibility" value="public" checked><span>Public</span></label>
+    <label><span id="description">Description</span><textarea maxlength="500" placeholder="For anyone keeping something green alive indoors…">Norms (optional)</textarea></label>
+    <details><summary id="preview">Preview how it will look</summary><div inert><h2 class="truncate" id="preview-name">Create a Nest</h2><p class="tl-user-text">Description</p></div></details>
+    <button id="publish" type="button" disabled>Publish</button></form>
+    <form><label id="unknown">Description</label><textarea maxlength="500"></textarea></form>
+  </main>`, '/nests/new');
+  f.run();
+  for (const [id, value] of Object.entries({title:'ネストを作成', description:'説明', preview:'見え方をプレビュー', 'preview-name':'Create a Nest', publish:'公開する', unknown:'Description'})) {
+    assert.equal(f.text(id), value, id);
+  }
+  assert.equal(f.document.querySelector('textarea').placeholder, 'どんなネストか、気軽に紹介してみよう…');
+  assert.equal(f.document.querySelector('textarea').value, 'Norms (optional)');
+  assert.equal(f.document.getElementById('publish').disabled, true);
+
+  const directory = fixture('ja', `<main><section aria-labelledby="nests-your-nests"><h3 id="nests-your-nests">Your Nests</h3>
+    <ul><li><button><span><span id="name" class="truncate">Your Nests</span><span id="count" class="text-tl-app-text-muted truncate">1,234 in the Flock · Public</span>
+    <span id="description" class="line-clamp-2">No Nests yet.</span></span></button><span id="role">Owner</span></li></ul></section></main>`, '/nests');
+  directory.run();
+  assert.equal(directory.text('nests-your-nests'), '参加中のネスト');
+  assert.equal(directory.text('name'), 'Your Nests');
+  assert.equal(directory.text('count'), 'メンバー1,234人 · 公開');
+  assert.equal(directory.text('description'), 'No Nests yet.');
+  assert.equal(directory.text('role'), '管理者');
+});
+
+test('ja: native Perch and mobile Nest tabs localize without changing names or control state', () => {
+  const f = fixture('ja', `<main>
+    <div><button data-nest-pill="example" aria-current="page" aria-label="Following, Nest, 10+ new"><span id="pill-name">Following</span></button>
+      <button aria-haspopup="menu" aria-label="Add a tab" id="add-tab">+</button></div>
+    <button data-perch-pill aria-haspopup="dialog" aria-expanded="true" aria-label="Your Perch: 2 muted" id="perch"></button>
+    <div data-home-nest-tab="example"><div><h2 class="truncate" id="name">Following</h2><button id="open">Open Nest</button></div>
+      <article><p class="tl-user-text" id="post">Open Nest</p></article></div></main>
+    <div role="menu" aria-label="Add a tab" id="tab-menu"><button role="menuitem" id="pin">Pin a Nest</button></div>
+    <div role="presentation" class="z-140"><div role="dialog" aria-modal="true" aria-labelledby="nest-menu-title">
+      <h2 id="nest-menu-title" class="truncate">Following</h2><ul class="list-none"><li><button>Open Nest</button></li>
+      <li><button id="arrange">Arrange tabs</button></li></ul></div></div>
+    <div role="dialog" aria-modal="true" aria-labelledby="p-title">
+      <h2 id="p-title">Your Perch</h2><a data-guide-link="perchOverview" aria-label="How Perch works" title="How Perch works"></a>
+      <section aria-labelledby="p-feed"><h3 id="p-feed">Following<span id="scope">This feed only</span></h3></section>
+      <ul aria-label="Your Perch" id="mutes"><li><button aria-label="Muted “Off”, always, change"><span class="truncate" id="muted-word">Off</span></button></li>
+        <li><button id="add" aria-label="Add a mute"></button></li></ul>
+      <div role="group" aria-label="Autoplay" id="video"><button aria-pressed="true" id="autoplay">Wi-Fi only</button></div>
+      <section aria-labelledby="perch-home-tabs"><h4 id="perch-home-tabs">Home tabs</h4><ol><li>
+        <span class="truncate">Following</span><button aria-label="Move Following up" disabled id="up"></button>
+        <button aria-label="Move Following down" id="down"></button></li></ol></section>
+    </div>
+    <div role="dialog" aria-modal="true" aria-labelledby="other-title"><h2 id="other-title">Other</h2><button id="unrelated">Add a mute</button></div>`);
+  const { document } = f;
+  const open = document.getElementById('open');
+  let clicks = 0;
+  open.addEventListener('click', () => clicks++);
+  f.run();
+  for (const [id, value] of Object.entries({
+    'pill-name':'Following', name:'Following', post:'Open Nest', open:'ネストを開く', 'nest-menu-title':'Following',
+    pin:'ネストを固定', arrange:'タブを並べ替え', 'p-title':'フィード設定', scope:'このフィードのみ',
+    'muted-word':'Off', autoplay:'Wi-Fi接続時のみ', 'perch-home-tabs':'ホームのタブ', unrelated:'Add a mute'
+  })) assert.equal(f.text(id), value, id);
+  assert.equal(document.getElementById('p-feed').firstChild.nodeValue, 'Following');
+  assert.equal(document.querySelector('[data-nest-pill]').getAttribute('aria-label'), 'Following、ネスト、新着10+件');
+  assert.equal(document.querySelector('[data-nest-pill]').getAttribute('aria-current'), 'page');
+  for (const [id, value] of Object.entries({
+    perch:'フィード設定（2件をミュート中）', 'add-tab':'タブを追加', 'tab-menu':'タブを追加',
+    add:'ミュートを追加', mutes:'フィード設定', video:'自動再生', down:'「Following」を下に移動'
+  })) assert.equal(document.getElementById(id).getAttribute('aria-label'), value, id);
+  assert.equal(document.getElementById('up').disabled, true);
+  assert.equal(document.getElementById('autoplay').getAttribute('aria-pressed'), 'true');
+  assert.equal(document.getElementById('open'), open);
+  open.click();
+  assert.equal(clicks, 1);
+  f.dom.window.close();
+});
+
+test('ja: native Perch mute sheet keeps the typed word and expiration radio values', () => {
+  const f = fixture('ja', `<div role="dialog" aria-modal="true" aria-labelledby="mute-title">
+    <form><h3 id="mute-title">Mute a word or phrase</h3>
+      <label><input type="text" maxlength="100" placeholder="A word or phrase" aria-label="Word or phrase" value="Always"></label>
+      <fieldset><legend id="duration">For how long?</legend>
+        <label><input type="radio" name="duration" value="24h" checked>24 hours</label>
+        <label><input type="radio" name="duration" value="always">Always</label>
+      </fieldset><button id="mute-save" type="submit">Mute</button>
+    </form></div>`);
+  const { document } = f;
+  const word = document.querySelector('input[type="text"]');
+  const selected = document.querySelector('[value="24h"]');
+  f.run();
+  assert.equal(f.text('mute-title'), '語句をミュートする');
+  assert.equal(f.text('duration'), 'ミュートする期間');
+  assert.equal(word.placeholder, '単語やフレーズを入力');
+  assert.equal(word.value, 'Always');
+  assert.equal(word.getAttribute('aria-label'), '単語やフレーズ');
+  assert.equal(selected.value, '24h');
+  assert.equal(selected.checked, true);
+  assert.equal(selected.parentElement.textContent, '24時間');
+  assert.equal(f.text('mute-save'), 'ミュートする');
   f.dom.window.close();
 });

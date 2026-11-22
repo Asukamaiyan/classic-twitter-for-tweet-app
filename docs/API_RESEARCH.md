@@ -1,3 +1,61 @@
+## 6.32.1: Perch and pinned Nest UI (2026-11-22)
+
+The [official Web bundle](https://app.tweet.app/assets/index-BsuxXN87.js) remains **2.11.6 / build 1795306956**. Japanese localization uses the Perch button and guide-bearing dialog, the native mute form, and the pinned Nest controls on Home. Preserve feed and Nest names, the entered mute value and duration, and existing handlers. The official site provides a [standalone web app manifest](https://app.tweet.app/manifest.webmanifest). Guides distinguish opening that site from the phone Home Screen and using the userscript in a compatible browser.
+
+---
+
+## 6.32.0: Nests and Perch (2026-11-22)
+
+Verified Tweet web **2.11.6 / build 1795306956** from the [official bundle](https://app.tweet.app/assets/index-BsuxXN87.js) and the browser footer. [Tweet’s product page](https://tweet.app/) documents Nests and the Perch. In the observed Nest form, descriptions support 500 characters, hashtags are space-separated (up to five), and up to five norms accept 200 characters each. The app owns these fields, visibility, joining, and saving.
+
+The visible native control is `button[data-perch-pill][aria-haspopup="dialog"]`. The Perch manages people, hashtags, and word mutes, with expiry. The optional extension collapse matches parts of rendered post text and can reveal individual posts. Tools opens the existing native button when it is present and exposes local collapse separately. This adds no settings API call or storage migration. Native timeline filtering and locally archived favorites have different scopes.
+
+---
+
+## 6.31.0: Tweet 2.9.2 / per-photo display size (2026-11-04)
+
+The [official app](https://app.tweet.app/) serves [index-3QBkI1_0.js](https://app.tweet.app/assets/index-3QBkI1_0.js), **2.9.2 / build 1793656820**, SHA256 `799cd87ff9ba907656193dc5b1d2e8582562d98d789ebce6d7473c2394aea747`. The photo carousel, image opener and ALT contracts match 2.9.0. The native carousel derives its frame from the first image's nested dimensions and clamps that aspect ratio to 4/5–2, then uses it for every later image. That common frame is the relevant cause of the black padding on differently shaped photos.
+
+For verified single/carousel widgets, 6.31.0 uses each selected image's `naturalWidth`/`naturalHeight` after that resource loads, retaining native page width and scroll selection. These are the [WHATWG-defined density-corrected, orientation-aware dimensions](https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-naturalwidth); zero/unavailable dimensions do not prove an aspect ratio. Preserve original sources and ALT, distinguish new src/srcset/sizes loads from earlier resources, and bound unknown/error layout without claiming successful decoding. Own Media/Favorites rows share the same fitting rule. Tiny/panoramic visuals retain their own ratio while the surrounding transparent pointer target is at least 44px high. A native ALT popup can temporarily expand its clipped photo area to a readable height while open, without moving its DOM or changing its content/actions. ResizeObserver changes are coalesced to a cancellable next animation frame. No crop, metadata/image fetch or authoring API is added.
+
+AST route-family count is 204→204. Hashtag GET construction adds optional cursor/limit and a query suffix; the apparent literal-family replacement is the same `GET /api/hashtags/{tag}` family, not a removed endpoint. Hashtag pagination/retry, follow semantics, review notices and TWIRDLE result navigation remain native. Public/media config, six published 6.29.2 scripts and origin/main remain unchanged. Fresh npm audit reports zero known advisories among 40 development dependencies; adopted major versions are unchanged.
+
+Evidence is outside the repository in `outputs/tweet-refresh-2026-11-04/latest/`: `official-app-current.json`, `photo-dimensions-contract.json`, `media-asset-wire-flow.json`, `photo-ast-comparison.json`, `route-family-delta.json`, `contract-revalidation.json` and `npm-audit.json`. Read-only public inspection and local fixtures do not prove authenticated API behavior or physical device acceptance.
+
+---
+
+## 6.30.0: Tweet 2.9.0 image ALT compatibility (2026-10-29)
+
+Fresh anonymous HTML and [official bundle](https://app.tweet.app/assets/index-CzsmICzd.js) identify **2.9.0 / build 1792965394**. The bundle is 1,789,398 bytes, SHA256 `3db512877f7794d5bdf496d28e045ece172810cdcb77a278171f078d56a60bbe`, replacing the preserved 2.8.0 bundle. Acorn extraction retains 204 normalized API route families, with no additions or removals. Public media/public configuration is byte-identical to October 25. This is a bounded public-client comparison, not signed-in backend acceptance.
+
+The observed addition is image ALT. Read `media_assets[].alt_text` as optional author content. Native create/reply/edit can pass a `mediaAltText` asset-ID map through their existing routes; this extension does not add or call that mutation. The native editor caps entry at 1,000 Unicode code points, but read/display helpers do not impose that cap on received descriptions. Preserve complete optional descriptions, including longer read-only records, line breaks, whitespace and URL strings in account-local Media/Favorites and JSON backup/import. Invalid optional backup types reject atomically; pre-ALT archives remain valid.
+
+Native multi-image slides now wrap a button opener and an independent ALT control/panel inside each slide, and use dimensions to select object-contain sizing. Recognize that structure while retaining old layouts, original image nodes/sources, handlers and native counters. The fullscreen viewer exposes a separate native ALT paragraph; reserve its flex region rather than covering it with the previously absolute photo stage or delivered-image tools. Do not treat ALT controls as photo openers.
+
+Japanese localization changes only verified editor/popup chrome and the Device language default option, plus the static Child Safety action. Protect every image `alt`, the native description paragraph, editor input, dynamic counters and all user text. The native GIF picker and translation continue to own their work. KLIPY GIF archive rendering remains unsupported. No URL cards, API credentials, new permissions, editor/post client or runtime dependencies are added.
+
+The six public Greasy Fork editions remain 6.29.2 and origin/main remains `0cea4e35024ea1e8583d1de2f177dbfddc14868c`. The local 6.30.0 candidate is not published or installed. Fresh npm audit reports zero known advisories among 40 development dependencies. Acorn 8.19.0 remains the latest release; jsdom 26.1.0 is the current major's latest (overall latest 30.1.3), without a security or compatibility reason for a major migration in this task.
+
+Evidence outside the repository: `outputs/tweet-refresh-2026-10-29/latest/official-app-current.json`, `route-family-delta.json`, `string-delta.json`, `alt-posting-and-ui-contract.json`, `npm-official-current.json` and `npm-audit.json`. Local build, synthetic fixture, real-browser fixture and physical/service acceptance are recorded separately in VALIDATION.
+
+---
+
+## 6.29.3: Tweet 2.8.0 public-client recheck (2026-10-25)
+
+Fresh anonymous GETs at 15:01 JST on October 25 returned the same main bundle below, byte-for-byte, and unchanged public media limits. The public six Greasy Fork scripts remain 6.29.2 and origin/main remains `0cea4e35024ea1e8583d1de2f177dbfddc14868c`. This does not require a new extension release or a dependency-major migration: the local candidate stays 6.29.3 with unchanged product code. Current installed Acorn is 8.19.0; jsdom stays 26.1.0. The fresh npm audit reports zero advisories among 40 development dependencies. Current evidence is outside the repository in `outputs/tweet-refresh-2026-10-25/latest/official-app-current.json`, `published-distributions.json`, `remote-state.json`, `npm-official-current.json` and `npm-audit.json`.
+
+### October 24 compatibility inspection
+
+The [official app](https://app.tweet.app/) serves [index-InfCz8AH.js](https://app.tweet.app/assets/index-InfCz8AH.js), **2.8.0 / build 1792815884**, 1,776,428 bytes, SHA256 `4c72e6f42f9d3521693eae37c2fe972a7938741ab1f9ed4b57dee30ed104acb0`. Read-only public HTML, bundle and configuration checks do not establish signed-in behavior or a complete backend changelog. The old 2.6 asset now returns 404; the bounded comparison uses its preserved bundle with the previously recorded SHA256.
+
+The normalized literal route-family comparison found 197 → 204 families, no removed family, and seven new administrative moderation/KLIPY-report routes. No new account-write or GIF route is called by this extension. Existing native upload limits remain five images, 10 MB per image, 15 MB per GIF and 50 MB / 30 seconds per video in the public media configuration. These observations are not a guarantee that all existing native DOM contracts remain unchanged.
+
+The new KLIPY GIF picker has its own modal, native search/selection, query-dependent messages, and `post.klipy_gif` metadata separate from `media_assets`. Localize only the verified Japanese search/header/status controls while retaining input values, result titles, DOM nodes and native handlers. In particular, a failed thumbnail must not let a GIF titled “Close” be translated as a UI button. Dynamic no-results messages remain unchanged so the user query is never parsed or reconstructed. The extension adds no GIF search, selection or post API. Its existing Media/Favorites snapshot schema does not yet reproduce the new `klipy_gif` attachment; the native feed remains authoritative for those GIFs.
+
+The six public Greasy Fork code URLs currently report 6.29.2 and match the pre-edit main source after stripping only manager-generated metadata lines. The 6.29.3 work is a local candidate. Evidence: `outputs/tweet-polish-2026-10-24/latest/official-app-current.json`, `route-family-delta.json`, `focused-contract-snippets.json`, `media-comparison.json` and `distribution-normalized-comparison.json` outside the repository.
+
+---
+
 ## 6.29.1: user-requested URL card withdrawal (2026-10-19)
 
 Remove the custom URL-card UI and direct public metadata/image requests at the user's request. Original URLs, normal native links, independent Home links-only filtering, quotes, media and game cards remain. This is a product decision; it does not claim that the official client added a replacement or changed its API. The first-party 2.6.0 build and authentication/media boundaries below remain unchanged. Earlier sections describe the feature set at their recorded release dates.

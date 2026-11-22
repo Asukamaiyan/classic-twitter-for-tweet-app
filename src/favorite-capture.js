@@ -58,6 +58,16 @@
     if (typeof ctMediaSlides === 'function') for (const grid of article.querySelectorAll('div.flex.snap-x.snap-mandatory.overflow-x-auto')) {
       for (const slide of ctMediaSlides(grid)) nodes.push(slide.firstElementChild);
     }
+    // 2.9 single images use a native button plus an optional sibling ALT panel.
+    // Do not infer identity from author-provided alt text or its wording.
+    for (const image of article.querySelectorAll('button[type="button"].cursor-pointer > img')) {
+      const button = image.parentElement, shell = button.parentElement;
+      if (button.children.length === 1 && shell?.matches('div.relative') &&
+          (button.matches('.block.w-full') && image.matches('img.w-full.object-cover') ||
+            button.matches('.block.h-full.w-full') && image.matches('img.h-full.w-full.object-contain') &&
+              shell.matches('.overflow-hidden.rounded-2xl.border.bg-black')) &&
+          shell.children.length <= 2 && (!shell.children[1] || shell.children[1].matches('div.contents'))) nodes.push(image);
+    }
     // The current native legacy-image branch uses a different alt; accept only
     // its exact direct image container, never a similarly named user image.
     for (const image of article.querySelectorAll('img[alt="Post media"].w-full.object-cover.cursor-pointer')) {
@@ -66,10 +76,20 @@
     }
     return [...new Set(nodes)].filter(el =>
       el.closest('article') === article && !el.closest('[aria-label^="Quoted post"],blockquote,[data-testid="quote-tweet"],[data-ct-quote],[data-user-content],.tl-user-text,[data-ct-owned],[data-ct-local-ui]'))
-      .slice(0, 16).map(el => ({type: el.tagName === 'VIDEO' ? 'video' : 'image',
-        url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : '',
-        ...(el.tagName === 'VIDEO' && /^(Animated GIF|GIFアニメーション|アニメーションGIF)$/.test(el.getAttribute('aria-label') || '')
-          ? {isGIF:true} : {})})).filter(asset => asset.url);
+      .slice(0, 16).map(el => {
+        const contents = el.tagName === 'IMG' && el.parentElement?.matches('button')
+          ? el.parentElement.parentElement?.querySelector(':scope > div.contents') : null;
+        const opener = contents?.querySelector(':scope > button[aria-controls][aria-expanded]');
+        const panel = opener && document.getElementById(opener.getAttribute('aria-controls'));
+        const description = panel && panel.parentElement === contents && panel.querySelector(':scope > p.whitespace-pre-wrap.break-words');
+        const altText = description && description.textContent === el.alt &&
+          /^(?:Show alt text|画像の説明文を表示)$/.test(opener.getAttribute('aria-label') || '') && ctProfileAltText(description.textContent);
+        return {type: el.tagName === 'VIDEO' ? 'video' : 'image',
+          url: ctProfileURL(el.src), poster: el.tagName === 'VIDEO' ? ctProfileURL(el.poster) : '',
+          ...(altText ? {altText} : {}),
+          ...(el.tagName === 'VIDEO' && /^(Animated GIF|GIFアニメーション|アニメーションGIF)$/.test(el.getAttribute('aria-label') || '')
+            ? {isGIF:true} : {})};
+      }).filter(asset => asset.url);
   }
 
   function ctFavoriteTranslationMetadataBlock(node) {

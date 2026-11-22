@@ -1,3 +1,98 @@
+# 6.32.2 / 写真の横送りとピンチ操作（2026-11-22）
+
+- 生成6版の構文検査と `npm run check` の819件が成功。対象4スイートの190件に、スクロールのまとめ処理とズーム中の再探索を検証する回帰を含む。
+- 旧ZIP 6.32.1と現6.32.2を実Chromeの同じローカル写真で比較。同じ写真に24件のスクロールイベントを送ったとき、スタイル参照とALT構造検索はどちらも24回から0回へ減少。実時間のFPS測定ではありません。
+- 390px／1280px×6生成版の12ケースで写真の切り替えと表示サイズ、本文・下書き・元の操作を確認。横ホイール操作、幅を変えた後の選択保持、短い写真のALTの開閉も検証。
+- 上記の比較は架空画像を使ったChrome検証です。別途、iPhone 18 Pro Max（iOS 27.3）のStayに日本語Safari版を取り込み、実サイトのタイムラインと写真切り替えを確認しました。XCTestのスクロールFrame Rateは2回平均84.35fps、端末全体の別カウンターは有効区間で60fpsでした。写真切り替えの描画コールバック間隔の中央値は17msです。ディスプレイ提示FPSとAndroid実機は未確認です。
+
+---
+
+# 6.32.1候補 / Perchとスマホ向け案内（2026-11-22）
+
+- `npm run check` は生成6版と構文検査、**817件成功、失敗0**。初回は既存の保存検索テストが固定待ち時間の終了時にまだ処理中でした。ネイティブ検索の再入力とURL状態の変化を待つ試験に修正し、全件を再実行しました。
+- Chromeのローカル検証画面で6版を1280pxと390pxの両方で確認。固定ネストを開く元の操作、Perchへの移動、ダイアログの幅、日本語版の並べ替えラベル、ネスト名・ミュート語・本文の保持を確認しました。幅の再設定と検証用タブ・サーバーの片付けも完了しました。
+- 全6版の導入案内にスマホChromeについて追記しました。確認範囲はChromeでのローカル検証で、Safari・Android実機およびインストール済み拡張への適用は未確認です。
+
+---
+
+# 6.32.0候補 / NestsとPerch（2026-11-22）
+
+公式Web **2.11.6 / build 1795306956** の公開bundleとログイン済みWeb画面から、Nests一覧、オーナーの編集フォーム、ホームのPerchを確認しました。日本語版はネストの操作ラベルを翻訳し、名称・説明・ルール・ハッシュタグ・投稿・入力値を保持します。
+
+- `npm run check` は6版の生成・構文検査と **815件成功、失敗0、スキップ0**。初回はランタイム検証の抽出関数一覧に新規翻訳関数が漏れ、2件失敗しました。一覧を修正して再実行しました。
+- Chromeのローカル検証画面に生成済み6版を読み込んだ結果、6/6版で言語別ラベル・入力値・本文・標準フィード設定への移動を確認。既存のローカルキーワード設定を保持する回帰も通過しました。
+- 公式Webでのネスト保存確認と、更新版のローカル画面の検証は別です。Safari・Android実機、配布先への公開、インストール済み拡張への適用は未確認です。
+
+---
+
+# 6.31.0 candidate / 写真ごとの表示サイズ（2026-11-04）
+
+公式Tweet **2.9.2 / build1793656820**を公開HTML・bundleで照合し、写真・ALT構造は2.9.0から同じことを確認しました。単枚・複数の写真と自前Media/Favoritesの表示を、選択中の写真の実寸比へ合わせます。投稿本文・下書き・ALT原文・URL・既存保存データ・ネイティブ操作を保持します。
+
+- **最終自動検証:** `npm run check` **811 PASS／0 FAIL／0 SKIP**。6版生成・構文を含み、コード／試験／metadata／6配布版の64ファイルが最終snapshotと一致。新しい写真対象の分割runは162 PASSです。6版の名前・namespace・match・grant・connect等は前回から同じで、依存バージョンも変更しません。
+- **修正前の再現:** 6.30.0を同じ公式CSS・架空写真で動かすと、390pxと1280pxで異なる写真が同じ先頭画像比の黒枠へ入り、image elementの比が実寸比と異なることを再現しました。これは期待した不具合の記録であり、修正後の成功には数えません。
+- **生成版の実ブラウザ:** **18/18成功**。6版×320／390／1280pxで、選択写真5比率の90観測と、寸法metadata有／無単枚の36観測を確認。画像の矩形がnatural比になり、通常時のframe高は現在写真の高さへ追従し、背景は透明。画像のURL・ALT・本文・下書きと選択状態を保持し、window errors／外部API要求は0です。90／36は観測数で、別のテスト件数ではありません。
+- **自前Media/Favorites:** 実sourceのtimestamps／photo-viewport／profileを隔離IIFEで動かした**before/after×390／1280pxの4比較ケース成功**。実mouse.wheelの横送りを確認し、修正後は横scrollを保持したまま現在の写真高へ変わります。これは認証なしのsource harnessで、6生成版の受け入れ結果とは分けています。
+- **追加の境界ケース:** 生成JA版でresizeの選択保持、遅延・src再利用・srcset候補、broken画像、100×20の小画像と10000×30の極端横長を確認。写真visualは元の比と自然サイズを保ち、透明な操作領域は44px以上です。未知／失敗はviewport内で最大240pxの中立領域を使い、読み込めた写真だけ実寸へ合わせます。モーション軽減ONのcaseでも本文・下書きを保持し、errors／外部API要求0でした。
+- **ALT reader:** 小さな写真のnative ALTを開く間だけ読取高を確保。修正後はpopup168px全体が見え、content144pxで長文末尾へscroll可能、閉じると透明な44px操作領域へ戻りました。元の段落・操作・文字列を維持しています。
+- **独立レビュー:** 最終14対象source／metadata／試験／仕様と正式6版を照合し、未解決P1/P2指摘なし。小さい写真の44px領域、自前横scroll、native ALT reader、ResizeObserverの次frame更新を含めて再確認しました。
+- **途中の失敗:** 初回対象runはresize listenerのlifecycle差で154 PASS／1 FAILとなり、cleanupを直して155 PASSへ。新しい写真コードの初回全件809は成功しましたが、実ブラウザで短い写真のALT clippingとResizeObserver同期更新による警告が見つかりました。ALT時だけの読取高とcancellable RAF更新へ修正し、追加2回帰を含む最終811とブラウザを再実行しました。エラーを抑止したり、途中失敗を成功扱いしたりしていません。rootのfixture側ではARIAの日本語名、dotsの二重translate、lazy画像待ち等の確認手順も調整し、製品不具合と区別しています。
+
+最終代表の修正前／修正後の横長写真と、短い写真のALT readerを実際に閲覧し、黒い余白の解消と説明文の末尾を確認しました。ブラウザはChromeで、写真は**TESTと明示したローカルSVG**、公式2.9.2 CSSとsource-shaped markupを使います。画像はすべてローカルで応答し、認証済みTweetサービスは接続しません。Safari／Android向け配布名をChromeで確認した結果であり、実OS／端末や実アカウントの検証ではありません。元の製品素材を置き換えていません。
+
+記録はリポジトリ外 `outputs/tweet-refresh-2026-11-04/userscript/` の `npm-check.log`、`browser-before.json`、`browser-after.json`、`browser-owned.json`、`browser-edge.json`、`final-code-manifest.json`、および `latest/userscript-photo-review.json`。写真fixtureと代表画像は `output/playwright/tweet-photos-2026-11-04/` です。実機Safari/Stay・Android、実OS IME・VoiceOver発話、live ALT保存／投稿・GIF受理、実配信画像の全組合せは未確認です。公開・push・インストール済みスクリプトの変更は行っていません。
+
+---
+
+# 6.30.0 candidate / Tweet 2.9画像ALTへの追従（2026-10-29）
+
+公式HTML・bundleを匿名で取得し、Tweet **2.9.0 / build 1792965394** を確認しました。204 API route familyの追加・削除なし、公開media/public configは10月25日と同一です。画像ALTと新しい写真DOM、言語設定の差分へ対応します。公開6版は6.29.2、作業中のローカル候補は6.30.0です。
+
+- 元の本文・URL・画像alt・ALT説明文・編集textareaと標準の操作を保持。静的なALT案内のみ日本語化し、画像altが旧UIラベルと同じでも書き換えません。
+- 新しい画像wrapperでも元の画像buttonとALTの操作を分離。取得済み画像説明を写真・動画／保存お気に入り・backup/import・拡大画像に保持。ネイティブ編集の1,000 codepoint上限を読み取りへ流用せず、長文・改行・前後空白を往復できます。不正なoptional型のbackupは既存全体を変更せず拒否し、旧形式も読み込めます。
+- fullscreenのnative ALT段落は画像stageと配信画像リンクから領域を分離。元node・画像比率・既存の有限モーションとReduced Motionを保持します。
+- 新しいALT/既存media対象16件は **16 PASS／0 FAIL／0 SKIP**。最初の対象runでlegacy image/videoの3件が失敗しました（false値をDOM扱いした実装ミス）。null境界へ直し、対象の旧画像・GIF回帰を含めて成功を確認しました。途中失敗の記録はリポジトリ外に保持しています。
+- **最終自動検証:** `npm run check` **804 PASS／0 FAIL／0 SKIP**。6配布版の生成・構文を含み、権限/識別子を維持。新しいALTの保全、長文・不可視onlyのraw保持と表示/AX fallback、旧画像・GIF・account/非同期ガードを含みます。最初の全件runはruntime抽出型harnessの新関数未登録で2件失敗し、harnessを更新後803件成功、さらに可視判定の分離後804件を全件再実行しました。途中結果は別ログで保持しています。
+- **今回の実ブラウザ:** 最終6版×320／390／1280pxで **18/18レイアウト成功**（390pxはダーク、他幅はライト）。長い保存名・44px削除操作・元本文/下書き保持、実キーの削除後focus・未保存入力、GIF原題/query/標準handler、Reduced Motionのanimation/transition 0秒を確認しました。
+- **今回のALT実ブラウザ:** JA/EN×320／390／1280pxの **6/6成功**。2.9公開コード形状の架空popup/editorと公式CSS、最終生成版を使用。元のALT・textarea・image.alt・保存/cancelhandler、写真wrapperからviewer、長いALTのスクロール、画像/ALT/配信画像リンクの非重なりを確認。全画像URLは既存の検証素材をローカルから返し、実Tweetアカウント/APIへは接続していません。Chromeエンジンであり、配布名Safari/Androidは各実機の証拠ではありません。
+- browser側の初回GIF読取にはUI ready待ち、ALT viewer closeには実際の日本語ラベルに一致するselectorを加え、製品を変更せず再実行しました。最終結果は `browser-layout-results.json`、`browser-interaction-results.json`、`browser-alt-results.json`、試験した6版hashは `browser-tested-distributions.json`。rootが代表画像を実際に閲覧しました。
+- **独立ソースレビュー:** `latest/userscript-alt-review.json`。最終15ソース/試験/メタ情報と生成6版hashを保存し、未解決P1/P2指摘なし。新しい可視判定deltaも再確認済みです。6生成版はブラウザ試験・独立レビューのhashと一致します。
+- 全6案内、削除したURLカードruntimeの不存在、`git diff --check`を確認。新しいソース配布候補は `outputs/Classic-Twitter-6.30.0-20261029.zip`。旧成果物を保持し、公開・インストールとは分けています。10月24日・25日の結果を今回の新規成功として扱いません。
+- `tests/helpers/native-alt.cjs`は取得した2.9構造を使う架空データのfixtureです。認証・実Tweet投稿・GIF検索の受理・実OS IME・Safari/Android実機の成功を示しません。GitHub push・Greasy Fork公開・インストール済みスクリプト変更は行っていません。
+
+今回の記録: リポジトリ外 `outputs/tweet-refresh-2026-10-29/`。
+
+---
+
+# 6.29.3 candidate / 最新情報の再確認（2026-10-25）
+
+- 公式HTML・main bundleと公開設定を新規取得。Tweet **2.8.0 / build 1792815884** のmain bundleは10月24日とバイト同一。公開6版は6.29.2、origin/mainも前回の状態を保持しています。ローカル6.29.3の製品コード・依存関係は変更しません。
+- **今回の自動検証:** 全6版を再生成し、`npm run check` **794 PASS／0 FAIL／0 SKIP**。再生成した全6配布ファイルと前回候補がSHA256で一致しました。既知advisoryは新規のnpm auditで0件でした。
+- **既存画面検証の扱い:** 以下の18レイアウトケース・実キー操作・GIF／Reduced Motionの結果は**10月24日の履歴**です。同じ製品コードと同じ公式bundleのため今回は再実行せず、10月25日の新しい実ブラウザ成功として扱いません。実OSのIME、Safari／Android実機、実TweetのGIF検索・投稿受理は引き続き未確認です。
+- 確認日と監査記録のみを更新。前回ZIPは保持し、今回のソースと記録を `outputs/Classic-Twitter-6.29.3-20261025.zip` にまとめました。GitHub push・Greasy Fork公開・インストール済みスクリプトの変更は行っていません。
+
+今回の証拠はリポジトリ外 `outputs/tweet-refresh-2026-10-25/` に保存します。
+
+---
+
+# 6.29.3 candidate / 入力・保存一覧とTweet 2.8 GIF検索（2026-10-24の履歴）
+
+2026-10-24。ローカルの6版を生成した候補であり、GitHub push・Greasy Fork公開・既存Stay/Tampermonkeyへの反映は行っていません。
+
+- ToolsのIME保護、削除後focus、長文のボタン幅と、2.8 GIF検索の構造限定日本語化を変更。
+- **自動検証:** `npm run check` **794 PASS／0 FAIL／0 SKIP**。6版の再生成・構文を含む。Tools・viewport対象49件、localization・runtime対象179件も成功。Acorn 8.19.0、jsdom 26.1.0、最終npm auditは既知advisory 0。
+- **生成版fixture:** 全6版の起動・削除focus・GIF検索の言語と元下書き保持をJSDOMで確認し、6/6成功。外部要求0・記録エラー0。fixture検証側のcross-realm空配列比較を長さ判定に直してから全件再実行。
+- **独立レビュー:** 2.8の公開bundle構造と現在差分を別agentが読み取り照合し、P1/P2の指摘なし。GIFタイトル／query、native node／handler保持、IME end／blur、失敗保存と削除focusを確認。証拠は `latest/userscript-6293-independent-review.json`。
+- **画面・レイアウト:** Codex内のChromium系ブラウザで全6版×320／390／1280pxの**18/18ケース成功**。長い日英の保存名でも横overflowなし、panelは画面内、削除操作は縦横44px以上。開いた直後のCloseフォーカス・元下書きを保持。18ケースは同一エンジンのライト表示で、Safari／Android版という配布名は実Safari／Androidエンジンの証拠ではありません。
+- **実キー・クリック:** 日本語390pxダーク／英語320pxダークで、検索・保存投稿の削除後next／previous／空時input、Escape→trigger、再開時の未保存入力保持を確認。GIFの検索語・title="Close"を保持し、nativeクリア・選択ハンドラは各1回。元の投稿node／HTML・下書き不変、外部要求0・エラー0。Reduced Motionではanimation／transitionとも0秒を確認。
+- **証拠:** `userscript/browser-layout-results.json`、`browser-interaction-results.json`、`tools-ja-390-dark.png`、`tools-en-320-dark.png`、`gif-ja-390-dark.png`。fixtureは架空データと通信拒否の隔離環境です。実Tweetの検索／投稿やサーバー処理は実行していません。
+- 合成compositionイベントは実OSの日本語変換テストではありません。Chrome fixtureはSafari／Android実機、実TweetのGIF検索・投稿受理の証拠にはなりません。
+- 全6版のID・保存キー・元ノードを保持。標準GIF検索はnative、独自URLカードは撤去した状態を継続します。新しいklipy_gif metadataのMedia/Favorites再現は未対応です。
+
+証拠はリポジトリ外 `outputs/tweet-polish-2026-10-24/` に保存します。
+
+---
+
 # 6.29.2 / URLカード撤去とお気に入り同期の修正
 
 2026-10-19。ユーザー依頼で独自URLカード・プレビュー取得・専用設定・全サイト接続指定を撤去しました。投稿本文と元URL、通常リンク、独立したHomeリンク絞り込み、引用・画像・動画・ゲームカードは保持します。

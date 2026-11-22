@@ -6,6 +6,7 @@ const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(path.join(__dirname, '../src/media.js'), 'utf8');
 const photoViewport = fs.readFileSync(path.join(__dirname, '../src/photo-viewport.js'), 'utf8');
 const {galleryMarkup,viewerMarkup,installNativeViewer}=require('./helpers/native-media.cjs');
+const {photoGalleryMarkup,singlePhotoMarkup}=require('./helpers/native-photo-fit.cjs');
 
 function uploadMarkup(kind = 'home') {
   const submit = `<button id="${kind === 'modal' ? 'public-modal-tweet-submit-btn' : kind === 'reply' ? 'reply-submit' : 'public-tweet-submit-btn'}">Post</button>`;
@@ -588,6 +589,30 @@ test('native photo zoom retains layout size and position through 2x, 4x and brow
   Object.assign(v,{scale:1,width:390,height:740,offsetLeft:0,offsetTop:0});v.dispatchEvent(new f.window.Event('resize'));
   assert.equal(d.style.getPropertyValue('--ct-media-view-height'),'740px');assert.equal(d.classList.contains('ct-media-photo-zoomed'),false);
 });
+test('zoomed native photo pan preserves layout without rescanning the gallery on each viewport event', t => {
+  const f = motionViewer(t, { viewport: {} });
+  const viewport = f.window.visualViewport;
+  const initialStyle = f.native.dialog.style.cssText;
+  let galleryReads = 0;
+  const matches = f.grid.matches.bind(f.grid);
+  f.grid.matches = selector => { galleryReads++; return matches(selector); };
+  Object.assign(viewport, { scale: 2, width: 195, height: 422 });
+  viewport.dispatchEvent(new f.window.Event('resize'));
+  assert.ok(galleryReads > 0, 'entering zoom still reconciles the active viewer');
+  galleryReads = 0;
+  for (let i = 0; i < 12; i++) {
+    viewport.offsetLeft = i; viewport.offsetTop = i * 2;
+    viewport.dispatchEvent(new f.window.Event('scroll'));
+    viewport.dispatchEvent(new f.window.Event('resize'));
+  }
+  assert.equal(galleryReads, 0);
+  assert.equal(f.native.dialog.style.cssText, initialStyle);
+  assert.equal(f.preview, f.native.dialog.querySelector('img'));
+  Object.assign(viewport, { scale: 1, width: 390, height: 844, offsetLeft: 0, offsetTop: 0 });
+  viewport.dispatchEvent(new f.window.Event('resize'));
+  assert.ok(galleryReads > 0, 'leaving zoom reconciles even when the layout bounds match');
+  assert.deepEqual(f.native.clicked, [0]);
+});
 test('a photo opened while already zoomed starts at unscaled bounds rather than the shrinking viewport', t => {
   const f=harness(t,viewerMarkup({source:'https://media.tweet.app/photo.jpg'}));
   photoViewportFixture(f,{scale:2,width:195,height:422,offsetLeft:100,offsetTop:200});const d=f.document.querySelector('[role=dialog]');
@@ -693,4 +718,157 @@ test('native icon-only upload controls keep accessible names while selection and
   photo.setAttribute('aria-label','Native future photo control');f.enhance();assert.equal(photo.getAttribute('aria-label'),'Native future photo control');
   const g=harness(t,uploadMarkup(),{locale:'en'});g.enhance();assert.equal(g.document.getElementById('photo').getAttribute('aria-label'),'Add photos');
   assert.equal(g.document.getElementById('videos').multiple,false);assert.equal(g.document.getElementById('photos').multiple,true);
+});
+
+
+const {gallery290Markup,altViewerMarkup,altText}=require('./helpers/native-alt.cjs');
+test('Tweet 2.9 gallery binds only image openers and leaves native ALT actions and images intact',t=>{
+  const f=harness(t,'<main><article>'+gallery290Markup()+'</article></main>');
+  const gallery=f.document.getElementById('gallery-290'), images=[...gallery.querySelectorAll('img')];
+  let calls=0;const alt=gallery.querySelector('button[aria-controls]'); alt.onclick=()=>calls++;
+  const before=gallery.innerHTML; f.enhance();
+  assert.equal(f.qa.ctMediaGalleries.size,1); assert.equal(f.qa.ctMediaGalleries.get(gallery).slides[0],images[0].parentElement);
+  alt.click(); assert.equal(calls,1); assert.equal(f.qa.viewer,null);
+  assert.equal(gallery.innerHTML,before); assert.equal(images[0].alt,altText);
+});
+test('Tweet 2.9 fullscreen description keeps a separate native text region and is unmarked on viewer cleanup',t=>{
+  const f=harness(t,altViewerMarkup()); const dialog=f.document.getElementById('native-alt-viewer');
+  const description=dialog.querySelector('p'), image=dialog.querySelector('img'), raw=description.textContent;
+  f.enhance(); assert.ok(dialog.classList.contains('ct-media-native-alt-viewer'));
+  assert.ok(description.classList.contains('ct-media-viewer-alt')); assert.equal(description.textContent,raw); assert.equal(image.alt,altText);
+  assert.ok(dialog.querySelector('.ct-media-photo-quality a'));
+  description.remove(); f.enhance(); assert.equal(dialog.classList.contains('ct-media-native-alt-viewer'),false); assert.equal(description.classList.contains('ct-media-viewer-alt'),false);
+});
+
+function loadedPhoto(f, image, width, height) {
+  const data = { width, height, complete: true, current: image.src };
+  Object.defineProperties(image, {
+    naturalWidth: { configurable: true, get: () => data.width }, naturalHeight: { configurable: true, get: () => data.height },
+    complete: { configurable: true, get: () => data.complete }, currentSrc: { configurable: true, get: () => data.current }
+  });
+  return data;
+}
+function photoWidth(track, initial = 390) {
+  const size = { width: initial };
+  Object.defineProperty(track, 'clientWidth', { configurable: true, get: () => size.width });
+  return size;
+}
+function inlineFrameQueue(window) {
+  const frames = new Map();
+  let serial = 0;
+  window.requestAnimationFrame = callback => { const id = ++serial; frames.set(id, callback); return id; };
+  window.cancelAnimationFrame = id => frames.delete(id);
+  return {
+    frames,
+    flush() {
+      for (const [id, callback] of [...frames]) {
+        if (frames.delete(id)) callback();
+      }
+    }
+  };
+}
+test('selected native photo controls inline height across portrait, landscape, square and panorama without changing native controls', t => {
+  const f = harness(t, `<main>${photoGalleryMarkup()}</main>`), grid = f.document.getElementById('photo-fit-gallery'), shell = grid.parentElement;
+  const frame = inlineFrameQueue(f.window);
+  photoWidth(grid, 390); const images = [...grid.querySelectorAll('img')], nodes = [...shell.querySelectorAll('*')];
+  [[600,1000],[1200,600],[800,800],[1800,300]].forEach(([w,h],i) => loadedPhoto(f,images[i],w,h));
+  let clicks = 0; shell.querySelector('[data-inline-next]').onclick = () => clicks++;
+  f.enhance(); const height = () => parseFloat(shell.style.getPropertyValue('--ct-photo-inline-height'));
+  assert.equal(height(), 510);
+  for (const [index, expected] of [[1,195],[2,390],[3,65],[0,510]]) {
+    grid.scrollLeft = index * 390; grid.dispatchEvent(new f.window.Event('scroll')); frame.flush(); assert.equal(height(), expected);
+  }
+  shell.querySelector('[data-inline-next]').click(); assert.equal(clicks,1);
+  assert.deepEqual([...shell.querySelectorAll('*')],nodes); assert.equal(f.window.getComputedStyle(shell).backgroundColor,'rgba(0, 0, 0, 0)');
+  assert.match(f.document.getElementById('ct-photo-inline-style').textContent,/\.ct-photo-fit-image\{[^}]*width:auto!important;[^}]*height:auto!important/);
+  assert.equal(images[0].alt,'Portrait Home Close'); assert.equal(images[0].src,'https://media.tweet.app/test-portrait.svg');
+});
+test('inline swipe bursts fit only the latest selected photo and release pending work on pagehide', t => {
+  const f = harness(t, `<main>${photoGalleryMarkup()}</main>`);
+  const grid = f.document.getElementById('photo-fit-gallery'), shell = grid.parentElement;
+  const frame = inlineFrameQueue(f.window);
+  const computedStyle = f.window.getComputedStyle.bind(f.window);
+  let trackStyleReads = 0;
+  f.window.getComputedStyle = element => { if (element === grid) trackStyleReads++; return computedStyle(element); };
+  photoWidth(grid, 390);
+  [...grid.querySelectorAll('img')].forEach((image, i) => loadedPhoto(f, image, 1200, [1200,600,300,1200][i]));
+  f.enhance();
+  trackStyleReads = 0;
+  function scroll(left) {
+    grid.scrollLeft = left;
+    grid.dispatchEvent(new f.window.Event('scroll'));
+  }
+  for (let i = 0; i < 20; i++) scroll(i * 6);
+  assert.equal(trackStyleReads, 0);
+  assert.equal(frame.frames.size, 1);
+  frame.flush();
+  assert.equal(trackStyleReads, 0, 'moving within a selected page does not trigger style fitting');
+  assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'), '390px');
+  for (let i = 1; i <= 20; i++) scroll(i * 39);
+  assert.equal(frame.frames.size, 1);
+  assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'), '390px');
+  frame.flush();
+  assert.equal(trackStyleReads, 1);
+  assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'), '97.5px', 'fit uses the final offset instead of the intermediate page');
+  scroll(0);
+  f.window.dispatchEvent(new f.window.Event('pagehide'));
+  assert.equal(frame.frames.size, 0);
+  assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'), '');
+  assert.equal(grid.scrollLeft, 0);
+});
+test('single photos with or without first-party clamped dimensions use actual decoded dimensions', t => {
+  for (const metadata of [true,false]) {
+    const f=harness(t,`<main>${singlePhotoMarkup(undefined,{metadata})}</main>`),shell=f.document.getElementById('photo-fit-single'),image=shell.querySelector('img');
+    photoWidth(shell,390); const size=loadedPhoto(f,image,600,1000); f.enhance();
+    assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'510px'); assert.ok(shell.classList.contains('ct-photo-fit-shell'));
+    assert.equal(image.alt,'Portrait Home Close');
+    size.width=100;size.height=50;image.dispatchEvent(new f.window.Event('load'));
+    assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'50px','small photos keep their natural size without empty upscaled space');
+    size.height=20;image.dispatchEvent(new f.window.Event('load'));
+    assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'44px','tiny photos retain a transparent accessible pointer target');
+  }
+});
+test('photo reuse waits for its own load, keeps failed or unknown sizes neutral, and accepts responsive currentSrc candidates', async t => {
+  const f=harness(t,`<main>${singlePhotoMarkup()}</main>`),shell=f.document.getElementById('photo-fit-single'),image=shell.querySelector('img');
+  photoWidth(shell,390);const data=loadedPhoto(f,image,800,800);f.enhance();assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'390px');
+  image.src='https://media.tweet.app/new-photo.jpg'; data.complete=false; await new Promise(r=>setTimeout(r,0));
+  assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'240px');
+  data.complete=true;image.dispatchEvent(new f.window.Event('load'));assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'240px','stale previous currentSrc cannot provide a new ratio');
+  data.current=image.src;data.width=1200;data.height=600;image.dispatchEvent(new f.window.Event('load'));assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'195px');
+  data.width=0;data.height=0;image.dispatchEvent(new f.window.Event('error'));assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'240px');
+  image.srcset='https://media.tweet.app/responsive-1.jpg 1x, https://media.tweet.app/responsive-2.jpg 2x';await new Promise(r=>setTimeout(r,0));
+  data.current='https://media.tweet.app/responsive-2.jpg';data.width=800;data.height=800;image.dispatchEvent(new f.window.Event('load'));
+  assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'390px');
+  image.setAttribute('width','600');image.setAttribute('height','0');await new Promise(r=>setTimeout(r,0));assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'390px','invalid declared metadata does not replace decoded size');
+});
+test('photo resize preserves selected page and pinch layout; detached or no-longer-native frames release fitting', t => {
+  const f=harness(t,`<main>${photoGalleryMarkup()}</main>`,{viewport:{width:390,height:844,scale:1}}),grid=f.document.getElementById('photo-fit-gallery'),shell=grid.parentElement;
+  const width=photoWidth(grid,390);[...grid.querySelectorAll('img')].forEach(image=>loadedPhoto(f,image,800,800));f.enhance();
+  grid.scrollLeft=390;grid.dispatchEvent(new f.window.Event('scroll'));width.width=320;f.window.dispatchEvent(new f.window.Event('resize'));
+  assert.equal(grid.scrollLeft,320);assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'320px');
+  Object.assign(f.window.visualViewport,{scale:2,height:422});width.width=160;f.window.visualViewport.dispatchEvent(new f.window.Event('resize'));
+  assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'320px');
+  Object.assign(f.window.visualViewport,{scale:1,height:844});width.width=320;f.window.visualViewport.dispatchEvent(new f.window.Event('resize'));
+  grid.classList.remove('snap-x');f.enhance();assert.equal(shell.classList.contains('ct-photo-fit-shell'),false);assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'');
+  const previous=shell.getAttribute('style');grid.querySelector('img').dispatchEvent(new f.window.Event('load'));assert.equal(shell.getAttribute('style'),previous);
+});
+
+test('short photo opens its unchanged native ALT reader in a temporary readable area and returns to natural height', async t => {
+  const f=harness(t,`<main>${singlePhotoMarkup()}</main>`),shell=f.document.getElementById('photo-fit-single'),image=shell.querySelector('img');
+  photoWidth(shell,320);loadedPhoto(f,image,1800,300);f.enhance();
+  const control=shell.querySelector('button[aria-controls]'),panel=f.document.getElementById(control.getAttribute('aria-controls')),body=panel.querySelector('p');
+  const original=body.textContent;assert.ok(parseFloat(shell.style.getPropertyValue('--ct-photo-inline-height'))<60);
+  control.setAttribute('aria-expanded','true');panel.hidden=false;await new Promise(r=>setTimeout(r,0));
+  assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'240px');assert.equal(panel.querySelector('p'),body);assert.equal(body.textContent,original);
+  control.setAttribute('aria-expanded','false');panel.hidden=true;await new Promise(r=>setTimeout(r,0));
+  assert.ok(Math.abs(parseFloat(shell.style.getPropertyValue('--ct-photo-inline-height'))-320/6)<.001);
+});
+test('ResizeObserver only schedules a coalesced fit and detached galleries cancel the pending frame', t => {
+  const f=harness(t,`<main>${photoGalleryMarkup()}</main>`),grid=f.document.getElementById('photo-fit-gallery'),shell=grid.parentElement;
+  let resize;f.window.ResizeObserver=class{constructor(fn){resize=fn;}observe(){}unobserve(){}};
+  const frames=new Map();let serial=0;f.window.requestAnimationFrame=fn=>{const id=++serial;frames.set(id,fn);return id;};f.window.cancelAnimationFrame=id=>frames.delete(id);
+  const size=photoWidth(grid,390);[...grid.querySelectorAll('img')].forEach(image=>loadedPhoto(f,image,800,800));f.enhance();
+  size.width=320;resize([{target:grid}]);resize([{target:grid}]);assert.equal(frames.size,1);assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'390px','observer does not synchronously resize its observed layout');
+  const fn=[...frames.values()][0];frames.clear();fn();assert.equal(shell.style.getPropertyValue('--ct-photo-inline-height'),'320px');
+  size.width=300;resize([{target:grid}]);assert.equal(frames.size,1);grid.remove();f.enhance();assert.equal(frames.size,0);
 });

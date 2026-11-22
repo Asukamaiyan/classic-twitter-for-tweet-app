@@ -91,10 +91,16 @@
     if (!grid?.matches('div.flex.w-full.snap-x.snap-mandatory.overflow-x-auto.overscroll-x-contain') ||
         !grid.closest('main,article') || grid.closest('[data-ct-local-ui],[data-ct-owned]') ||
         !grid.parentElement?.matches('div.relative.overflow-hidden.rounded-2xl.border.bg-black')) return [];
-    const slides = [...grid.children];
-    if (slides.length < 2 || slides.length > 16 || slides.some(slide =>
-        !slide.matches('button[type="button"].relative.w-full.min-w-full.shrink-0.snap-start.bg-black') ||
-        slide.children.length !== 1 || !slide.firstElementChild.matches('img.h-full.w-full.object-cover') ||
+    const wrappers = [...grid.children];
+    // 2.9 wraps each native opener and its independent ALT popover in a slide.
+    // Return the opener in both versions; never bind swipe/open to ALT controls.
+    const slides = wrappers.map(slide => slide.matches('div.relative.w-full.min-w-full.shrink-0.snap-start.bg-black') &&
+      slide.children.length <= 2 && (!slide.children[1] || slide.children[1].matches('div.contents'))
+      ? slide.firstElementChild : slide);
+    if (slides.length < 2 || slides.length > 16 || slides.some((slide, index) =>
+        !(slide?.matches('button[type="button"].relative.w-full.min-w-full.shrink-0.snap-start.bg-black') ||
+          slide?.matches('button[type="button"].h-full.w-full.cursor-pointer') && slide.parentElement === wrappers[index]) ||
+        slide.children.length !== 1 || !slide.firstElementChild.matches('img.h-full.w-full:is(.object-cover,.object-contain)') ||
         !ctMediaQualityURL(slide.firstElementChild.src))) return [];
     const sources = slides.map(slide => slide.firstElementChild.src);
     return new Set(sources).size === sources.length ? slides : [];
@@ -103,7 +109,8 @@
     const slides = ctMediaSlides(grid);
     if (!slides.length) return;
     const existing = ctMediaGalleries.get(grid);
-    if (existing) { existing.slides = slides; existing.shell.classList.add('ct-media-native-gallery'); return; }
+    const fit = () => ctPhotoInlineFit(grid.parentElement, grid, [...grid.children], slides, slides.map(slide => slide.firstElementChild));
+    if (existing) { existing.slides = slides; existing.shell.classList.add('ct-media-native-gallery'); fit(); return; }
     // Record the native opener only. Its scroll snap, dots, keyboard/click
     // handlers and counts remain untouched; no second inline carousel is made.
     const state = { grid, slides, shell: grid.parentElement };
@@ -115,12 +122,32 @@
     };
     grid.addEventListener('click', state.onClick, true);
     ctMediaGalleries.set(grid, state);
+    fit();
   }
   function ctMediaRemoveGallery(state) {
+    ctPhotoInlineRemove(ctPhotoInlineFrames.get(state.grid));
     state.shell.classList.remove('ct-media-native-gallery');
     state.grid.removeEventListener('click', state.onClick, true);
     ctMediaGalleries.delete(state.grid);
     if (ctMediaPendingViewer?.state === state) ctMediaPendingViewer = null;
+  }
+  function ctMediaSinglePhotoParts(image) {
+    const fluid = image.matches('img.w-full.object-cover') && [...image.classList].some(name => name.startsWith('max-h-['));
+    const framed = image.matches('img.h-full.w-full.object-contain');
+    if ((!fluid && !framed) || !image.closest('main,article') ||
+        image.closest('[data-ct-local-ui],[data-ct-owned]') || !ctMediaQualityURL(image.src)) return null;
+    const opener = image.parentElement, shell = opener?.parentElement;
+    if (!opener?.matches('button[type="button"].block.w-full.cursor-pointer') || opener.children.length !== 1 ||
+        !shell?.matches('div.relative') || shell.children.length > 2 ||
+        shell.children.length === 2 && !shell.children[1].matches('div.contents') ||
+        framed && (!opener.classList.contains('h-full') || !shell.matches('div.relative.overflow-hidden.rounded-2xl.border.bg-black'))) return null;
+    return { shell, opener };
+  }
+  function ctMediaFitSinglePhoto(image) {
+    const parts = ctMediaSinglePhotoParts(image);
+    if (!parts) return;
+    const state = ctPhotoInlineFit(parts.shell, parts.shell, [parts.opener], [parts.opener], [image]);
+    if (state) state.kind = 'nativeSingle';
   }
   function ctMediaNativePhotoViewer(dialog) {
     if (!dialog?.matches('div[role="dialog"][aria-modal="true"]:is([aria-label="Media viewer"],[aria-label="写真・動画ビューア"])') ||
@@ -353,18 +380,22 @@
     if (touch.pointer != null) try { touch.capture?.releasePointerCapture(touch.pointer); } catch {}
   }
   function ctMediaViewport(dialog) {
+    const wasZoomed = dialog.classList.contains('ct-media-photo-zoomed');
     const fit = ctPhotoViewportFit(dialog, '--ct-media-view-');
     dialog.classList.toggle('ct-media-photo-zoomed', fit.zoomed);
-    if (ctMediaViewer?.dialog === dialog && (fit.zoomed || fit.changed)) {
+    // Once pinch has cancelled a swipe, subsequent zoomed pan events have
+    // fixed layout bounds and need no native gallery rescan.
+    if (ctMediaViewer?.dialog === dialog && (fit.zoomed !== wasZoomed || fit.changed)) {
       ctMediaCancelPhotoGesture(ctMediaViewer); ctMediaEnhanceViewer();
     }
   }
   function ctMediaCenterViewers() {
     for (const [dialog, state] of ctMediaCenteredViewers) {
       if (dialog.isConnected && ctMediaNativePhotoViewer(dialog)) continue;
-      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed');
+      dialog.classList.remove('ct-media-centered-viewer', 'ct-media-viewport-viewer', 'ct-media-photo-zoomed', 'ct-media-native-alt-viewer');
       state.stage.classList.remove('ct-media-viewer-stage');
       state.header?.classList.remove('ct-media-viewer-header');
+      state.alt?.classList.remove('ct-media-viewer-alt');
       ctMediaReleasePhotoQuality(dialog);
       for (const key of ['top', 'left', 'width', 'height']) dialog.style.removeProperty(`--ct-media-view-${key}`);
       ctMediaCenteredViewers.delete(dialog);
@@ -375,14 +406,19 @@
       const { image, stage, header } = native;
       const previous = ctMediaCenteredViewers.get(dialog);
       if (previous && previous.stage !== stage) previous.stage.classList.remove('ct-media-viewer-stage');
+      const alt = [...dialog.children].find(el => el.matches('p[aria-hidden="true"].whitespace-pre-wrap.break-words') &&
+        el.firstElementChild?.matches('span') && el.firstElementChild.textContent.trim() === 'ALT');
+      if (previous?.alt && previous.alt !== alt) previous.alt.classList.remove('ct-media-viewer-alt');
       dialog.classList.add('ct-media-centered-viewer');
+      dialog.classList.toggle('ct-media-native-alt-viewer', !!alt);
+      alt?.classList.add('ct-media-viewer-alt');
       // Contained native viewers remain inside their existing modal. Only the
       // verified fixed viewer follows the visible viewport on mobile browsers.
       dialog.classList.toggle('ct-media-viewport-viewer', dialog.classList.contains('fixed'));
       stage.classList.add('ct-media-viewer-stage');
       header?.classList.add('ct-media-viewer-header');
       ctMediaAttachPhotoQuality(dialog, image);
-      ctMediaCenteredViewers.set(dialog, { stage, header });
+      ctMediaCenteredViewers.set(dialog, { stage, header, alt });
       ctMediaViewport(dialog);
     }
     if (ctMediaViewportBound) return;
@@ -795,6 +831,9 @@
       .ct-media-photo-resolution { padding:5px 8px; background:#0009; border-radius:4px; white-space:nowrap; }
       .ct-media-photo-quality[hidden],.ct-media-photo-quality [hidden] { display:none!important; }
       .ct-media-centered-viewer > .ct-media-viewer-stage { position:absolute!important; inset:0; box-sizing:border-box; width:100%; height:100%; min-height:0; min-width:0; display:flex!important; align-items:center!important; justify-content:center!important; padding:calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-right)) calc(64px + max(env(safe-area-inset-top),env(safe-area-inset-bottom))) max(12px,env(safe-area-inset-left))!important; }
+      .ct-media-native-alt-viewer > .ct-media-viewer-stage { position:relative!important; inset:auto!important; height:auto!important; flex:1 1 0%; padding-bottom:12px!important; }
+      .ct-media-native-alt-viewer > .ct-media-viewer-alt { position:relative; z-index:2; box-sizing:border-box; width:100%; max-height:min(8rem,30%); flex-shrink:0; overflow-y:auto; margin-bottom:calc(96px + env(safe-area-inset-bottom))!important; }
+      .ct-media-native-alt-viewer .ct-media-photo-pane { padding-bottom:12px; }
       .ct-media-viewer-stage > img { display:block; width:auto!important; height:auto!important; max-width:100%!important; max-height:100%!important; object-fit:contain!important; }
       .ct-media-swipe-stage { touch-action:pan-y pinch-zoom; }
       .ct-media-photo-zoomed .ct-media-swipe-stage { touch-action:pan-x pan-y pinch-zoom; }
@@ -823,6 +862,8 @@
   }
   function ctMediaEnhance(root = document) {
     ctMediaStyles();
+    ctPhotoInlinePrune();
+    for (const state of ctPhotoInlineFrames.values()) if (state.kind === 'nativeSingle' && !ctMediaSinglePhotoParts(state.images[0])) ctPhotoInlineRemove(state);
     for (const [dialog, state] of ctMediaPhotoQuality) {
       if (!dialog.isConnected || !state.image.isConnected || !dialog.contains(state.image)) ctMediaReleasePhotoQuality(dialog);
     }
@@ -839,6 +880,9 @@
     const grids = [...root.querySelectorAll?.('div.flex.snap-x.snap-mandatory.overflow-x-auto') || []];
     if (root.matches?.('div.flex.snap-x.snap-mandatory.overflow-x-auto')) grids.push(root);
     grids.forEach(ctMediaObserveGallery);
+    const singles = [...root.querySelectorAll?.('img.w-full:is(.object-cover,.object-contain)') || []];
+    if (root.matches?.('img.w-full:is(.object-cover,.object-contain)')) singles.push(root);
+    singles.forEach(ctMediaFitSinglePhoto);
     const videos = [...root.querySelectorAll?.('video[controls]') || []];
     if (root.matches?.('video[controls]')) videos.push(root);
     videos.forEach(ctMediaEnhanceVideo);

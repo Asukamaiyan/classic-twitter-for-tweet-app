@@ -1582,3 +1582,70 @@ test('a reversed profile photo drag toward an undecoded neighbor retains the cen
   assert.equal(h.stage.querySelector('.ct-profile-photo-layer'), null); assert.equal(h.image.classList.contains('ct-profile-photo-covered'), false);
   await h.prepare(0); assert.equal(h.api.state.viewer.index, 0); assert.equal(h.image.src, 'https://images.example/gesture-0.jpg');
 });
+
+
+test('Tweet 2.9 image descriptions survive API, Favorite storage, backup and viewer without editor-length truncation', async t => {
+  const h=harness(t); await h.ready();
+  const alt='  Home\nLike Close https://example.org/?q=原文#写真 '+ '🙂長文'.repeat(600)+'  ';
+  const media=[{media_type:'image',public_url:'https://images.example/alt.jpg',alt_text:alt}];
+  assert.equal(h.api.assets({media_assets:media})[0].altText,alt);
+  h.api.remember([post('alt-original',media,{hasLiked:true})],'uid-viewer');
+  assert.equal(h.api.load()[0].media[0].altText,alt);
+  const backup=JSON.parse(h.api.backup()); assert.equal(backup.items[0].media[0].altText,alt);
+  backup.items[0].id='alt-imported'; assert.equal(h.api.importBackup(JSON.stringify(backup)),1);
+  assert.equal(h.api.load().find(item=>item.id==='alt-imported').media[0].altText,alt);
+  await h.select('favorites');
+  const photo=h.document.querySelector('[data-ct-profile-post="alt-imported"] .ct-profile-photo');
+  assert.equal(photo.querySelector('img').alt,alt); assert.ok(photo.getAttribute('aria-label').endsWith(alt));
+  h.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
+  h.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
+  photo.click(); assert.equal(h.document.querySelector('dialog img').alt,alt);
+  assert.equal(h.api.load().find(item=>item.id==='alt-imported').text,'User text <script> News Edited Like');
+});
+
+test('optional ALT backup values reject wrong types atomically while old backups still import', async t => {
+  const h=harness(t); await h.ready(); h.api.save(item('kept',{media:[{type:'image',url:'https://images.example/a.jpg',poster:''}]}));
+  const backup=JSON.parse(h.api.backup()), before=h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer');
+  for (const [type,altText] of [['image',false],['image',{text:'Home'}],['video','Home']]) {
+    const invalid=JSON.parse(JSON.stringify(backup)); invalid.items[0].media[0]={type,url:'https://images.example/a.jpg',poster:'',altText};
+    assert.throws(()=>h.api.importBackup(JSON.stringify(invalid)),/format/);
+    assert.equal(h.window.localStorage.getItem('legacy.favorites:uid:uid-viewer'),before);
+  }
+  backup.items[0].id='old-import'; assert.equal(h.api.importBackup(JSON.stringify(backup)),1);
+  assert.equal(h.api.load().find(item=>item.id==='old-import').media[0].altText,undefined);
+});
+
+
+test('invisible-only ALT stays raw in storage and backups but uses meaningful photo accessibility fallbacks',async t=>{
+  const h=harness(t);await h.ready();
+  const raw=' \n\u200b\u0301\u0007\u115f\u3164\u2800';
+  h.api.remember([post('invisible-alt',[{media_type:'image',public_url:'https://images.example/invisible.jpg',alt_text:raw}],{hasLiked:true})],'uid-viewer');
+  assert.equal(h.api.load()[0].media[0].altText,raw);assert.equal(JSON.parse(h.api.backup()).items[0].media[0].altText,raw);
+  await h.select('favorites');const photo=h.document.querySelector('.ct-profile-photo');
+  assert.equal(photo.getAttribute('aria-label'),'Enlarge photo 1/1');assert.equal(photo.querySelector('img').alt,'Post photo 1/1');
+  h.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
+  h.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
+  photo.click();assert.equal(h.document.querySelector('dialog img').alt,'Photo 1/1');assert.equal(h.api.load()[0].media[0].altText,raw);
+});
+
+test('owned Media and Favorites photo rows follow the selected decoded ratio without offscreen reflow or content loss', async t => {
+  const h=harness(t);await h.ready();h.api.save(item('fit-row',{media:[
+    {type:'image',url:'https://images.example/fit-portrait.jpg',altText:'Home\nLike Close'},
+    {type:'image',url:'https://images.example/fit-landscape.jpg',altText:'Landscape 原文'}
+  ]}));await h.select('favorites');
+  const gallery=h.document.querySelector('.ct-profile-gallery');Object.defineProperty(gallery,'clientWidth',{configurable:true,value:390});
+  const images=[...gallery.querySelectorAll('img')],sizes=[];
+  for(const [index,image] of images.entries()){
+    const size={width:index?1200:600,height:index?600:1000};sizes.push(size);
+    Object.defineProperties(image,{complete:{configurable:true,value:true},currentSrc:{configurable:true,get:()=>image.src},
+      naturalWidth:{configurable:true,get:()=>size.width},naturalHeight:{configurable:true,get:()=>size.height}});
+    image.dispatchEvent(new h.window.Event('load'));
+  }
+  assert.equal(gallery.style.getPropertyValue('--ct-photo-inline-height'),'480px');
+  assert.equal(h.window.getComputedStyle(gallery).overflowX,'auto','photo fitting retains direct touch/trackpad horizontal scrolling');
+  gallery.scrollLeft=398;gallery.dispatchEvent(new h.window.Event('scroll'));await new Promise(resolve=>h.window.requestAnimationFrame(resolve));assert.equal(gallery.style.getPropertyValue('--ct-photo-inline-height'),'195px');
+  sizes[0].height=1800;images[0].dispatchEvent(new h.window.Event('load'));assert.equal(gallery.style.getPropertyValue('--ct-photo-inline-height'),'195px','offscreen portrait cannot grow the selected landscape');
+  h.api.patch();assert.equal(h.document.querySelector('.ct-profile-gallery'),gallery);assert.equal(gallery.scrollLeft,398);
+  assert.equal(images[0].alt,'Home\nLike Close');const saved=h.api.load()[0];assert.equal(saved.media[0].altText,'Home\nLike Close');
+  h.route('/feed');h.api.patch();const previous=gallery.getAttribute('style');images[1].dispatchEvent(new h.window.Event('load'));assert.equal(gallery.getAttribute('style'),previous);
+});
