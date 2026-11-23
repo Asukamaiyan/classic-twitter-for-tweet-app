@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese Android
 // @namespace    https://tweet.app/
-// @version      6.32.2
+// @version      6.32.3
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -2936,7 +2936,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.32.2';
+    document.documentElement.dataset.ctActiveVersion = '6.32.3';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -10291,6 +10291,25 @@ if (/^just\s+now$/i.test(t)) {
     return null;
   }
 
+  function nativeNestAllowanceJapaneseText(text) {
+    const translated = text
+      .replace(/^Start a Nest for people who share an interest\. /, '同じ話題に興味がある人が集まるネストを作れます。')
+      .replace(/You own (\d+) of (\d+) Nests?\. (\d+|None) left\./,
+        (_, owned, cap, remaining) => `ネストは上限${cap}件のうち${owned}件を作成済みです。${remaining === 'None' ? '残りはありません。' : `あと${remaining}件作れます。`}`)
+      .replace(/You own (\d+) Nests?\. Staff have no limit\./, 'ネストを$1件所有しています。スタッフには上限がありません。')
+      .replace(/You own (\d+)( live)? Nests?, over the limit of (\d+)\.(?: None left\.)?/, 'ネストを$1件所有しており、上限の$3件を超えています。')
+      .replace(/You own (\d+) live Nests?, the most you can\./, '運営中のネストは上限の$1件です。')
+      .replace(/You're at your limit of (\d+) Nests?\./, 'ネストは上限の$1件に達しています。')
+      .replace(/ A Nest you left still counts until the team gives it a new owner\./, '退出したネストも、運営が新しい管理者を決めるまでは上限に含まれます。')
+      .replace(/ (\d+) Nests you left still count until the team gives them a new owner\./, '退出した$1件のネストも、運営が新しい管理者を決めるまでは上限に含まれます。')
+      .replace(/ Delete (one|\d+) to (create another\.|publish this, or save it as a draft\.?)$/,
+        (_, count, action) => action.startsWith('create') ? `新しく作るには、${count === 'one' ? 1 : count}件削除してください。` :
+          `公開するには${count === 'one' ? 1 : count}件削除してください。下書きとして保存することもできます。`)
+      .replace(/ Create is back once the team gives it a new owner\.$/, '運営が新しい管理者を決めると、再び作成できます。')
+      .replace(/ You can still save a draft\.?$/, '下書きは引き続き保存できます。');
+    return translated === text ? null : translated;
+  }
+
   // Nest names, descriptions, norms and hashtags belong to their authors.
   // Identify Tweet 2.11's own controls and metadata before matching its labels.
   function nativeNestJapaneseText(el, text, attr = null, node = null) {
@@ -10302,6 +10321,13 @@ if (/^just\s+now$/i.test(t)) {
       ['A Nest is a home for a Flock: people who share a topic. Joining is always optional, and your feed works the same without it.',
         'ネストは、同じ話題を楽しむ仲間が集まる場所です。参加は自由で、参加しなくてもタイムラインはこれまでどおり使えます。'],
       ['Create a Nest', 'ネストを作成'], ['Loading Nest…', 'ネストを読み込み中…'], ['Loading Nests…', 'ネストを読み込み中…'],
+      ["Drafts don't count.", '下書きは上限に含まれません。'], ['Draft', '下書き'], ['Try again', '再試行'],
+      ['Checking whether you can create a Nest…', 'ネストを作成できるか確認中…'],
+      ["We couldn't check whether you can create a Nest. Try again in a moment.", 'ネストを作成できるか確認できませんでした。少し待ってからお試しください。'],
+      ['Creating a Nest is part of a paid membership. You can still join and post in Nests.', 'ネストの作成は有料メンバー向けです。既存のネストへの参加や投稿はできます。'],
+      ["Nests aren't available to you right now.", '現在、ネストを利用できません。'],
+      ["This draft doesn't exist. It may have been published or deleted.", 'この下書きは見つかりません。公開または削除された可能性があります。'],
+      ['Draft · only you can see it', '下書き · 自分だけに表示'],
       ['Loading your Nests…', '参加中のネストを読み込み中…'], ['No Nests yet.', 'まだネストがありません。'],
       ["You're in every Nest listed.", '一覧のネストにはすべて参加しています。'],
       ["Couldn't load Nests", 'ネストを読み込めませんでした'], ["Couldn't load this Nest", 'ネストを読み込めませんでした'],
@@ -10326,6 +10352,10 @@ if (/^just\s+now$/i.test(t)) {
       ['Uploading cover photo…', 'カバー画像をアップロード中…'], ['Uploading nest picture…', 'ネストのアイコンをアップロード中…'],
       ['Name', '名前'], ['Hashtags', 'ハッシュタグ'], ['Hashtags (optional)', 'ハッシュタグ（任意）'],
       ['Norms (optional)', 'ルール（任意）'], ['Add a norm', 'ルールを追加'], ['Who can see it', '公開範囲'],
+      ['What the Nest is called. Has to be unique. Up to 50 characters.', 'ほかのネストと重複しない名前を50文字以内で入力してください。'],
+      ['What the Nest is called. Only its members see it. Up to 50 characters.', '名前は50文字以内で、メンバーだけに表示されます。'],
+      ["A hidden Nest's web address doesn't use its name. It never changes.", '非表示のネストのURLには名前が含まれません。作成後もURLは変わりません。'],
+      ['Its web address comes from the name and never changes, even after a rename.', 'URLは最初の名前をもとに作成され、名前を変えても変わりません。'],
       ['Who it\'s for and what people do there.', 'どんな人が集まり、どんな話をする場所か。'],
       ['1 to 5, separated by spaces. Public posts with any of them also show in the Nest. Other Nests can use the same hashtags.',
         '1〜5個を空白で区切って入力します。このハッシュタグの公開投稿もネストに表示され、ほかのネストでも同じタグを使えます。'],
@@ -10355,16 +10385,22 @@ if (/^just\s+now$/i.test(t)) {
       ['Save draft', '下書きを保存'], ['Save', '保存'], ['Saving…', '保存中…'], ['Delete draft', '下書きを削除'],
       ['Delete this Nest', 'このネストを削除'], ['Delete Nest', 'ネストを削除'], ['Leave this Nest', 'このネストから退出'],
       ['Hand this Nest over', 'ネストの管理を引き継ぐ'],
+      ['Make another member the owner. They need to be able to create a Nest themselves. You stay a member.', 'ネストを作成できる別のメンバーに管理を引き継ぎます。あなたは引き続きメンバーとして参加できます。'],
+      ['Choose a new owner', '新しい管理者を選ぶ'], ['Loading the Flock…', 'メンバーを読み込み中…'],
+      ["Couldn't load the Flock.", 'メンバーを読み込めませんでした。'], ['Show more members', 'さらにメンバーを表示'],
       ['Anyone can see this. It also shows in the main feed.', '誰でも閲覧でき、メインのタイムラインにも表示されます。'],
       ["Only members see this, and Tweet's rules still apply. It can't be reposted or quoted outside the Nest.",
         'メンバーだけが閲覧でき、Tweetのルールが適用されます。ネストの外ではリツイートや引用はできません。'],
       ['Nest invites', 'ネストへの招待'], ['Choose who can invite you to a Nest.', 'ネストに招待できる相手を選びます。'],
       ['Choose who can invite you to join a Nest.', 'ネストに招待できる相手を選びます。'],
       ['Who can invite you to a Nest', 'ネストに招待できる相手'], ['No one', '誰からも受け取らない'],
+      ['People you follow', 'フォローしている人'], ['Only people you follow can invite you.', 'あなたがフォローしている人だけが招待できます。'],
+      ['People you follow who follow you back', '相互フォローの人'],
+      ['Invites only come from your followers, so this also needs them to follow you.', 'お互いにフォローしている人からだけ招待を受け取ります。'],
       ['Nobody can invite you to a Nest. You can still join public Nests.', '招待は届きませんが、公開ネストには参加できます。'],
       ["Couldn't load your Nest invite setting.", 'ネストの招待設定を読み込めませんでした。']
     ]);
-    if (!words.has(text) && !/^(?:Edit|Join|Joined|Pinned\. Unpin|Pin to Home:|Norm|Remove norm|Yes, delete|Public Nest|Private Nest|Hidden Nest|Post in|Posting in|Started|Always shown|Up to|, up to|characters each\.|in the Flock|new$|"$|For anyone keeping|[\d,]+ in the Flock|[A-Za-z]{3} \d{4}$)/u.test(text)) return null;
+    if (!words.has(text) && !/^(?:Edit|Join|Joined|Pinned\. Unpin|Pin to Home:|Norm|Remove norm|Yes, delete|Public Nest|Private Nest|Hidden Nest|Post in|Posting in|Started|Always shown|Up to|, up to|characters each\.|in the Flock|new$|"$|For anyone keeping|[\d,]+ in the Flock|[A-Za-z]{3} \d{4}$|You own |You're at your limit of |Start a Nest for people who share an interest\.)/u.test(text)) return null;
     if (isOwnedLocalizationElement(el) || el.closest(
       'article,blockquote,.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[data-user-content],[translate="no"],.notranslate,' +
       '[contenteditable]:not([contenteditable="false"]),[data-testid="tweet-text"],[data-testid="profile-bio"]')) return null;
@@ -10378,6 +10414,17 @@ if (/^just\s+now$/i.test(t)) {
     const form = el.closest('form');
     const nestForm = form && ((edit && form.querySelector('textarea[data-nest-field="description"][maxlength="500"]')) ||
       (creation && main && form.querySelector('input[name="nest-visibility"]') && form.querySelector('textarea[maxlength="500"]')));
+    if (!attr && main && !truncated) {
+      if (listing && el.matches('p.text-tl-app-text-muted') &&
+          el.parentElement?.matches('div.flex.items-center.justify-between.border-b') &&
+          el.nextElementSibling?.matches('button[type="button"]') &&
+          /^(?:Create a Nest|ネストを作成)$/.test(clean(el.nextElementSibling.textContent))) return nativeNestAllowanceJapaneseText(text);
+      if (creation && el.matches('p.px-4.border-b.text-tl-app-text-muted') &&
+          el.nextElementSibling?.matches('form') && el.nextElementSibling.querySelector('input[name="nest-visibility"]')) {
+        return text === "Drafts don't count." ? words.get(text) : nativeNestAllowanceJapaneseText(text);
+      }
+      if (creation && el.matches('.animate-fadeIn > div.px-6.py-16.text-center > :is(p,button)')) return words.get(text) || null;
+    }
     if (nestForm && !truncated && !el.closest('details > div[inert]')) {
       if (attr === 'placeholder' && el.matches('textarea[maxlength="500"]') && text === 'For anyone keeping something green alive indoors…') return 'どんなネストか、気軽に紹介してみよう…';
       if (attr === 'aria-label') {
@@ -10387,6 +10434,7 @@ if (/^just\s+now$/i.test(t)) {
             el.parentElement?.querySelector('input[type="file"][accept="image/*"]')) return words.get(text);
       }
       if (attr || el.matches('textarea,input,option') || el.closest('button:has(img)')) return null;
+      if (creation && el.matches('li') && /^(?:You own |You're at your limit of )/.test(text)) return nativeNestAllowanceJapaneseText(text);
       if (text === 'Up to' && node?.nextSibling?.nodeValue === '5' && node.parentElement.previousElementSibling?.matches('legend')) return '最大';
       if (text === ', up to' && node?.previousSibling?.nodeValue === '5' && node.nextSibling?.nodeValue === '200') return '項目、各';
       if (text === "characters each. They add to Tweet's rules." && node?.previousSibling?.nodeValue === '200') return '文字まで。Tweetのルールに加えて適用されます。';
@@ -10429,6 +10477,8 @@ if (/^just\s+now$/i.test(t)) {
     const tabs = el.closest('[role="tablist"][aria-label="Nest sections"],[role="tablist"][aria-label="ネストのタブ"]');
     if (tabs && (attr === 'aria-label' && el === tabs || !attr && el.closest('[role="tab"][aria-controls^="nest-"]'))) return words.get(text) || null;
     const directory = el.closest('section[aria-labelledby="nests-your-nests"],section[aria-labelledby="nests-more-nests"],section[aria-labelledby="nests-nests-to-explore"]');
+    if (listing && main && !attr && text === 'Draft · only you can see it' &&
+        el.matches('span.text-tl-app-text-muted') && el.closest('section[aria-labelledby="nests-drafts"]')) return words.get(text);
     const rail = el.closest('section[aria-labelledby^="nest-norms-"],section[aria-labelledby^="nest-coming-up-"],section[aria-labelledby^="nest-flock-"]');
     const header = detail && main && el.closest('div.overflow-x-clip')?.querySelector(':scope > div.px-4 > p.tl-user-text');
     if (attr && (directory || header)) {
@@ -10458,7 +10508,7 @@ if (/^just\s+now$/i.test(t)) {
     }
     if (!truncated && (directory || rail || header)) return words.get(text) || null;
     if (main && listing && el.matches('h2.truncate') && el.closest('.sticky') && text === 'Nests') return words.get(text);
-    if (main && creation && el.matches('h2.truncate') && el.closest('.sticky') && /^(?:Create a Nest|Draft Nest)$/.test(text)) return words.get(text);
+    if (main && creation && el.matches('h2.truncate') && el.closest('.sticky') && /^(?:Create a Nest|Draft Nest|Draft)$/.test(text)) return words.get(text);
     if (main && (listing || creation || detail) && !truncated && !el.closest('button:has(img)') &&
         /^(?:Create a Nest|Drafts|Loading (?:your )?Nests?…|Couldn't load (?:this Nest|Nests)|Couldn't load Nests\. Try again later\.|This Nest doesn't exist)$/.test(text)) return words.get(text) || null;
     return null;
@@ -10479,6 +10529,25 @@ if (/^just\s+now$/i.test(t)) {
       ['Muted', 'ミュート中'], ['Add a mute', 'ミュートを追加'], ['Video', '動画'],
       ['Autoplay', '自動再生'], ['On', 'オン'], ['Wi-Fi only', 'Wi-Fi接続時のみ'], ['Off', 'オフ'],
       ['Format', '表示形式'], ['Normal', '標準'], ['Less video', '動画を減らす'],
+      ['Choose when videos play, and how much video you see.', '動画を自動再生する条件と、フィードでの表示方法を設定できます。'],
+      ['Videos play on their own, muted.', '動画を音声なしで自動再生します。'],
+      ['Videos play on their own only when your device says it’s on Wi-Fi.', '端末がWi-Fiに接続しているときだけ、動画を自動再生します。'],
+      ['Videos wait for a tap.', '動画はタップすると再生されます。'],
+      ['Video posts show as small cards in every feed. Tap one to watch it.', '動画付きの投稿をすべてのフィードで小さなカードとして表示します。タップすると再生できます。'],
+      ['Your device asks for reduced motion, so videos wait for a tap. Choose On to play them anyway.',
+        '端末で動きを減らす設定が有効なため、動画はタップすると再生されます。自動再生するには「オン」を選んでください。'],
+      ['Your device is saving data, so videos wait for a tap. Choose On to play them anyway.',
+        '端末でデータ節約が有効なため、動画はタップすると再生されます。自動再生するには「オン」を選んでください。'],
+      ['Couldn’t save. Try again.', '保存できませんでした。もう一度お試しください。'],
+      ['Your settings changed somewhere else. Here’s the latest.', '別の場所で設定が変更されたため、最新の内容を表示しています。'],
+      ['Followed hashtags', 'フォロー中のハッシュタグ'],
+      ['Posts with these hashtags are added to your Following feed. Unfollow one here to take its posts out of Following.',
+        'フォローしたハッシュタグの投稿が「フォロー中」に表示されます。ここでフォローを解除すると、そのタグ経由の投稿を表示しなくなります。'],
+      ['Loading followed hashtags...', 'フォロー中のハッシュタグを読み込み中…'],
+      ['Loading more followed hashtags', 'フォロー中のハッシュタグをさらに読み込み中…'],
+      ["You aren't following any hashtags.", 'フォロー中のハッシュタグはありません。'],
+      ['Something went wrong loading hashtags you follow.', 'フォロー中のハッシュタグを読み込めませんでした。'],
+      ['Load more', 'さらに読み込む'], ['View and change what you have muted.', 'ミュートしている人・ハッシュタグ・語句を確認、変更できます。'],
       ['Reset filters', 'フィルターをリセット'], ['Reset', 'リセット'], ['Keep', 'そのままにする'],
       ['Reset your filters? Your mutes stay, and so does the feed Tweet opens to.',
         'フィルターをリセットしますか？ ミュートと、Tweetを開いたときのフィード設定は保持されます。'],
@@ -10506,7 +10575,9 @@ if (/^just\s+now$/i.test(t)) {
       ["Make a list, or pin a Nest you're in, and it shows here.", 'リストを作るか、参加中のネストを固定すると、ここに表示されます。'],
       ['Add a tab', 'タブを追加'], ['Pin a Nest', 'ネストを固定'], ['New list', 'リストを作成']
     ]);
-    if (!words.has(text) && !/^(?:Your Perch:|Muted |Change how long: |Unmute |Move |Unpin |Mute [@#]|\d+ more muted$|.+, Nest(?:, |$))/.test(text)) return null;
+    if (!words.has(text) && !/^(?:Your Perch:|Muted |Change how long: |Unmute |Move |Unpin |Mute [@#]|\d+ more muted$|.+, Nest(?:, |$)|(?:View|Unfollow|Unfollowing) #|Could not unfollow #)/.test(text)) return null;
+    if (!attr && /^(?:Muted|View and change what you have muted\.)$/.test(text) &&
+        isNativeSettingsNavigation(el) && !isOwnedLocalizationElement(el)) return words.get(text);
     if (isOwnedLocalizationElement(el) ||
         el.closest('article,blockquote,.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,.truncate,[class*="line-clamp-"],[data-user-content],[translate="no"],.notranslate,[contenteditable]:not([contenteditable="false"])')) return null;
 
@@ -10517,6 +10588,36 @@ if (/^just\s+now$/i.test(t)) {
     if (attr === 'aria-label' && el.matches('button[data-nest-pill]')) {
       const name = /^(.+), Nest(?:, ([\d,]+\+?) new)?$/.exec(text);
       return name ? `${name[1]}、ネスト${name[2] ? `、新着${name[2]}件` : ''}` : null;
+    }
+    if (/^\/settings\/?$/.test(location.pathname)) {
+      const section = el.closest('main section.flex.flex-col.flex-1.min-w-0');
+      if (section && !attr && text === 'Muted' && el.matches('span.font-extrabold') &&
+          el.parentElement?.matches('div.sm\\:hidden') && el.parentElement.parentElement === section) return words.get(text);
+      const panel = el.closest('div.flex.flex-col.gap-5');
+      const container = panel?.closest('div.p-5');
+      const heading = panel?.querySelector(':scope > div:first-child > h4.font-extrabold');
+      const title = clean(heading?.textContent);
+      const kind = /^(?:Video|動画)$/.test(title) ? 'video' :
+        /^(?:Muted|ミュート中)$/.test(title) ? 'muted' :
+        /^(?:Followed hashtags|フォロー中のハッシュタグ)$/.test(title) ? 'hashtags' : null;
+      if (!section || !kind || container?.parentElement !== section) return null;
+      if (attr === 'placeholder') return kind === 'muted' && el.matches('input[type="text"][maxlength="100"]') ? words.get(text) || null : null;
+      if (attr === 'aria-label' && kind === 'hashtags' && el.matches('button')) {
+        const tag = /^(View|Unfollow|Unfollowing) (#[^\s]+)$/.exec(text);
+        if (tag) return tag[1] === 'View' ? `${tag[2]}を表示` : tag[1] === 'Unfollow' ? `${tag[2]}のフォローを解除` : `${tag[2]}のフォローを解除中…`;
+      }
+      if (attr === 'aria-label' && kind === 'muted' && el.matches('button')) {
+        const action = /^(Change how long: |Unmute )(.+)$/.exec(text);
+        if (action) return `${action[2]}のミュート${action[1] === 'Unmute ' ? 'を解除' : '期間を変更'}`;
+      }
+      if (attr === 'aria-label' && (el.matches('button') ||
+          kind === 'muted' && el.matches('[role="radiogroup"][aria-label="Mute a word or hashtag"]'))) return words.get(text) || null;
+      if (attr || el.matches('textarea,input,option') || el.closest('button:has(img)')) return null;
+      if (kind === 'hashtags' && el.matches('[role="alert"],[role="alert"] span')) {
+        const error = /^Could not unfollow (#[^\s]+)\. Please try again\.$/.exec(text);
+        if (error) return `${error[1]}のフォローを解除できませんでした。もう一度お試しください。`;
+      }
+      return words.get(text) || null;
     }
     if (!/^\/feed\/?$/.test(location.pathname)) return null;
     if (text === 'Open Nest' && !attr && el.matches('[data-home-nest-tab] > div:first-child > button')) return words.get(text);
@@ -10733,7 +10834,8 @@ if (/^just\s+now$/i.test(t)) {
     const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],[role="dialog"][aria-modal="true"][aria-label="Choose a GIF"],ul[aria-label="Choose a GIF"],div[aria-label="Choose image"],a[aria-label^="Open the post by @"],section[aria-label="Pinned posts"],' +
       '#sidebar-pinned-nests,#menu-pinned-nests,[role="tablist"][aria-label="Nest sections"],a[data-guide-link^="nests"],' +
       'a[data-guide-link="perchOverview"],[role="menu"][aria-label="Add a tab"],ul[aria-label="Your Perch"],' +
-      '[role="dialog"][aria-modal="true"]:has(a[data-guide-link="perchOverview"]) :is([role="group"],[role="radiogroup"],[role="status"])[aria-label], #perch-home-tabs ~ ol [draggable][title]';
+      '[role="dialog"][aria-modal="true"]:has(a[data-guide-link="perchOverview"]) :is([role="group"],[role="radiogroup"],[role="status"])[aria-label], #perch-home-tabs ~ ol [draggable][title],' +
+      'main section [role="radiogroup"][aria-label="Mute a word or hashtag"]';
     if (host instanceof Element && host.matches(selector)) controls.push(host);
     host?.querySelectorAll?.(selector).forEach(el => controls.push(el));
     // Tweet 2.2.3 owns these photo controls. Match their actual structure so an
@@ -10821,13 +10923,15 @@ if (/^just\s+now$/i.test(t)) {
     // Dynamic replacements belong to their specific UI contexts. In particular,
     // never parse actor names or dates from arbitrary text that resembles a UI.
     const el = node.parentElement;
+    const guideLink = text === 'Guides' && el.matches('aside nav button > span') &&
+      el.parentElement.querySelector(':scope > svg.lucide-book-open');
     const timestamp = nativeTimestampJapaneseText(el, text);
     const sourceLanguage = isNativeTranslationMetadata(el) && node === el.firstChild && text.match(/^Translated from (.{1,80})$/);
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
     const accountAction = nativeLocalizationAccountMenu(el) && text.match(/^(Mute|Unmute) (@[A-Za-z0-9_.-]+)$/);
     const parentPoll = nativeLocalizationParentPostPreview(el) && el.matches('p.mt-1.text-tl-app-text-muted') && text.match(/^Poll · ([2-5]) choices$/);
     let out = nativeAltJapaneseText(el, text) || nativeGIFPickerJapaneseText(el, text) || native26JapaneseText(el, text) || nativePinJapaneseText(el, text) || nativeGameJapaneseText(el, text) || nativeSessionJapaneseText(el, text) || (parentPoll ? `投票 · ${parentPoll[1]}個の選択肢` : null) || nativeMediaUploadJapaneseText(el, node.nodeValue) || nativeBlockJapaneseText(el, text) || nativePollJapaneseText(el, text) || (accountAction ? accountAction[1] === 'Mute' ? `${accountAction[2]}をミュート` : `${accountAction[2]}のミュートを解除` : null) || timestamp ||
-      (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) ||
+      (sourceLanguage ? `${JP.get(sourceLanguage[1]) || sourceLanguage[1]}から翻訳` : null) || (guideLink ? 'ガイド' : null) ||
       (remaining ? `${remaining[1]}個のコードが残っています` :
       isNativeEditedIndicator(el) ? '編集済み' :
       isNativeTweetCount(el) && /^([\d,.]+[KMB]?) tweets?$/i.test(text) ? `${text.match(/^([\d,.]+[KMB]?)/)[1]}件のツイート` :
@@ -11562,6 +11666,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.32.2 loaded'
+    '🐦 Classic Twitter JP v6.32.3 loaded'
   );
 })();

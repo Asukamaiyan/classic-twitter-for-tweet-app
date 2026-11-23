@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.32.3 — Japanese settings and Nest messages (2026-11-23)
+
+- Localize verified Tweet 2.11.7 video, followed hashtags, mutes, Nest ownership and invitation settings, including their loading and empty states.
+- Keep the native controls, saved choices, names, hashtags and user-written text.
+
 ## 6.32.2 — Smoother photo scrolling (2026-11-22)
 
 - Align inline carousel updates to the browser’s rendering cadence. Skip repeated photo fitting during motion within the same active slide.
