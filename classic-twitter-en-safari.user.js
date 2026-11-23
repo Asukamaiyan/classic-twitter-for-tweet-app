@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Safari
 // @namespace    https://tweet.app/
-// @version      6.32.3
+// @version      6.32.4
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -411,10 +411,11 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
   let backend = mobile ? null : 'window', probing = false, registration = null;
   let observed = [], signature = '';
   const observer = new MutationObserver(() => refresh());
+  const accountSelector = 'aside button:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])';
 
   function identity() {
     const handles = [];
-    for (const button of document.querySelectorAll('aside button[aria-label="Account menu"]')) {
+    for (const button of document.querySelectorAll(accountSelector)) {
       if (button.closest('[data-ct-local-ui],[data-ct-owned],article')) continue;
       const block = [...button.children].find(el => el.matches('div.flex-1.min-w-0'));
       const label = block && [...block.children].find(el => el.matches('p') &&
@@ -428,7 +429,7 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
 
   function controls() {
     const found = [];
-    for (const svg of document.querySelectorAll('aside nav svg[data-icon],nav[aria-label="Mobile navigation"] > div > button > svg[data-icon]')) {
+    for (const svg of document.querySelectorAll('aside nav svg[data-icon],nav:is([aria-label="Mobile navigation"],[aria-label="モバイルナビゲーション"]) > div > button > svg[data-icon]')) {
       if (!/^(bell|bell-filled)$/.test(svg.getAttribute('data-icon') || '') ||
           svg.closest('[data-ct-local-ui],[data-ct-owned],article')) continue;
       const size = svg.getAttribute('width');
@@ -532,7 +533,7 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
 
   function watch(rows) {
     const roots = enabled && active ? [...new Set([...rows.map(row => row.root),
-      ...document.querySelectorAll('aside button[aria-label="Account menu"]')].filter(Boolean))] : [];
+      ...document.querySelectorAll(accountSelector)].filter(Boolean))] : [];
     if (roots.length === observed.length && roots.every((root, i) => root === observed[i])) return;
     observer.disconnect(); observed = roots;
     for (const root of roots) observer.observe(root, { childList: true, subtree: true, characterData: true,
@@ -2937,7 +2938,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.32.3';
+    document.documentElement.dataset.ctActiveVersion = '6.32.4';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -6392,6 +6393,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   };
   const ctBadgeImageStates = new WeakMap();
   const ctBadgeRequests = new WeakMap();
+  const ctBadgeAccountSelector = '[role="dialog"]:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])';
 
   function ctBadgeLabel(kind) {
     const labels = { founder: '創設メンバー', fighter: 'ファイター', centurion: 'センチュリオン',
@@ -6536,7 +6538,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   function ctBadgeAccountTarget(dialog) {
-    if (!dialog?.isConnected || !dialog.matches('[role="dialog"][aria-label="Account menu"]')) return null;
+    if (!dialog?.isConnected || !dialog.matches(ctBadgeAccountSelector)) return null;
     const name = dialog.querySelector('button.block.text-left > p.font-extrabold.truncate');
     const handle = name?.nextElementSibling;
     if (!handle?.matches('p.truncate') || !/^@/.test(handle.textContent.trim())) return null;
@@ -6632,9 +6634,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (host.matches?.('img[src]')) images.push(host);
     images.forEach(ctUpgradeBadgeImage);
     ctPatchNativeBadgeDescriptions(images, host);
-    const scopes = new Set(root.querySelectorAll?.('article,[role="dialog"][aria-label="Account menu"]') || []);
-    if (root.matches?.('article,[role="dialog"][aria-label="Account menu"]')) scopes.add(root);
-    const parent = root.closest?.('article,[role="dialog"][aria-label="Account menu"]');
+    const scopes = new Set(root.querySelectorAll?.(`article,${ctBadgeAccountSelector}`) || []);
+    if (root.matches?.(`article,${ctBadgeAccountSelector}`)) scopes.add(root);
+    const parent = root.closest?.(`article,${ctBadgeAccountSelector}`);
     if (parent) scopes.add(parent);
     const requests = [];
     for (const scope of scopes) {
@@ -9258,5 +9260,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.32.3 loaded');
+  console.log('🐦 Classic Twitter EN v6.32.4 loaded');
 })();

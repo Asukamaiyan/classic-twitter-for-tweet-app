@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.32.4 — More Japanese interface labels (2026-11-23)
+
+- Localize Nest notifications, invitations, ownership transfer, withdrawal, deletion and visibility confirmations, and remaining list counters.
+- Localize account menu accessibility, theme choices, mute durations and referral controls in verified native layouts.
+- Translate Perch autoplay and video controls and feedback for feed settings changes, mutes and undo.
+- Preserve native event handlers, chosen settings, account and Nest names, and user-authored content.
+
 ## 6.32.3 — Japanese settings and Nest messages (2026-11-23)
 
 - Localize verified Tweet 2.11.7 video, followed hashtags, mutes, Nest ownership and invitation settings, including their loading and empty states.
