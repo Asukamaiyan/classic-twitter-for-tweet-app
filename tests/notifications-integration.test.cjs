@@ -115,7 +115,7 @@ for (const { file, locale } of distributions) {
     assert.equal(reply.querySelector('.break-words').textContent, 'Home Following Settings');
     assert.equal(document.querySelector('textarea').value, 'Home Following draft');
     assert.equal(reply.querySelector('button[aria-label]').getAttribute('aria-label'), "View @alice's profile");
-    const drawer = document.querySelector('[role="dialog"][aria-label="Account menu"]');
+    const drawer = document.querySelector(`[role="dialog"][aria-label="${english ? 'Account menu' : 'アカウントメニュー'}"]`);
     assert.equal(drawer.querySelector('p.font-extrabold').textContent, 'Home');
     assert.equal(drawer.querySelectorAll('.ct-official-badges').length, 1);
     assert.equal(drawer.querySelector('p.text-sm').textContent, '@alice');
@@ -157,7 +157,7 @@ for (const { file, locale } of distributions) {
     drawer.remove();
     document.body.insertAdjacentHTML('beforeend', account);
     await wait(250);
-    assert.equal(document.querySelectorAll('[aria-label="Account menu"] .ct-official-badges').length, 1, 'a newly opened mobile drawer is enhanced by the normal mutation scan');
+    assert.equal(document.querySelectorAll(`[aria-label="${english ? 'Account menu' : 'アカウントメニュー'}"] .ct-official-badges`).length, 1, 'a newly opened mobile drawer is enhanced by the normal mutation scan');
     assert.deepEqual(errors, []);
   });
 }

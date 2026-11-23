@@ -43,12 +43,13 @@ function fixture(language, html, route = '/feed') {
   ];
   const japanese = [
     'ctLocalizationRegularText', 'ctLocalizationClassicText',
-    'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
+    'isNativeSettingsValue', 'nativeSettingsExtraJapaneseText', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
     'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber', 'nativeTimestampJapaneseText',
     'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
     'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
     'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia', 'nativeGIFPickerJapaneseText', 'nativeAltJapaneseText', 'nativeNestAllowanceJapaneseText', 'nativeNestJapaneseText', 'nativePerchJapaneseText',
-    'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError',
+    'nativePerchAutoplayJapaneseText', 'nativePerchDurationJapaneseText', 'nativePerchFeedbackJapaneseText', 'nativePerchToastJapaneseText',
+    'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError', 'nativeAccountDrawer', 'patchNativeAccountChrome',
     'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
     'nativeLocalization26Context', 'native26JapaneseText', 'patchNative26UI',
     'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText',
@@ -81,6 +82,54 @@ function fixture(language, html, route = '/feed') {
   }
   return { dom, document, qa, run, text: id => document.getElementById(id).textContent };
 }
+
+test('ja: native settings localize theme, mute duration, account warning and invite links', () => {
+  const f = fixture('ja', `<main><section class="flex sm:flex flex-col flex-1 min-w-0">
+    <button id="theme" type="button" class="font-mono" title="App Theme: SYSTEM (Click to cycle)"
+      aria-label="App theme: system. Click to cycle between light, dark, and system."><svg class="lucide-moon"></svg><span class="capitalize font-bold">system</span></button>
+    <button id="remove" type="button"><span><span class="font-bold text-red-500">Delete account</span>
+      <span id="warning" class="leading-relaxed">Permanently delete your account and its content.</span></span></button>
+    <div class="p-5"><div class="flex flex-col gap-5"><div><h4 class="font-extrabold">Muted</h4></div>
+      <div class="flex min-w-0 flex-1 flex-col"><span id="person" class="text-xs font-bold text-tl-app-text truncate">Always</span>
+        <span id="duration" class="truncate text-[0.6875rem] text-tl-app-text-muted">Always</span></div>
+    </div></div>
+    <div class="flex flex-col gap-5"><fieldset><input name="nest-invites-from" type="radio" value="following" checked></fieldset>
+      <div id="feedback" role="status" aria-live="polite" aria-atomic="true">Couldn't save. Try again.</div>
+    </div>
+    <section aria-labelledby="free-invite-heading"><div><h4 id="free-invite-heading">Free invite link</h4><span id="quota" class="rounded-full border"></span></div>
+      <div id="the-link" class="font-mono break-all select-all">https://example.com/Copy</div>
+      <div class="flex flex-row gap-2"><button type="button" id="copy">Copy</button><button type="button" id="mail">Email</button></div>
+    </section>
+    <p class="tl-user-text" id="body">Free invite link</p><span id="other">system</span>
+  </section></main>`, '/settings');
+  const { document } = f;
+  const quota = document.getElementById('quota');
+  quota.append('2', ' of ', '5', ' free invites left');
+  const countNodes = [...quota.childNodes];
+  const theme = document.getElementById('theme');
+  let clicks = 0;
+  theme.addEventListener('click', () => clicks++);
+  f.run();
+  assert.equal(f.text('theme'), '端末の設定');
+  assert.match(theme.title, /端末の設定/);
+  assert.match(theme.getAttribute('aria-label'), /ライト、ダーク、端末の設定/);
+  assert.equal(f.text('warning'), 'アカウントと投稿内容を完全に削除します。');
+  assert.equal(f.text('person'), 'Always');
+  assert.equal(f.text('duration'), '無期限');
+  assert.equal(f.text('feedback'), '保存できませんでした。もう一度お試しください。');
+  assert.equal(document.querySelector('[name="nest-invites-from"]').checked, true);
+  assert.equal(f.text('free-invite-heading'), '無料招待リンク');
+  assert.equal(f.text('quota'), '2 / 5 件の無料招待が残っています');
+  assert.deepEqual([...quota.childNodes], countNodes);
+  assert.equal(f.text('the-link'), 'https://example.com/Copy');
+  assert.equal(f.text('copy'), 'コピー');
+  assert.equal(f.text('mail'), 'メールで送る');
+  assert.equal(f.text('body'), 'Free invite link');
+  assert.equal(f.text('other'), 'system');
+  theme.click();
+  assert.equal(clicks, 1);
+  f.dom.window.close();
+});
 
 test('ja: native edited tweet/reply metadata translates without touching content or names', () => {
   const f = fixture('ja', `<article>
@@ -595,6 +644,56 @@ for (const language of ['ja', 'en']) {
     f.dom.window.close();
   });
 }
+
+test('ja: native account controls and mobile guides localize without changing identities or handlers', t => {
+  const f = fixture('ja', `
+    <aside><button id="desktop-account" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">
+      <img class="rounded-full object-cover" alt="Guides avatar"><div class="flex-1 min-w-0">
+        <p class="truncate" id="desktop-name">Guides</p><p class="text-tl-app-text-muted truncate" id="desktop-handle">@myaccount</p></div></button></aside>
+    <header><div class="min-h-(--app-mobile-header-height)"><button id="mobile-trigger" class="absolute rounded-full" type="button" aria-expanded="true" aria-label="Open profile menu">
+      <div class="rounded-full object-cover" role="img" aria-label="Guides avatar placeholder"></div></button></div></header>
+    <nav id="mobile-nav" aria-label="Mobile navigation"><div><button><svg data-icon="bell"></svg></button></div></nav>
+    <div id="drawer" role="dialog" aria-modal="true" aria-label="Account menu"><div class="px-4 pt-5 pb-4">
+      <button class="block text-left"><img class="rounded-full object-cover" alt="Guides avatar"><p class="truncate font-extrabold">Guides</p><p class="truncate">@myaccount</p></button>
+      <span id="following"><strong>7</strong> Following</span></div>
+      <div class="flex-1 py-2"><button id="guide" class="w-full text-left" type="button"><svg class="lucide-book-open"></svg><span>Guides</span></button></div></div>
+    <article><button id="protected" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu"><img alt="Account menu avatar"></button>
+      <p data-user-content id="post">Guides</p></article>
+    <div id="other" role="dialog" aria-modal="true" aria-label="Account menu"><button class="w-full text-left" type="button"><svg class="lucide-book-open"></svg><span>Guides</span></button></div>
+  `);
+  t.after(() => f.dom.window.close());
+  const { document } = f;
+  const desktop = document.getElementById('desktop-account');
+  const trigger = document.getElementById('mobile-trigger');
+  const guide = document.getElementById('guide');
+  const avatar = desktop.firstElementChild;
+  let handlerCalls = 0;
+  for (const button of [desktop, trigger, guide]) button.addEventListener('click', () => handlerCalls++);
+  f.run();
+  assert.equal(desktop.getAttribute('aria-label'), 'アカウントメニュー');
+  assert.equal(desktop.getAttribute('aria-expanded'), 'false');
+  assert.equal(avatar.alt, 'Guidesのプロフィール画像');
+  assert.equal(trigger.getAttribute('aria-label'), 'プロフィールメニューを開く');
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+  assert.equal(trigger.firstElementChild.getAttribute('aria-label'), 'Guidesのプロフィール画像の代替表示');
+  assert.equal(document.getElementById('mobile-nav').getAttribute('aria-label'), 'モバイルナビゲーション');
+  assert.equal(document.getElementById('drawer').getAttribute('aria-label'), 'アカウントメニュー');
+  assert.equal(f.text('following').trim(), '7 フォロー中');
+  assert.equal(f.text('guide'), 'ガイド');
+  assert.equal(f.text('desktop-name'), 'Guides');
+  assert.equal(f.text('desktop-handle'), '@myaccount');
+  assert.equal(f.text('post'), 'Guides');
+  assert.equal(f.text('other'), 'Guides');
+  assert.equal(document.getElementById('other').getAttribute('aria-label'), 'Account menu');
+  assert.equal(document.getElementById('protected').getAttribute('aria-label'), 'Account menu');
+  assert.equal(document.getElementById('protected').firstElementChild.alt, 'Account menu avatar');
+  avatar.alt = 'Settings avatar';
+  f.run(avatar);
+  assert.equal(avatar.alt, 'Settingsのプロフィール画像');
+  assert.equal(handlerCalls, 0);
+  for (const button of [desktop, trigger, guide]) button.click();
+  assert.equal(handlerCalls, 3);
+});
 
 test('ja: mobile account menu counts translate while display name stays unchanged', () => {
   const f = fixture('ja', `<div role="dialog" aria-label="Account menu">
@@ -2018,6 +2117,70 @@ test('ja: native Perch and mobile Nest tabs localize without changing names or c
   f.dom.window.close();
 });
 
+test('ja: native Perch chips translate mode labels and preserve mute words and state on redraw', () => {
+  const f = fixture('ja', `<div role="dialog" aria-modal="true" aria-labelledby="perch-title">
+    <h2 id="perch-title">Your Perch</h2><a data-guide-link="perchOverview"></a>
+    <ul class="flex flex-wrap gap-2" aria-label="Your Perch"><li><button id="mode" type="button" aria-expanded="false"
+      aria-controls="perch-panel" aria-label="Autoplay wi-fi only, change"></button></li>
+    <li><button id="video" type="button" aria-expanded="false" aria-controls="perch-panel" aria-label="Less video, change"></button></li>
+    <li><button id="mute-label" type="button" aria-expanded="false" aria-controls="perch-panel"
+      aria-label="Muted “Off”, until tomorrow, change"><span id="word" class="truncate">Off</span></button></li></ul>
+    <div id="perch-panel"></div></div>
+    <div role="dialog" aria-modal="true" aria-labelledby="other-title"><h2 id="other-title">Other</h2>
+    <ul aria-label="Your Perch"><li><button id="unrelated-chip" type="button" aria-expanded="false"
+      aria-controls="other-panel" aria-label="Autoplay on, change"></button></li></ul><div id="other-panel"></div></div>`);
+  const mode = f.document.getElementById('mode');
+  f.run();
+  assert.equal(mode.getAttribute('aria-label'), '動画の自動再生：Wi-Fi接続時のみ、変更');
+  assert.equal(f.document.getElementById('video').getAttribute('aria-label'), '動画を減らす、変更');
+  assert.equal(f.document.getElementById('mute-label').getAttribute('aria-label'), '“Off”をミュート中（明日まで）、変更');
+  assert.equal(f.text('word'), 'Off');
+  assert.equal(f.document.getElementById('unrelated-chip').getAttribute('aria-label'), 'Autoplay on, change');
+  mode.setAttribute('aria-label', 'Autoplay off, change');
+  mode.setAttribute('aria-expanded', 'true');
+  f.run(mode);
+  assert.equal(mode.getAttribute('aria-label'), '動画の自動再生：オフ、変更');
+  assert.equal(mode.getAttribute('aria-expanded'), 'true');
+  assert.equal(mode.getAttribute('aria-controls'), 'perch-panel');
+  f.dom.window.close();
+});
+
+test('ja: native Perch feedback and Undo localize through redraws without changing matching content', () => {
+  const f = fixture('ja', `<main><button data-perch-pill aria-haspopup="dialog" aria-expanded="false" aria-label="Your Perch"></button>
+    <article><p class="tl-user-text" id="post">Video back to normal</p></article></main>
+    <div class="pointer-events-none fixed inset-x-0 z-[120] flex justify-center">
+      <div class="pointer-events-auto flex items-center gap-3 rounded-full bg-sky-500" role="status" aria-live="polite">
+        <span id="perch-toast">Autoplay wi-fi only</span><button id="undo" type="button" class="shrink-0 font-bold underline">Undo</button>
+      </div>
+    </div><div role="status" aria-live="polite"><span id="other-toast">Filters reset</span></div>`);
+  const status = f.document.getElementById('perch-toast');
+  const undo = f.document.getElementById('undo');
+  f.run();
+  assert.equal(status.textContent, '動画の自動再生を「Wi-Fi接続時のみ」にしました');
+  assert.equal(undo.textContent, '元に戻す');
+  assert.equal(f.text('post'), 'Video back to normal');
+  assert.equal(f.text('other-toast'), 'Filters reset');
+  undo.firstChild.nodeValue = 'Undo';
+  f.run(undo.firstChild);
+  assert.equal(undo.textContent, '元に戻す');
+  for (const [source, expected] of [
+    ['Tweet opens to Following', 'Tweetを開いたときに「フォロー中」を表示します'],
+    ['Video back to normal', '動画の表示を標準に戻しました'], ['Filters reset', 'フィルターをリセットしました'],
+    ['Unmuted “a  b”', '“a  b”のミュートを解除しました'], ['“Off” muted until tomorrow', '“Off”をミュート中（明日まで）'],
+    ['Undone', '元に戻しました']
+  ]) {
+    status.firstChild.nodeValue = source;
+    f.run(status.firstChild);
+    assert.equal(status.textContent, expected);
+  }
+  status.firstChild.nodeValue = 'Unrelated feedback';
+  undo.firstChild.nodeValue = 'Undo';
+  f.run(status.parentElement);
+  assert.equal(undo.textContent, 'Undo');
+  assert.equal(status.textContent, 'Unrelated feedback');
+  f.dom.window.close();
+});
+
 test('ja: native Perch mute sheet keeps the typed word and expiration radio values', () => {
   const f = fixture('ja', `<div role="dialog" aria-modal="true" aria-labelledby="mute-title">
     <form><h3 id="mute-title">Mute a word or phrase</h3>
@@ -2225,4 +2388,107 @@ test('ja: Nest invite settings localize audience choices and preserve the select
   assert.equal(f.document.querySelector('input:checked'), chosen);
   assert.deepEqual([...f.document.querySelectorAll('input')].map(input => input.value), ['following', 'mutuals', 'none']);
   assert.deepEqual(['following', 'mutuals', 'none'].map(id => f.document.getElementById(id).firstChild), labels);
+});
+
+test('ja: Nest detail translates current notification controls and metadata without rewriting the Nest', t => {
+  const f = fixture('ja', `<main><div class="overflow-x-clip"><div class="px-4 pb-4">
+    <div class="relative"><button id="notification" aria-haspopup="menu" aria-expanded="true" title="Notifications: Off" aria-label="Notifications for Pokémon: Off"><svg></svg></button>
+      <div id="menu" role="menu" aria-label="Notifications for Pokémon"><button id="off" role="menuitemradio" aria-checked="true"><span id="off-label">Off</span><span id="hint">No notifications. New posts still show a count.</span></button></div>
+    </div><button id="report" title="Report this Nest" aria-label="Report Pokémon"><svg></svg></button>
+    <div class="mt-3"><h2 id="name" class="truncate">Off</h2><p class="inline-flex items-center text-tl-app-text-muted" id="visibility"><svg></svg>Public Nest · Owner @off</p></div>
+    <p class="tl-user-text" id="description">No notifications. New posts still show a count.</p>
+    <span id="today" class="text-tl-app-text-muted"><strong class="font-extrabold">1</strong></span>
+  </div></div><p id="status" role="status" class="text-tl-app-text-muted">Saved your changes to Pokémon.</p></main>`, '/nests/pokemon');
+  t.after(() => f.dom.window.close());
+  const {document} = f;
+  const off = document.getElementById('off');
+  let clicks = 0;
+  off.addEventListener('click', () => clicks++);
+  const today = document.getElementById('today');
+  today.append(' ', 'tweet', ' today');
+  const count = today.firstChild;
+  f.run();
+  assert.equal(document.getElementById('notification').getAttribute('aria-label'), '「Pokémon」の通知：オフ');
+  assert.equal(document.getElementById('notification').getAttribute('title'), '通知：オフ');
+  assert.equal(document.getElementById('menu').getAttribute('aria-label'), '「Pokémon」の通知設定');
+  assert.equal(document.getElementById('report').getAttribute('aria-label'), '「Pokémon」を報告');
+  assert.equal(f.text('off-label'), 'オフ');
+  assert.equal(f.text('hint'), '通知は届きません。新着件数は表示されます。');
+  assert.equal(f.text('description'), 'No notifications. New posts still show a count.');
+  assert.equal(f.text('name'), 'Off');
+  assert.equal(f.text('visibility'), '公開ネスト · 管理者 @off');
+  assert.equal(f.text('status'), '「Pokémon」の変更を保存しました。');
+  assert.equal(f.text('today').replace(/ /g, ''), '1件の投稿（今日）');
+  assert.equal(today.firstChild, count);
+  assert.equal(off.getAttribute('aria-checked'), 'true');
+  off.click();
+  assert.equal(clicks, 1);
+});
+
+test('ja: Nest owner, privacy and invite controls keep split names and form values', t => {
+  const f = fixture('ja', `<main><article><p class="tl-user-text" id="post">Show more</p></article></main>
+    <div role="dialog" aria-modal="true" aria-labelledby="nest-settings-title"><h2 id="nest-settings-title">Edit Pokémon</h2>
+      <form><textarea data-nest-field="description" maxlength="500">Invite people on Tweet</textarea>
+        <fieldset class="border-t"><legend>Hand this Nest over</legend><p id="empty"></p><ul id="owners" role="radiogroup" aria-label="New owner"><li><input type="radio" name="nest-new-owner-pokemon" value="follower-id" checked><span class="truncate">Show more</span></li></ul><button id="make-owner" type="button"></button></fieldset>
+        <fieldset class="border-t"><legend>Leave this Nest</legend><p id="leave-hint">It stays up without an owner, and nobody can edit it until the Tweet team gives it a new one. To choose who takes over, hand it over instead.</p><button id="leave" type="button">Leave Pokémon</button><button id="yes-leave" type="button">Yes, leave without an owner</button></fieldset>
+        <fieldset class="border-t"><legend>Delete this Nest</legend><p id="delete-hint">It goes away for everyone, and its posts stop showing anywhere.</p></fieldset>
+      </form><div role="group" aria-label="Confirm who can see it" id="privacy"><p role="alert" id="warning">This can't be undone. Once it's hidden, it can never be made public or private again. Posts made while it was public stay public.</p><button type="button" id="confirm" data-testid="nest-settings-confirm-visibility" disabled>Yes, make it hidden</button></div>
+    </div><div role="dialog" aria-modal="true" aria-labelledby="nest-invite-title">
+      <h2 id="nest-invite-title" class="truncate"></h2><section aria-labelledby="nest-invite-tweet"><h3 id="nest-invite-tweet">Invite people on Tweet</h3><p id="quota" class="mt-0.5"></p><label><span class="sr-only">Search your followers</span><input id="search" type="search" placeholder="Search your followers" value="Pokémon"></label>
+        <ul><li><p class="truncate" id="follower">Invited</p><button type="button" id="invite-button" aria-label="Invited: In the Nest">In the Nest</button></li></ul></section>
+      <section aria-labelledby="nest-invite-new"><h3 id="nest-invite-new">Invite someone new</h3><p id="link-hint" class="mt-0.5"></p><input id="link" aria-label="Invite link" readonly value="https://example.invalid/fixture"><button id="copy" type="button">Copy link</button></section>
+    </div>`, '/nests/pokemon');
+  t.after(() => f.dom.window.close());
+  const {document} = f;
+  const get = id => document.getElementById(id);
+  get('empty').append('Nobody else is in ', 'Show more', ' yet.');
+  get('make-owner').append('Yes, make ', 'Loading…', ' the owner');
+  get('nest-invite-title').append('Invite to ', 'Pokémon');
+  get('quota').append("Your followers get a notification and can join in one tap. There's a daily limit on invites", ' (4 left today)', ', and people can turn Nest invites off.');
+  get('link-hint').append('Share a link that brings them to ', 'Pokémon', ' when they join Tweet, and counts as your invite.', ' Each link works once, so make one per person.');
+  const ownerName = get('make-owner').childNodes[1];
+  const nestName = get('nest-invite-title').lastChild;
+  const linkName = get('link-hint').childNodes[1];
+  f.run();
+  assert.equal(f.text('empty'), '「Show more」にはほかのメンバーがいません。');
+  assert.equal(f.text('make-owner'), '「Loading…」に管理を引き継ぐ');
+  assert.equal(get('make-owner').childNodes[1], ownerName);
+  assert.equal(get('owners').getAttribute('aria-label'), '新しい管理者');
+  assert.equal(get('owners').querySelector('input').value, 'follower-id');
+  assert.equal(f.text('leave'), '「Pokémon」から退出する');
+  assert.match(f.text('leave-hint'), /後任を選ぶ場合/);
+  assert.equal(f.text('yes-leave'), '管理者がいない状態で退出する');
+  assert.match(f.text('delete-hint'), /誰にも表示されなくなり/);
+  assert.equal(get('privacy').getAttribute('aria-label'), '公開範囲の変更を確認');
+  assert.match(f.text('warning'), /公開中に作成された投稿は公開のまま/);
+  assert.equal(f.text('confirm'), '非表示にする');
+  assert.equal(get('confirm').disabled, true);
+  assert.equal(f.text('nest-invite-title'), 'ネストに招待：Pokémon');
+  assert.equal(get('nest-invite-title').lastChild, nestName);
+  assert.match(f.text('quota'), /今日の残り4件/);
+  assert.equal(get('search').placeholder, 'フォロワーを検索');
+  assert.equal(get('search').value, 'Pokémon');
+  assert.equal(f.text('follower'), 'Invited');
+  assert.equal(get('invite-button').getAttribute('aria-label'), 'Invited：参加済み');
+  assert.match(f.text('link-hint'), /「Pokémon」を開く招待リンク/);
+  assert.equal(get('link-hint').childNodes[1], linkName);
+  assert.equal(get('link').getAttribute('aria-label'), '招待リンク');
+  assert.equal(get('link').value, 'https://example.invalid/fixture');
+  assert.equal(f.text('copy'), 'リンクをコピー');
+  assert.equal(f.text('post'), 'Show more');
+});
+
+test('ja: Nest directory translates the new-post count and loading control without changing the name', t => {
+  const f = fixture('ja', `<main><section aria-labelledby="nests-your-nests"><h3 id="nests-your-nests">Your Nests</h3>
+    <ul><li><button><span class="truncate" id="name">Show more</span></button><span id="unread" class="tabular-nums"></span></li></ul></section>
+    <button type="button" class="w-full px-4 py-3 border-t" id="load">Show more</button></main>`, '/nests');
+  t.after(() => f.dom.window.close());
+  const unread = f.document.getElementById('unread');
+  unread.append('1,234+', ' new');
+  const count = unread.firstChild;
+  f.run();
+  assert.equal(f.text('unread'), '1,234+件の新着');
+  assert.equal(unread.firstChild, count);
+  assert.equal(f.text('name'), 'Show more');
+  assert.equal(f.text('load'), 'さらに表示');
 });

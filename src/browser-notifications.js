@@ -48,10 +48,11 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
   let backend = mobile ? null : 'window', probing = false, registration = null;
   let observed = [], signature = '';
   const observer = new MutationObserver(() => refresh());
+  const accountSelector = 'aside button:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])';
 
   function identity() {
     const handles = [];
-    for (const button of document.querySelectorAll('aside button[aria-label="Account menu"]')) {
+    for (const button of document.querySelectorAll(accountSelector)) {
       if (button.closest('[data-ct-local-ui],[data-ct-owned],article')) continue;
       const block = [...button.children].find(el => el.matches('div.flex-1.min-w-0'));
       const label = block && [...block.children].find(el => el.matches('p') &&
@@ -65,7 +66,7 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
 
   function controls() {
     const found = [];
-    for (const svg of document.querySelectorAll('aside nav svg[data-icon],nav[aria-label="Mobile navigation"] > div > button > svg[data-icon]')) {
+    for (const svg of document.querySelectorAll('aside nav svg[data-icon],nav:is([aria-label="Mobile navigation"],[aria-label="モバイルナビゲーション"]) > div > button > svg[data-icon]')) {
       if (!/^(bell|bell-filled)$/.test(svg.getAttribute('data-icon') || '') ||
           svg.closest('[data-ct-local-ui],[data-ct-owned],article')) continue;
       const size = svg.getAttribute('width');
@@ -169,7 +170,7 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
 
   function watch(rows) {
     const roots = enabled && active ? [...new Set([...rows.map(row => row.root),
-      ...document.querySelectorAll('aside button[aria-label="Account menu"]')].filter(Boolean))] : [];
+      ...document.querySelectorAll(accountSelector)].filter(Boolean))] : [];
     if (roots.length === observed.length && roots.every((root, i) => root === observed[i])) return;
     observer.disconnect(); observed = roots;
     for (const root of roots) observer.observe(root, { childList: true, subtree: true, characterData: true,

@@ -45,15 +45,16 @@ const localizationNames = [
   'ctLocalizationClassicEnabled', 'ctLocalizationState', 'ctLocalizationNativeRecordException', 'ctLocalizationRecordAllowed',
   'ctLocalizationRead', 'ctLocalizationWrite', 'ctLocalizationForget', 'ctRememberLocalization', 'ctSyncLocalizationAppearance',
   'replaceLocalizationText', 'patchUIAttributes', 'translateTextNode', 'patchUI', 'patchInputs', 'ctLocalizationRegularText',
-  'ctLocalizationClassicText', 'isNativeSettingsValue', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
+  'ctLocalizationClassicText', 'isNativeSettingsValue', 'nativeSettingsExtraJapaneseText', 'isNativeLocalizationHelp', 'isNativeNotificationTimestamp',
   'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber',
   'nativeTimestampJapaneseText', 'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
     'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
   'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
-  'nativeLocalization26Context', 'native26JapaneseText', 'patchNative26UI',
+  'nativeLocalization26Context', 'native26JapaneseText', 'patchNative26UI', 'nativeAccountDrawer', 'patchNativeAccountChrome',
   'isNativeTweetCount', 'patchNativePollAndAccountUI', 'nativePollJapaneseText', 'nativeMediaUploadJapaneseText',
   'nativeLocalizationMediaUpload', 'nativeLocalizationGIFMedia', 'nativeGIFPickerJapaneseText', 'nativeAltJapaneseText',
   'nativeNestAllowanceJapaneseText', 'nativeNestJapaneseText', 'nativePerchJapaneseText', 'nativeLocalizationBlockMenu',
+  'nativePerchAutoplayJapaneseText', 'nativePerchDurationJapaneseText', 'nativePerchFeedbackJapaneseText', 'nativePerchToastJapaneseText',
   'nativeLocalizationBlockDialog', 'nativeLocalizationBlockProfile', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError'
 ];
 assert.ok(shippedDeclarations.has('ctNativeNotificationRowSelector'), 'localization uses the shipped notification row selector');

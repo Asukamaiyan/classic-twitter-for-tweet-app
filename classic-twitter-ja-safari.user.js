@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - Japanese
 // @namespace    https://tweet.app/
-// @version      6.32.3
+// @version      6.32.4
 // @description  昔のTwitter風の表示と星のお気に入り。日本語UI・写真スライド・通知フィルター・保存ツール。本文や名前は保持。
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -411,10 +411,11 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
   let backend = mobile ? null : 'window', probing = false, registration = null;
   let observed = [], signature = '';
   const observer = new MutationObserver(() => refresh());
+  const accountSelector = 'aside button:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])';
 
   function identity() {
     const handles = [];
-    for (const button of document.querySelectorAll('aside button[aria-label="Account menu"]')) {
+    for (const button of document.querySelectorAll(accountSelector)) {
       if (button.closest('[data-ct-local-ui],[data-ct-owned],article')) continue;
       const block = [...button.children].find(el => el.matches('div.flex-1.min-w-0'));
       const label = block && [...block.children].find(el => el.matches('p') &&
@@ -428,7 +429,7 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
 
   function controls() {
     const found = [];
-    for (const svg of document.querySelectorAll('aside nav svg[data-icon],nav[aria-label="Mobile navigation"] > div > button > svg[data-icon]')) {
+    for (const svg of document.querySelectorAll('aside nav svg[data-icon],nav:is([aria-label="Mobile navigation"],[aria-label="モバイルナビゲーション"]) > div > button > svg[data-icon]')) {
       if (!/^(bell|bell-filled)$/.test(svg.getAttribute('data-icon') || '') ||
           svg.closest('[data-ct-local-ui],[data-ct-owned],article')) continue;
       const size = svg.getAttribute('width');
@@ -532,7 +533,7 @@ function createBrowserNotifications({ locale = 'ja' } = {}) {
 
   function watch(rows) {
     const roots = enabled && active ? [...new Set([...rows.map(row => row.root),
-      ...document.querySelectorAll('aside button[aria-label="Account menu"]')].filter(Boolean))] : [];
+      ...document.querySelectorAll(accountSelector)].filter(Boolean))] : [];
     if (roots.length === observed.length && roots.every((root, i) => root === observed[i])) return;
     observer.disconnect(); observed = roots;
     for (const root of roots) observer.observe(root, { childList: true, subtree: true, characterData: true,
@@ -2937,7 +2938,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.32.3';
+    document.documentElement.dataset.ctActiveVersion = '6.32.4';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -6392,6 +6393,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   };
   const ctBadgeImageStates = new WeakMap();
   const ctBadgeRequests = new WeakMap();
+  const ctBadgeAccountSelector = '[role="dialog"]:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])';
 
   function ctBadgeLabel(kind) {
     const labels = { founder: '創設メンバー', fighter: 'ファイター', centurion: 'センチュリオン',
@@ -6536,7 +6538,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   }
 
   function ctBadgeAccountTarget(dialog) {
-    if (!dialog?.isConnected || !dialog.matches('[role="dialog"][aria-label="Account menu"]')) return null;
+    if (!dialog?.isConnected || !dialog.matches(ctBadgeAccountSelector)) return null;
     const name = dialog.querySelector('button.block.text-left > p.font-extrabold.truncate');
     const handle = name?.nextElementSibling;
     if (!handle?.matches('p.truncate') || !/^@/.test(handle.textContent.trim())) return null;
@@ -6632,9 +6634,9 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     if (host.matches?.('img[src]')) images.push(host);
     images.forEach(ctUpgradeBadgeImage);
     ctPatchNativeBadgeDescriptions(images, host);
-    const scopes = new Set(root.querySelectorAll?.('article,[role="dialog"][aria-label="Account menu"]') || []);
-    if (root.matches?.('article,[role="dialog"][aria-label="Account menu"]')) scopes.add(root);
-    const parent = root.closest?.('article,[role="dialog"][aria-label="Account menu"]');
+    const scopes = new Set(root.querySelectorAll?.(`article,${ctBadgeAccountSelector}`) || []);
+    if (root.matches?.(`article,${ctBadgeAccountSelector}`)) scopes.add(root);
+    const parent = root.closest?.(`article,${ctBadgeAccountSelector}`);
     if (parent) scopes.add(parent);
     const requests = [];
     for (const scope of scopes) {
@@ -9925,6 +9927,56 @@ if (/^just\s+now$/i.test(t)) {
           el.parentElement?.matches('div.flex.flex-col.outline-none')));
   }
 
+  function nativeAccountDrawer(el) {
+    const drawer = el?.closest('[role="dialog"][aria-modal="true"]:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])');
+    const profile = drawer?.querySelector(':scope > div.px-4.pt-5.pb-4 > button.block.text-left');
+    const name = profile?.querySelector(':scope > p.font-extrabold.truncate');
+    const handle = name?.nextElementSibling;
+    return handle?.matches('p.truncate') && /^@[A-Za-z0-9_.-]{1,80}$/.test(clean(handle.textContent)) ? drawer : null;
+  }
+
+  function patchNativeAccountChrome(root = document) {
+    const host = root.nodeType === Node.TEXT_NODE ? root.parentElement : root;
+    const desktop = 'aside button[type="button"][aria-haspopup="menu"][aria-expanded]:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])';
+    const mobile = 'header button[type="button"].absolute.rounded-full[aria-expanded]:is([aria-label="Open profile menu"],[aria-label="プロフィールメニューを開く"])';
+    const drawer = '[role="dialog"][aria-modal="true"]:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])';
+    const selector = `${desktop},${mobile},${drawer},nav[aria-label="Mobile navigation"]`;
+    const scopes = new Set(host?.querySelectorAll?.(selector) || []);
+    const containing = host?.closest?.(selector);
+    if (containing) scopes.add(containing);
+    for (const el of scopes) {
+      if (isOwnedLocalizationElement(el) || el.closest('article,blockquote,[data-user-content],[translate="no"],.notranslate,[contenteditable]:not([contenteditable="false"])')) continue;
+      let avatarHost = el;
+      let label;
+      if (el.matches(desktop)) {
+        const handle = el.querySelector(':scope > div.flex-1.min-w-0 > p.text-tl-app-text-muted.truncate');
+        if (!/^@[A-Za-z0-9_.-]{1,80}$/.test(clean(handle?.textContent))) continue;
+        label = 'アカウントメニュー';
+      } else if (el.matches(mobile)) {
+        if (!el.parentElement?.classList.contains('min-h-(--app-mobile-header-height)')) continue;
+        label = 'プロフィールメニューを開く';
+      } else if (el.matches(drawer)) {
+        if (nativeAccountDrawer(el) !== el) continue;
+        avatarHost = el.querySelector(':scope > div.px-4.pt-5.pb-4 > button.block.text-left');
+        label = 'アカウントメニュー';
+      } else {
+        const navIcons = el.querySelectorAll(':scope > div > button > svg[data-icon]');
+        if (![...navIcons].some(svg => /^(?:bell|bell-filled)$/.test(svg.getAttribute('data-icon') || ''))) continue;
+        label = 'モバイルナビゲーション';
+      }
+      if (el.getAttribute('aria-label') !== label) ctRememberLocalization(el, 'aria-label', label);
+      const avatar = avatarHost.firstElementChild;
+      if (!avatar?.matches('img.rounded-full.object-cover,div[role="img"].rounded-full.object-cover')) continue;
+      const image = avatar.tagName === 'IMG';
+      const attr = image ? 'alt' : 'aria-label';
+      const suffix = image ? ' avatar' : ' avatar placeholder';
+      const original = avatar.getAttribute(attr) || '';
+      if (!original.endsWith(suffix)) continue;
+      const name = original.slice(0, -suffix.length);
+      if (name) ctRememberLocalization(avatar, attr, image ? `${name}のプロフィール画像` : `${name}のプロフィール画像の代替表示`);
+    }
+  }
+
   function nativeLocalizationAccountMenu(el) {
     if (!el?.matches('span.min-w-0.truncate') || !el.parentElement?.matches('button[role="menuitem"]') ||
         !el.parentElement.querySelector(':scope > svg') || !el.parentElement.parentElement?.matches('[role="menu"]')) return null;
@@ -10009,7 +10061,7 @@ if (/^just\s+now$/i.test(t)) {
     const shop = el.matches('span') ? el.parentElement : null;
     if (shop?.matches('a:is([href="https://tweet.shop"],[href="https://tweet.shop/"])[target="_blank"][rel~="noopener"][rel~="noreferrer"]') &&
         shop.querySelector(':scope > svg.lucide-shopping-bag') &&
-        (shop.closest('aside nav') || shop.closest('[role="dialog"][aria-label="Account menu"]')) &&
+        (shop.closest('aside nav') || shop.closest('[role="dialog"]:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])')) &&
         shop.children.length === 3 && shop.children[1].matches('span:not(.sr-only)') &&
         shop.children[2].matches('span.sr-only') && !el.children.length) return { kind: 'shop', root: shop };
     const menu = el.matches('span') && el.parentElement?.matches('button[type="button"]') ? el.parentElement.parentElement : null;
@@ -10586,6 +10638,31 @@ if (/^just\s+now$/i.test(t)) {
       ['Make another member the owner. They need to be able to create a Nest themselves. You stay a member.', 'ネストを作成できる別のメンバーに管理を引き継ぎます。あなたは引き続きメンバーとして参加できます。'],
       ['Choose a new owner', '新しい管理者を選ぶ'], ['Loading the Flock…', 'メンバーを読み込み中…'],
       ["Couldn't load the Flock.", 'メンバーを読み込めませんでした。'], ['Show more members', 'さらにメンバーを表示'],
+      ['New owner', '新しい管理者'], ['Yes, leave without an owner', '管理者がいない状態で退出する'],
+      ['It stays up without an owner, and nobody can edit it until the Tweet team gives it a new one. To choose who takes over, hand it over instead.',
+        'ネストは残ります。Tweetの運営が新しい管理者を決めるまで、誰も編集できません。後任を選ぶ場合は「ネストの管理を引き継ぐ」を使ってください。'],
+      ['It goes away for everyone, and its posts stop showing anywhere.', 'ネストを削除すると、誰にも表示されなくなり、ネスト内の投稿もすべて非表示になります。'],
+      ['Confirm who can see it', '公開範囲の変更を確認'], ['Yes, make it private', '非公開にする'], ['Yes, make it hidden', '非表示にする'],
+      ['Loading…', '読み込み中…'], ['Show more', 'さらに表示'], ['All posts', 'すべての投稿'], ['Off', 'オフ'],
+      ["One notification for this Nest's new posts", 'このネストに新着投稿があると通知します。'],
+      ['No notifications. New posts still show a count.', '通知は届きません。新着件数は表示されます。'],
+      ['Notifications: All posts', '通知：すべての投稿'], ['Notifications: Off', '通知：オフ'],
+      ['Check your connection and try again.', '接続を確認してもう一度お試しください。'],
+      ['Too many requests right now. Wait a moment, then try again.', 'リクエストが集中しています。少し待ってからもう一度お試しください。'],
+      ['It may have closed, or the link is wrong.', 'ネストが閉鎖されたか、リンクが正しくありません。'],
+      ['Invite people on Tweet', 'Tweetのユーザーを招待'], ['Invite someone new', 'Tweetに新しい人を招待'],
+      ['Search your followers', 'フォロワーを検索'], ['Loading your followers…', 'フォロワーを読み込み中…'],
+      ["Couldn't load your followers. Try again later.", 'フォロワーを読み込めませんでした。少し待ってからお試しください。'],
+      ["Couldn't load more followers. Try again.", '続きのフォロワーを読み込めませんでした。もう一度お試しください。'],
+      ['None of your followers are left to invite.', '招待できるフォロワーはもういません。'],
+      ["You've reached today's invite limit. Try again tomorrow.", '今日の招待上限に達しました。明日以降にお試しください。'],
+      ["You can't invite people to this Nest any more.", 'このネストには招待できなくなりました。'],
+      ['Inviting…', '招待中…'], ['Invited', '招待済み'], ['In the Nest', '参加済み'],
+      ["Can't invite", '招待できません'], ['Limit reached', '上限に達しました'],
+      ['Invite link', '招待リンク'], ['Copy link', 'リンクをコピー'], ['Copied', 'コピーしました'],
+      ['Making a link…', 'リンクを作成中…'], ['Make another link', '別のリンクを作る'], ['Get an invite link', '招待リンクを作る'],
+      ['Link copied.', 'リンクをコピーしました。'], ["Couldn't make a link. Try again.", 'リンクを作れませんでした。もう一度お試しください。'],
+      ["Couldn't copy. Select the link and copy it yourself.", 'コピーできませんでした。リンクを選択して手動でコピーしてください。'],
       ['Anyone can see this. It also shows in the main feed.', '誰でも閲覧でき、メインのタイムラインにも表示されます。'],
       ["Only members see this, and Tweet's rules still apply. It can't be reposted or quoted outside the Nest.",
         'メンバーだけが閲覧でき、Tweetのルールが適用されます。ネストの外ではリツイートや引用はできません。'],
@@ -10598,7 +10675,7 @@ if (/^just\s+now$/i.test(t)) {
       ['Nobody can invite you to a Nest. You can still join public Nests.', '招待は届きませんが、公開ネストには参加できます。'],
       ["Couldn't load your Nest invite setting.", 'ネストの招待設定を読み込めませんでした。']
     ]);
-    if (!words.has(text) && !/^(?:Edit|Join|Joined|Pinned\. Unpin|Pin to Home:|Norm|Remove norm|Yes, delete|Public Nest|Private Nest|Hidden Nest|Post in|Posting in|Started|Always shown|Up to|, up to|characters each\.|in the Flock|new$|"$|For anyone keeping|[\d,]+ in the Flock|[A-Za-z]{3} \d{4}$|You own |You're at your limit of |Start a Nest for people who share an interest\.)/u.test(text)) return null;
+    if (!words.has(text) && !/^(?:Edit|Leave |Invite(?: to| )|Invited |No followers match |Couldn't invite |.+: (?:Invited|In the Nest|Can't invite|Limit reached)$|Notifications for |Nobody else is in$|Hand over to$|Yes, make$|the owner$|yet\.$|Your followers get |\(\d+ left today\)$|, and people can |Share a link that brings them to$|when they join Tweet|Each link works once|This can't be undone|Requested\. Cancel|Report |Published |Saved your changes to |Deleted |Asked to join |Couldn't change notifications for |tweet(?:s)?$|today$|Join|Joined|Pinned\. Unpin|Pin to Home:|Norm|Remove norm|Yes, delete|Public Nest|Private Nest|Hidden Nest|Post in|Posting in|Started|Always shown|Up to|, up to|characters each\.|in the Flock|new$|"$|For anyone keeping|[\d,]+ in the Flock|[A-Za-z]{3} \d{4}$|You own |You're at your limit of |Start a Nest for people who share an interest\.)/u.test(text)) return null;
     if (isOwnedLocalizationElement(el) || el.closest(
       'article,blockquote,.tl-user-text,.whitespace-pre-wrap,.break-words,.wrap-break-word,[data-user-content],[translate="no"],.notranslate,' +
       '[contenteditable]:not([contenteditable="false"]),[data-testid="tweet-text"],[data-testid="profile-bio"]')) return null;
@@ -10609,6 +10686,44 @@ if (/^just\s+now$/i.test(t)) {
     const main = el.closest('main');
     const truncated = el.closest('.truncate,[class*="line-clamp-"]');
     const edit = el.closest('[role="dialog"][aria-modal="true"][aria-labelledby="nest-settings-title"]');
+    const invite = el.closest('[role="dialog"][aria-modal="true"][aria-labelledby="nest-invite-title"]');
+    if (invite) {
+      if (attr === 'placeholder' && el.matches('input[type="search"]') && text === 'Search your followers') return words.get(text);
+      if (attr === 'aria-label' && el.matches('input[readonly]') && text === 'Invite link') return words.get(text);
+      if (attr === 'aria-label' && el.matches('section[aria-labelledby="nest-invite-tweet"] li > button')) {
+        const action = /^Invite (.+)$/.exec(text);
+        if (action) return `${action[1]}を招待`;
+        const status = /^(.+): (Invited|In the Nest|Can't invite|Limit reached)$/.exec(text);
+        if (status) return `${status[1]}：${words.get(status[2])}`;
+      }
+      if (attr) return null;
+      if (el.matches('h2#nest-invite-title') && node === el.firstChild && /^Invite to /.test(node.nodeValue)) return 'ネストに招待：';
+      const help = el.matches('section:is([aria-labelledby="nest-invite-tweet"],[aria-labelledby="nest-invite-new"]) > p[class~="mt-0.5"]');
+      if (help) {
+        if (node === el.firstChild?.nextSibling && /^(?:Share a link that brings them to|Tweetへの登録時に「)$/.test(clean(el.firstChild?.nodeValue))) return node.nodeValue;
+        const prose = {
+          "Your followers get a notification and can join in one tap. There's a daily limit on invites": 'フォロワーに通知が届き、タップひとつで参加できます。1日あたりの招待数には上限があり',
+          ', and people can turn Nest invites off.': '、招待を受け取らない設定もできます。',
+          'Share a link that brings them to': 'Tweetへの登録時に「',
+          'when they join Tweet, and counts as your invite.': '」を開く招待リンクを共有できます。登録はあなたからの招待として数えられます。',
+          'Each link works once, so make one per person.': '各リンクは1回限りです。招待する人ごとに作成してください。'
+        }[text];
+        if (prose) return prose;
+        const left = /^\((\d+) left today\)$/.exec(text);
+        if (left) return `（今日の残り${left[1]}件）`;
+        return null;
+      }
+      if (truncated || el.matches('input') || !el.closest('section:is([aria-labelledby="nest-invite-tweet"],[aria-labelledby="nest-invite-new"])')) return null;
+      if (el.matches('p')) {
+        const empty = /^No followers match "(.+)"\.$/.exec(text);
+        if (empty) return `「${empty[1]}」に一致するフォロワーがいません。`;
+        const sent = /^Invited (.+)\.$/.exec(text);
+        if (sent) return `${sent[1]}に招待を送りました。`;
+        const failed = /^Couldn't invite (.+)\. Try again\.$/.exec(text);
+        if (failed) return `${failed[1]}を招待できませんでした。もう一度お試しください。`;
+      }
+      return words.get(text) || null;
+    }
     const form = el.closest('form');
     const nestForm = form && ((edit && form.querySelector('textarea[data-nest-field="description"][maxlength="500"]')) ||
       (creation && main && form.querySelector('input[name="nest-visibility"]') && form.querySelector('textarea[maxlength="500"]')));
@@ -10622,6 +10737,35 @@ if (/^just\s+now$/i.test(t)) {
         return text === "Drafts don't count." ? words.get(text) : nativeNestAllowanceJapaneseText(text);
       }
       if (creation && el.matches('.animate-fadeIn > div.px-6.py-16.text-center > :is(p,button)')) return words.get(text) || null;
+    }
+    if (edit) {
+      const ownership = el.closest('fieldset.border-t');
+      if (attr === 'aria-label' && el.matches('ul[role="radiogroup"]') && text === 'New owner' &&
+          ownership && el.querySelector('input[name^="nest-new-owner-"]')) return words.get(text);
+      if (attr === 'aria-label' && el.matches('[role="group"]') && text === 'Confirm who can see it' &&
+          el.querySelector('[data-testid="nest-settings-confirm-visibility"]')) return words.get(text);
+      if (!attr && (el.matches('button:is([data-testid="nest-settings-save"],[data-testid="nest-settings-confirm-visibility"])') ||
+          text === 'Cancel' && el.closest('[role="group"]')?.querySelector('[data-testid="nest-settings-confirm-visibility"]'))) return words.get(text) || null;
+      if (!attr && el.matches('[data-testid="nest-one-way-warning"], [data-testid="nest-one-way-warning"] p, [role="group"] > p[role="alert"]')) {
+        const warning = /^This can't be undone\. Once it's (private|hidden), it can never be made (public|public or private) again\.( Posts made while it was public stay public\.)?$/.exec(text);
+        if (warning) {
+          const visibility = warning[1] === 'private' ? '非公開' : '非表示';
+          const restore = warning[2] === 'public' ? '公開' : '公開または非公開';
+          return `この変更は取り消せません。${visibility}にすると、${restore}には戻せません。${warning[3] ? '公開中に作成された投稿は公開のままです。' : ''}`;
+        }
+      }
+      if (!attr && ownership && !truncated && node) {
+        if (node === el.firstChild?.nextSibling && /^(?:Nobody else is in|Hand over to|Yes, make|管理の引き継ぎ先：|「)$/.test(clean(el.firstChild?.nodeValue))) return node.nodeValue;
+        if (el.matches('button') && node === el.firstChild && node.nextSibling) {
+          if (text === 'Hand over to') return '管理の引き継ぎ先：';
+          if (text === 'Yes, make' && node.nextSibling.nextSibling) return '「';
+        }
+        if (text === 'the owner' && el.matches('button') && el.firstChild?.nodeValue === '「' && node.previousSibling) return '」に管理を引き継ぐ';
+        if (el.matches('p') && text === 'Nobody else is in' && node === el.firstChild && node.nextSibling) return '「';
+        if (el.matches('p') && text === 'yet.' && el.firstChild?.nodeValue === '「' && node.previousSibling) return '」にはほかのメンバーがいません。';
+        const leave = el.matches('button') && /^Leave (.+)$/.exec(text);
+        if (leave) return `「${leave[1]}」から退出する`;
+      }
     }
     if (nestForm && !truncated && !el.closest('details > div[inert]')) {
       if (attr === 'placeholder' && el.matches('textarea[maxlength="500"]') && text === 'For anyone keeping something green alive indoors…') return 'どんなネストか、気軽に紹介してみよう…';
@@ -10677,10 +10821,32 @@ if (/^just\s+now$/i.test(t)) {
     const directory = el.closest('section[aria-labelledby="nests-your-nests"],section[aria-labelledby="nests-more-nests"],section[aria-labelledby="nests-nests-to-explore"]');
     if (listing && main && !attr && text === 'Draft · only you can see it' &&
         el.matches('span.text-tl-app-text-muted') && el.closest('section[aria-labelledby="nests-drafts"]')) return words.get(text);
-    const rail = el.closest('section[aria-labelledby^="nest-norms-"],section[aria-labelledby^="nest-coming-up-"],section[aria-labelledby^="nest-flock-"]');
+    const rail = el.closest('section[aria-labelledby^="nest-norms-"],section[aria-labelledby^="nest-coming-up-"],section[aria-labelledby^="nest-flock-"],section[aria-labelledby^="nests-for-you-title"]');
     const header = detail && main && el.closest('div.overflow-x-clip')?.querySelector(':scope > div.px-4 > p.tl-user-text');
+    const panel = detail && main && el.closest('[role="tabpanel"][id^="nest-"][id*="-panel-"]');
+    const notificationWrapper = header && el.closest('.relative:has(>button[aria-haspopup="menu"]:is([title^="Notifications:"],[title^="通知："]))');
+    if (notificationWrapper) {
+      const control = el.parentElement === notificationWrapper && el.matches('button[aria-haspopup="menu"]');
+      const menu = el.closest('div[role="menu"]');
+      if (attr === 'title' && control) return words.get(text) || null;
+      if (attr === 'aria-label' && control) {
+        const notice = /^Notifications for (.+): (All posts|Off)$/.exec(text);
+        if (notice) return `「${notice[1]}」の通知：${words.get(notice[2])}`;
+      }
+      if (attr === 'aria-label' && el === menu && menu.parentElement === notificationWrapper) {
+        const notice = /^Notifications for (.+)$/.exec(text);
+        if (notice) return `「${notice[1]}」の通知設定`;
+      }
+      if (!attr && menu?.parentElement === notificationWrapper && el.closest('button[role="menuitemradio"]')) return words.get(text) || null;
+    }
     if (attr && (directory || header)) {
       if (attr === 'title' && el.matches('button') && /^(?:Pin to Home|Unpin from Home|Report this Nest)$/.test(text)) return words.get(text);
+      if (attr === 'aria-label' && header && el.matches('button')) {
+        const request = /^Requested\. Cancel your request to join (.+)$/.exec(text);
+        if (request) return `「${request[1]}」への参加申請を取り消す`;
+        const report = /^Report (.+)$/.exec(text);
+        if (report && /^(?:Report this Nest|このネストを報告)$/.test(el.title)) return `「${report[1]}」を報告`;
+      }
       if (attr === 'aria-label' && el.matches('button[aria-pressed]')) {
         const join = /^(?:Join (.+)|Joined (.+)\. Leave)$/u.exec(text);
         if (join) return join[1] ? `「${join[1]}」に参加` : `「${join[2]}」から退出`;
@@ -10689,6 +10855,22 @@ if (/^just\s+now$/i.test(t)) {
       }
     }
     if (attr) return null;
+    if (directory && text === 'new' && el.matches('li > span.tabular-nums') && /^[\d,]+\+?$/.test(node?.previousSibling?.nodeValue || '')) return '件の新着';
+    if (listing && main && el.matches('button.w-full.px-4.py-3.border-t') && /^(?:Show more|Loading…)$/.test(text)) return words.get(text);
+    if (detail && main && el.matches('.animate-fadeIn > div.px-6.py-16.text-center > :is(p,button)')) return words.get(text) || null;
+    if ((detail || listing) && main && el.matches('p[role="status"].text-tl-app-text-muted,p[role="status"].border-tl-app-border')) {
+      const notices = [
+        [/^Published (.+)\.$/, '「$1」を公開しました。'], [/^Saved your changes to (.+)\.$/, '「$1」の変更を保存しました。'],
+        [/^Deleted (.+)\.$/, '「$1」を削除しました。'], [/^Asked to join (.+)\.$/, '「$1」への参加を申請しました。'],
+        [/^Couldn't change notifications for (.+)\. Try again\.$/, '「$1」の通知設定を変更できませんでした。もう一度お試しください。']
+      ];
+      const notice = notices.find(([pattern]) => pattern.test(text));
+      if (notice) return text.replace(...notice);
+    }
+    if (header && el.matches('span.text-tl-app-text-muted') && node?.parentElement?.firstElementChild?.matches('strong.font-extrabold')) {
+      if (/^tweets?$/.test(text) && node?.nextSibling?.nodeValue?.trim() === 'today') return '件';
+      if (text === 'today' && clean(node?.previousSibling?.nodeValue) === '件') return 'の投稿（今日）';
+    }
     if (header && el.matches('p.inline-flex.items-center.text-tl-app-text-muted')) {
       const visibility = /^(Public|Private|Hidden) Nest · (?:Owner (@[^\s]+)|(Waiting for a new owner))$/u.exec(text);
       if (visibility) return `${words.get(visibility[1])}ネスト · ${visibility[2] ? `管理者 ${visibility[2]}` : '管理者の引き継ぎ待ち'}`;
@@ -10704,12 +10886,67 @@ if (/^just\s+now$/i.test(t)) {
       const month = date && nativeLocalizationMonthNumber(date[1]);
       if (month) return `${date[2]}年${month}月`;
     }
-    if (!truncated && (directory || rail || header)) return words.get(text) || null;
+    if (!truncated && (directory || rail || header || panel && el.matches("p"))) return words.get(text) || null;
     if (main && listing && el.matches('h2.truncate') && el.closest('.sticky') && text === 'Nests') return words.get(text);
     if (main && creation && el.matches('h2.truncate') && el.closest('.sticky') && /^(?:Create a Nest|Draft Nest|Draft)$/.test(text)) return words.get(text);
     if (main && (listing || creation || detail) && !truncated && !el.closest('button:has(img)') &&
         /^(?:Create a Nest|Drafts|Loading (?:your )?Nests?…|Couldn't load (?:this Nest|Nests)|Couldn't load Nests\. Try again later\.|This Nest doesn't exist)$/.test(text)) return words.get(text) || null;
     return null;
+  }
+
+  function nativePerchAutoplayJapaneseText(value) {
+    return { on: 'オン', 'wi-fi only': 'Wi-Fi接続時のみ', off: 'オフ' }[value];
+  }
+
+  function nativePerchDurationJapaneseText(text) {
+    if (text === 'always') return '無期限';
+    const until = text.slice(6);
+    const days = nativePerchDurationJapaneseText.days ||= new Map([
+      ['tomorrow', '明日'], ['monday', '月曜日'], ['tuesday', '火曜日'],
+      ['wednesday', '水曜日'], ['thursday', '木曜日'], ['friday', '金曜日'],
+      ['saturday', '土曜日'], ['sunday', '日曜日']
+    ]);
+    return `${days.get(until.toLowerCase()) || until}まで`;
+  }
+
+  function nativePerchFeedbackJapaneseText(text) {
+    const messages = nativePerchFeedbackJapaneseText.messages ||= new Map([
+      ['Less video', '動画の表示を減らしました'], ['Video back to normal', '動画の表示を標準に戻しました'],
+      ['Filters reset', 'フィルターをリセットしました'], ['Undone', '元に戻しました'],
+      ['Couldn’t save that. Please try again.', '保存できませんでした。もう一度お試しください。']
+    ]);
+    if (messages.has(text)) return messages.get(text);
+    const feed = /^Tweet opens to (For You|Following)$/.exec(text);
+    if (feed) return `Tweetを開いたときに「${feed[1] === 'For You' ? 'おすすめ' : 'フォロー中'}」を表示します`;
+    const autoplay = /^Autoplay (on|wi-fi only|off)$/.exec(text);
+    if (autoplay) return `動画の自動再生を「${nativePerchAutoplayJapaneseText(autoplay[1])}」にしました`;
+    const unmuted = /^Unmuted ([@#]\S+|“[^\r\n]+”)$/u.exec(text);
+    if (unmuted) return `${unmuted[1]}のミュートを解除しました`;
+    const updatedMute = /^([@#]\S+|“[^\r\n]+”) muted (always|until .+)$/u.exec(text);
+    return updatedMute ? `${updatedMute[1]}をミュート中（${nativePerchDurationJapaneseText(updatedMute[2])}）` : null;
+  }
+
+  function nativePerchToastJapaneseText(node) {
+    const el = node?.parentElement;
+    const toast = el?.parentElement;
+    if (!el?.matches('span,button[type="button"]') ||
+        !toast?.matches('div[role="status"][aria-live="polite"].pointer-events-auto.rounded-full.bg-sky-500') ||
+        !/^\/feed\/?$/.test(location.pathname) || isOwnedLocalizationElement(el) || isProtectedLocalizationElement(el) ||
+        !toast.parentElement?.matches('div.pointer-events-none.fixed.inset-x-0.flex.justify-center') ||
+        !toast.parentElement.classList.contains('z-[120]') ||
+        !document.querySelector('main button[data-perch-pill][aria-haspopup="dialog"]')) return null;
+    const message = toast.firstElementChild;
+    if (!message?.matches('span') || message.childNodes.length !== 1 ||
+        message.firstChild.nodeType !== Node.TEXT_NODE || toast.children.length > 2) return null;
+    const messageNode = message.firstChild;
+    const feedback = nativePerchFeedbackJapaneseText(messageNode.nodeValue);
+    const translated = nativePerchToastJapaneseText.translated ||= new WeakMap();
+    if (feedback) translated.set(messageNode, feedback);
+    if (el === message) return feedback;
+    if (node.nodeValue !== 'Undo' || el !== toast.lastElementChild ||
+        !el.matches('button.shrink-0.font-bold.underline')) return null;
+    // The action can redraw after the associated message was translated.
+    return feedback || translated.get(messageNode) === messageNode.nodeValue ? '元に戻す' : null;
   }
 
   function nativePerchJapaneseText(el, text, attr = null) {
@@ -10773,7 +11010,7 @@ if (/^just\s+now$/i.test(t)) {
       ["Make a list, or pin a Nest you're in, and it shows here.", 'リストを作るか、参加中のネストを固定すると、ここに表示されます。'],
       ['Add a tab', 'タブを追加'], ['Pin a Nest', 'ネストを固定'], ['New list', 'リストを作成']
     ]);
-    if (!words.has(text) && !/^(?:Your Perch:|Muted |Change how long: |Unmute |Move |Unpin |Mute [@#]|\d+ more muted$|.+, Nest(?:, |$)|(?:View|Unfollow|Unfollowing) #|Could not unfollow #)/.test(text)) return null;
+    if (!words.has(text) && !/^(?:Your Perch:|Muted |Change how long: |Unmute |Move |Unpin |Mute [@#]|\d+ more muted$|.+, Nest(?:, |$)|(?:View|Unfollow|Unfollowing) #|Could not unfollow #|Autoplay (?:on|wi-fi only|off), change$|Less video, change$)/.test(text)) return null;
     if (!attr && /^(?:Muted|View and change what you have muted\.)$/.test(text) &&
         isNativeSettingsNavigation(el) && !isOwnedLocalizationElement(el)) return words.get(text);
     if (isOwnedLocalizationElement(el) ||
@@ -10811,7 +11048,7 @@ if (/^just\s+now$/i.test(t)) {
       if (attr === 'aria-label' && (el.matches('button') ||
           kind === 'muted' && el.matches('[role="radiogroup"][aria-label="Mute a word or hashtag"]'))) return words.get(text) || null;
       if (attr || el.matches('textarea,input,option') || el.closest('button:has(img)')) return null;
-      if (kind === 'hashtags' && el.matches('[role="alert"],[role="alert"] span')) {
+      if (kind === 'hashtags' && el.closest('[role="alert"],[role="status"][aria-live="polite"][aria-atomic="true"]')) {
         const error = /^Could not unfollow (#[^\s]+)\. Please try again\.$/.exec(text);
         if (error) return `${error[1]}のフォローを解除できませんでした。もう一度お試しください。`;
       }
@@ -10842,8 +11079,13 @@ if (/^just\s+now$/i.test(t)) {
     if (!perch && !standaloneMute) return null;
 
     if (attr === 'aria-label' && el.matches('button')) {
+      if (perch && el.matches('ul:is([aria-label="Your Perch"],[aria-label="フィード設定"]) > li > button[aria-controls][aria-expanded]')) {
+        const autoplay = /^Autoplay (on|wi-fi only|off), change$/.exec(text);
+        if (autoplay) return `動画の自動再生：${nativePerchAutoplayJapaneseText(autoplay[1])}、変更`;
+        if (text === 'Less video, change') return '動画を減らす、変更';
+      }
       const mute = /^Muted (.+), (always|until .+), change$/.exec(text);
-      if (mute) return `${mute[1]}をミュート中（${mute[2] === 'always' ? '無期限' : mute[2].slice(6) + 'まで'}）、変更`;
+      if (mute) return `${mute[1]}をミュート中（${nativePerchDurationJapaneseText(mute[2])}）、変更`;
       const verb = /^(Change how long: |Unmute )(.+)$/.exec(text);
       if (verb) return `${verb[2]}のミュート${verb[1] === 'Unmute ' ? 'を解除' : '期間を変更'}`;
       const more = /^(\d+) more muted$/.exec(text);
@@ -10965,7 +11207,7 @@ if (/^just\s+now$/i.test(t)) {
     if (el.matches('span.text-xs.font-semibold') && el.parentElement?.matches('div.flex.items-center.justify-center') &&
         el.parentElement.querySelector('svg.animate-spin') && /^Loading(?:[ .]|$)/.test(text)) return true;
     // The mobile account menu's counts are spans, unlike profile buttons.
-    if (el.matches('span') && el.closest('[role="dialog"][aria-label="Account menu"]') &&
+    if (el.matches('span') && el.closest('[role="dialog"]:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])') &&
         /^(?:Following|Followers)$/.test(text) &&
         [...el.children].some(child => child.matches('strong') && /^[\d,]+$/.test(clean(child.textContent)))) return true;
     // Native empty states put text-center on the parent, not the paragraph.
@@ -11031,6 +11273,7 @@ if (/^just\s+now$/i.test(t)) {
     const controls = [];
     const selector = 'button,[role="tab"],[role="menuitem"],input,textarea,video[aria-label],[role="dialog"][aria-modal="true"][aria-label="Media viewer"],[role="dialog"][aria-modal="true"][aria-label="Choose a GIF"],ul[aria-label="Choose a GIF"],div[aria-label="Choose image"],a[aria-label^="Open the post by @"],section[aria-label="Pinned posts"],' +
       '#sidebar-pinned-nests,#menu-pinned-nests,[role="tablist"][aria-label="Nest sections"],a[data-guide-link^="nests"],' +
+      'div[role="menu"][aria-label^="Notifications for "],ul[role="radiogroup"][aria-label="New owner"],[role="group"][aria-label="Confirm who can see it"],' +
       'a[data-guide-link="perchOverview"],[role="menu"][aria-label="Add a tab"],ul[aria-label="Your Perch"],' +
       '[role="dialog"][aria-modal="true"]:has(a[data-guide-link="perchOverview"]) :is([role="group"],[role="radiogroup"],[role="status"])[aria-label], #perch-home-tabs ~ ol [draggable][title],' +
       'main section [role="radiogroup"][aria-label="Mute a word or hashtag"]';
@@ -11099,7 +11342,7 @@ if (/^just\s+now$/i.test(t)) {
         const image = photo && value?.match(/^(Open|Show) image ([1-5]) of ([2-5])$/);
         const imageLabel = image && Number(image[2]) === photo.index && Number(image[3]) === photo.count &&
           (image[1] === 'Open' ? photo.open : photo.show) ? `${image[3]}枚中${image[2]}枚目の画像を${image[1] === 'Open' ? '開く' : '表示'}` : null;
-        const out = nativePerchJapaneseText(el, value, attr) || nativeNestJapaneseText(el, value, attr) || nativeAltJapaneseText(el, value, attr) || nativeGIFPickerJapaneseText(el, value, attr) || nativePinJapaneseText(el, value, attr) || (parent ? `${parent[1]}への返信元のツイートを開く` : null) ||
+        const out = nativePerchJapaneseText(el, value, attr) || nativeNestJapaneseText(el, value, attr) || nativeSettingsExtraJapaneseText(el, value, attr) || nativeAltJapaneseText(el, value, attr) || nativeGIFPickerJapaneseText(el, value, attr) || nativePinJapaneseText(el, value, attr) || (parent ? `${parent[1]}への返信元のツイートを開く` : null) ||
           (session ? `${session[1]}からログアウト` : null) || gif || (unblockLabel ? unblockLabel[1] === 'Unblocking' ? `${unblockLabel[2]}のブロックを解除中…` : `${unblockLabel[2]}のブロックを解除` : null) || imageLabel || (value === 'Reply options' ? isNativeReplyOptionsButton(el) ? '返信のメニュー' : null :
           choice ? `選択肢 ${choice[1]}を削除` : action ? `返信、${action[1]}件の返信` :
           repost ? `リツイート、${repost[1]}件のリツイート` :
@@ -11109,10 +11352,78 @@ if (/^just\s+now$/i.test(t)) {
     }
   }
 
+  function nativeSettingsExtraJapaneseText(el, text, attr = null, node = null) {
+    if (typeof text !== 'string' || !/^\/settings\/?$/.test(location.pathname) ||
+        !el?.closest('main section.flex.flex-col.flex-1.min-w-0') || isOwnedLocalizationElement(el) ||
+        el.closest('article,blockquote,.tl-user-text,[data-user-content],[translate="no"],.notranslate,input,textarea,[contenteditable]:not([contenteditable="false"])')) return null;
+
+    const modes = { system: '端末の設定', light: 'ライト', dark: 'ダーク' };
+    if (Object.hasOwn(modes, text) || /^(?:App Theme:|App theme:)/.test(text)) {
+      const button = el.closest('button[type="button"].font-mono');
+      const label = button?.querySelector(':scope > span.capitalize.font-bold');
+      if (!label || !button.querySelector(':scope > svg:is(.lucide-moon,.lucide-sun)')) return null;
+      if (!attr && el === label && Object.hasOwn(modes, text)) return modes[text];
+      if (el === button && attr === 'title') {
+        const mode = /^App Theme: (SYSTEM|LIGHT|DARK) \(Click to cycle\)$/.exec(text);
+        if (mode) return `テーマ：${modes[mode[1].toLowerCase()]}（クリックで切り替え）`;
+      }
+      if (el === button && attr === 'aria-label') {
+        const mode = /^App theme: (system|light|dark)\. Click to cycle between light, dark, and system\.$/.exec(text);
+        if (mode) return `テーマ：${modes[mode[1]]}。クリックでライト、ダーク、端末の設定を切り替えます。`;
+      }
+      return null;
+    }
+    if (attr) return null;
+    if (text === 'Permanently delete your account and its content.' && el.matches('span.leading-relaxed') &&
+        el.previousElementSibling?.matches('span.font-bold.text-red-500') &&
+        /^(?:Delete account|アカウントを削除)$/.test(clean(el.previousElementSibling.textContent)) &&
+        el.parentElement?.parentElement?.matches('button[type="button"]')) return 'アカウントと投稿内容を完全に削除します。';
+
+    if (text === 'Always' && el.matches('span.truncate.text-tl-app-text-muted') &&
+        el.classList.contains('text-[0.6875rem]') &&
+        el.previousElementSibling?.matches('span.text-xs.font-bold.text-tl-app-text') &&
+        el.parentElement?.matches('div.flex.min-w-0.flex-1.flex-col')) {
+      const panel = el.closest('div.flex.flex-col.gap-5');
+      const heading = panel?.querySelector(':scope > div:first-child > h4.font-extrabold');
+      if (/^(?:Muted|ミュート中)$/.test(clean(heading?.textContent))) return '無期限';
+    }
+
+    const status = el.closest('[role="status"][aria-live="polite"][aria-atomic="true"]');
+    if (status && /^(?:Saved\.|Couldn't save\. Try again\.)$/.test(text) &&
+        status.closest('div.flex.flex-col.gap-5')?.querySelector('input[name="nest-invites-from"]')) {
+      return text === 'Saved.' ? '保存しました。' : '保存できませんでした。もう一度お試しください。';
+    }
+
+    const referral = el.closest('section:is([aria-labelledby="free-invite-heading"],[aria-labelledby="standard-invite-heading"])');
+    if (!referral?.querySelector('div.font-mono.break-all.select-all') || el.closest('div.font-mono.break-all.select-all,.truncate')) return null;
+    const words = nativeSettingsExtraJapaneseText.referral ||= new Map([
+      ['Free invite link', '無料招待リンク'], ['Standard invite link', '通常の招待リンク'],
+      ['As a Tweet Ambassador, friends who join with this link get in free.', 'Tweetアンバサダーの招待リンクです。このリンクから参加する友だちは無料で登録できます。'],
+      ['All your free invites are used. Friends on this link can still join with a founding badge, and that counts for your standard link.',
+        '無料招待の枠は使い切りました。このリンクから創設バッジ付きで登録した友だちは、通常の招待としてカウントされます。'],
+      ['Make a new free link', '無料招待リンクを作り直す'],
+      ['Make a new free link? Your current free link stops working right away. Invites already used stay used.',
+        '無料招待リンクを作り直しますか？ 今のリンクはすぐに使えなくなります。使用済みの招待数はそのままです。'],
+      ['Make a new link', '新しいリンクを作る'], ['Making a new link…', '新しいリンクを作成中…'],
+      ['Keep this link', '今のリンクを使い続ける']
+    ]);
+    if (el.matches('button') && el.parentElement?.matches('div.flex.flex-row.gap-2')) {
+      if (text === 'Copy') return 'コピー';
+      if (text === 'Email') return 'メールで送る';
+    }
+    if (el.matches('span.rounded-full.border') && el.previousElementSibling?.id === 'free-invite-heading' &&
+        /^\d+ (?:of|\/) \d+ (?:free invites left|件の無料招待が残っています)$/.test(clean(el.textContent))) {
+      if (text === 'of' && /^\d+$/.test(node?.previousSibling?.nodeValue || '') && /^\d+$/.test(node?.nextSibling?.nodeValue || '')) return ' / ';
+      if (text === 'free invites left') return ' 件の無料招待が残っています';
+    }
+    return words.get(text) || null;
+  }
+
   function translateTextNode(node) {
     const text = clean(node.nodeValue);
     if (!text || text.length > 500) return;
-    const communityText = nativePerchJapaneseText(node.parentElement, text) || nativeNestJapaneseText(node.parentElement, text, null, node);
+    const communityText = nativePerchJapaneseText(node.parentElement, text) || nativeNestJapaneseText(node.parentElement, text, null, node) ||
+      nativeSettingsExtraJapaneseText(node.parentElement, text, null, node) || nativePerchToastJapaneseText(node);
     if (communityText) {
       ctRememberLocalization(node, null, communityText, communityText);
       return;
@@ -11121,8 +11432,9 @@ if (/^just\s+now$/i.test(t)) {
     // Dynamic replacements belong to their specific UI contexts. In particular,
     // never parse actor names or dates from arbitrary text that resembles a UI.
     const el = node.parentElement;
-    const guideLink = text === 'Guides' && el.matches('aside nav button > span') &&
-      el.parentElement.querySelector(':scope > svg.lucide-book-open');
+    const guideLink = text === 'Guides' && el.parentElement.querySelector(':scope > svg.lucide-book-open') &&
+      (el.matches('aside nav button > span') ||
+        el.matches('button[type="button"].w-full.text-left > span') && nativeAccountDrawer(el));
     const timestamp = nativeTimestampJapaneseText(el, text);
     const sourceLanguage = isNativeTranslationMetadata(el) && node === el.firstChild && text.match(/^Translated from (.{1,80})$/);
     const remaining = isNativeSettingsValue(el) && text.match(/^(\d+) codes? remaining$/);
@@ -11151,6 +11463,7 @@ if (/^just\s+now$/i.test(t)) {
   function patchUI(root = document) {
     ctSyncLocalizationAppearance(root);
     patchNativePollAndAccountUI(root);
+    patchNativeAccountChrome(root);
     patchNativeGamesUI(root);
     patchNative26UI(root);
     localizationScopeNodes(root).forEach(translateTextNode);
@@ -11864,6 +12177,6 @@ if (/^just\s+now$/i.test(t)) {
   }
 
   console.log(
-    '🐦 Classic Twitter JP v6.32.3 loaded'
+    '🐦 Classic Twitter JP v6.32.4 loaded'
   );
 })();

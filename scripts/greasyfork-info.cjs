@@ -135,6 +135,7 @@ function render(edition) {
     `<p><strong>${japanese ? '有効にするのは環境と言語に合う1本だけ。別の版へ切り替えるときは、前の版を無効にしてください。' : 'Enable only one edition for your browser and language. Disable the previous edition when switching.'}</strong></p>`,
     `<h3>${japanese ? '版を選ぶ' : 'Choose an edition'}</h3>`,
     editionTable(edition.locale),
+    `<p>${japanese ? '6.32.4はネストの通知・管理・招待、フィード設定の通知、テーマ、ミュート期間、招待リンク、アカウントメニューの案内を日本語化しました。' : '6.32.4 expands Japanese localization for Nest controls, feed feedback, theme options, mute durations, referral links, and account navigation.'}</p>`,
     `<p>${japanese ? '6.32.3はネストの作成上限と招待設定、動画、フォロー中のハッシュタグ、ミュートの説明を日本語化しました。' : '6.32.3 completes Japanese localization for Nest limits and invitations, video, followed hashtags, and mute settings.'}</p>`,
     `<p>${japanese ? '6.29.2では独自URLカードをいったん削除しました。リンク先のタイトル・説明・画像の取得とプレビュー操作・自動取得設定を外し、元の投稿本文と通常のURLリンクを保持します。カード用の外部通信は行いません。ホームの「リンク付きのみ」は引き続き使えます。' : 'Version 6.29.2 temporarily removes custom URL cards, metadata/image fetching, preview controls and automatic-preview settings. Original post text and ordinary URL links remain. No custom card requests are made to link destinations. The Home links-only filter remains available.'}</p>`,
     `<p>${japanese ? '6.32.2は写真の横送りで同じ大きさを繰り返し計算する処理を減らしました。' : '6.32.2 reduces repeated photo layout calculation while scrolling a carousel.'}</p>`,

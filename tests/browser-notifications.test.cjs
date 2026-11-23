@@ -295,6 +295,24 @@ test('losing the existing mobile worker cancels pending delivery and reports uns
   assert.match(h.controller.getState().status, /active service worker/);
 });
 
+test('Japanese account and mobile navigation labels keep native alerts connected', async t => {
+  const h = setup(t, { locale: 'ja', beforeCreate: ({ document }) => {
+    document.querySelector('aside button[aria-label="Account menu"]').setAttribute('aria-label', 'アカウントメニュー');
+    document.getElementById('desktop').remove();
+    document.querySelector('nav[aria-label="Mobile navigation"]').setAttribute('aria-label', 'モバイルナビゲーション');
+    document.getElementById('mobile').setAttribute('aria-label', '通知');
+  } });
+  assert.equal(await h.enable(), true);
+  const mobile = h.document.getElementById('mobile');
+  let opens = 0;
+  mobile.addEventListener('click', () => opens++);
+  h.count(4, 'mobile');
+  await settle();
+  assert.equal(h.alerts.length, 1);
+  h.alerts[0].onclick();
+  assert.equal(opens, 1);
+});
+
 test('missing or impersonated native DOM cannot establish account or count; route labels stay untouched', async t => {
   const h = setup(t, { beforeCreate: window => {
     window.document.querySelector('aside button[aria-label="Account menu"]').remove();

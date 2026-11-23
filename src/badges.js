@@ -6,6 +6,7 @@
   };
   const ctBadgeImageStates = new WeakMap();
   const ctBadgeRequests = new WeakMap();
+  const ctBadgeAccountSelector = '[role="dialog"]:is([aria-label="Account menu"],[aria-label="アカウントメニュー"])';
 
   function ctBadgeLabel(kind) {
     const labels = { founder: '創設メンバー', fighter: 'ファイター', centurion: 'センチュリオン',
@@ -150,7 +151,7 @@
   }
 
   function ctBadgeAccountTarget(dialog) {
-    if (!dialog?.isConnected || !dialog.matches('[role="dialog"][aria-label="Account menu"]')) return null;
+    if (!dialog?.isConnected || !dialog.matches(ctBadgeAccountSelector)) return null;
     const name = dialog.querySelector('button.block.text-left > p.font-extrabold.truncate');
     const handle = name?.nextElementSibling;
     if (!handle?.matches('p.truncate') || !/^@/.test(handle.textContent.trim())) return null;
@@ -246,9 +247,9 @@
     if (host.matches?.('img[src]')) images.push(host);
     images.forEach(ctUpgradeBadgeImage);
     ctPatchNativeBadgeDescriptions(images, host);
-    const scopes = new Set(root.querySelectorAll?.('article,[role="dialog"][aria-label="Account menu"]') || []);
-    if (root.matches?.('article,[role="dialog"][aria-label="Account menu"]')) scopes.add(root);
-    const parent = root.closest?.('article,[role="dialog"][aria-label="Account menu"]');
+    const scopes = new Set(root.querySelectorAll?.(`article,${ctBadgeAccountSelector}`) || []);
+    if (root.matches?.(`article,${ctBadgeAccountSelector}`)) scopes.add(root);
+    const parent = root.closest?.(`article,${ctBadgeAccountSelector}`);
     if (parent) scopes.add(parent);
     const requests = [];
     for (const scope of scopes) {
