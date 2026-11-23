@@ -47,7 +47,7 @@ function fixture(language, html, route = '/feed') {
     'isNativeEditedIndicator', 'isNativeReplyTimestamp', 'isNativeReplyOptionsButton', 'nativeLocalizationMonthNumber', 'nativeTimestampJapaneseText',
     'nativeLocalizationParentPostPreview', 'isNativeParentPostTimestamp', 'isNativeTranslationMetadata',
     'nativeLocalizationSessionContext', 'nativeSessionJapaneseText', 'nativeLocalizationPinContext', 'nativePinJapaneseText',
-    'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia', 'nativeGIFPickerJapaneseText', 'nativeAltJapaneseText', 'nativeNestJapaneseText', 'nativePerchJapaneseText',
+    'nativeLocalizationMediaUpload', 'nativeMediaUploadJapaneseText', 'nativeLocalizationGIFMedia', 'nativeGIFPickerJapaneseText', 'nativeAltJapaneseText', 'nativeNestAllowanceJapaneseText', 'nativeNestJapaneseText', 'nativePerchJapaneseText',
     'nativeLocalizationBlockMenu', 'nativeBlockJapaneseText', 'isNativeBlockedAccountError',
     'nativeLocalizationGameContext', 'nativeGameJapaneseText', 'patchNativeGamesUI',
     'nativeLocalization26Context', 'native26JapaneseText', 'patchNative26UI',
@@ -2041,4 +2041,188 @@ test('ja: native Perch mute sheet keeps the typed word and expiration radio valu
   assert.equal(selected.parentElement.textContent, '24時間');
   assert.equal(f.text('mute-save'), 'ミュートする');
   f.dom.window.close();
+});
+
+function currentSettingsPanel(title, description, controls) {
+  return `<main><section class="flex flex-col flex-1 min-w-0"><div class="p-5"><div class="flex flex-col gap-5">
+    <div><h4 id="settings-title" class="text-sm font-extrabold text-tl-app-text">${title}</h4>
+      <p id="settings-description" class="leading-relaxed">${description}</p></div>
+    <div class="rounded-2xl border border-tl-app-border overflow-hidden divide-y divide-tl-app-border">${controls}</div>
+  </div></div></section></main>`;
+}
+
+test('ja: current Video settings localize labels and hints without changing playback controls', t => {
+  const title = 'Video';
+  const description = 'Choose when videos play, and how much video you see.';
+  const panel = currentSettingsPanel(title, description, `
+    <div role="radiogroup" aria-labelledby="autoplay"><p id="autoplay">Autoplay</p>
+      <label><input type="radio" name="settings-autoplay" value="on"><span id="on">On</span>
+        <span id="on-hint">Videos play on their own, muted.</span></label>
+      <label><input type="radio" name="settings-autoplay" value="wifi_only" checked><span id="wifi">Wi-Fi only</span>
+        <span id="wifi-hint">Videos play on their own only when your device says it’s on Wi-Fi.</span></label>
+      <label><input type="radio" name="settings-autoplay" value="off"><span id="off">Off</span>
+        <span id="off-hint">Videos wait for a tap.</span></label>
+    </div>
+    <div><span id="less">Less video</span>
+      <p id="less-hint">Video posts show as small cards in every feed. Tap one to watch it.</p>
+      <button id="switch" type="button" role="switch" aria-checked="true" aria-labelledby="less" aria-describedby="less-hint"></button></div>
+  `);
+  const f = fixture('ja', panel + `<article><p id="post" class="tl-user-text">${description}</p></article>`, '/settings?tab=display');
+  t.after(() => f.dom.window.close());
+  const { document } = f;
+  const radio = document.querySelector('input:checked');
+  const toggle = document.getElementById('switch');
+  let changes = 0;
+  let clicks = 0;
+  document.querySelector('main').addEventListener('change', () => changes++);
+  toggle.addEventListener('click', () => clicks++);
+  f.dom.window.qaClassic = false;
+  f.run();
+  for (const [id, text] of Object.entries({
+    'settings-title': '動画', autoplay: '自動再生', on: 'オン', wifi: 'Wi-Fi接続時のみ', off: 'オフ', less: '動画を減らす',
+    'settings-description': '動画を自動再生する条件と、フィードでの表示方法を設定できます。',
+    'on-hint': '動画を音声なしで自動再生します。',
+    'wifi-hint': '端末がWi-Fiに接続しているときだけ、動画を自動再生します。',
+    'off-hint': '動画はタップすると再生されます。',
+    'less-hint': '動画付きの投稿をすべてのフィードで小さなカードとして表示します。タップすると再生できます。'
+  })) assert.equal(f.text(id), text, id);
+  assert.equal(f.text('post'), description);
+  assert.equal(document.querySelector('input:checked'), radio);
+  assert.deepEqual([...document.querySelectorAll('input')].map(input => input.value), ['on', 'wifi_only', 'off']);
+  assert.equal(toggle.getAttribute('aria-checked'), 'true');
+  assert.equal(toggle.getAttribute('aria-labelledby'), 'less');
+  assert.equal(toggle.getAttribute('aria-describedby'), 'less-hint');
+  toggle.click();
+  assert.equal(clicks, 1);
+  assert.equal(changes, 0);
+
+  const outsideSettings = fixture('ja', panel, '/explore');
+  t.after(() => outsideSettings.dom.window.close());
+  outsideSettings.run();
+  assert.equal(outsideSettings.text('settings-description'), description);
+  assert.equal(outsideSettings.text('wifi-hint'), 'Videos play on their own only when your device says it’s on Wi-Fi.');
+});
+
+test('ja: current mute and followed-hashtag panels localize chrome and preserve user data', t => {
+  const muteHelp = 'People, hashtags and words you mute are left out of For You, Following, replies, search and Explore. A mute with an end stops on its own.';
+  const mutes = fixture('ja', currentSettingsPanel('Muted', muteHelp, `
+    <p id="empty">You haven't muted anything.</p><button id="add">Mute a word or hashtag</button>
+    <span id="muted-value" class="truncate">Muted</span><span id="muted-tag">#Always</span>
+    <button id="change">Change how long</button>
+  `), '/settings/');
+  t.after(() => mutes.dom.window.close());
+  mutes.run();
+  assert.equal(mutes.text('settings-title'), 'ミュート中');
+  assert.match(mutes.text('settings-description'), /ミュート/);
+  assert.match(mutes.text('empty'), /ミュート/);
+  assert.match(mutes.text('add'), /ミュート/);
+  assert.match(mutes.text('change'), /期間/);
+  assert.equal(mutes.text('muted-value'), 'Muted');
+  assert.equal(mutes.text('muted-tag'), '#Always');
+
+  const hashtagsHelp = 'Posts with these hashtags are added to your Following feed. Unfollow one here to take its posts out of Following.';
+  const hashtags = fixture('ja', currentSettingsPanel('Followed hashtags', hashtagsHelp, `
+    <ul><li><span id="tag" class="truncate">#Following</span><button id="unfollow" type="button">Unfollow</button></li></ul>
+    <p id="user" data-user-content>${hashtagsHelp}</p>
+  `), '/settings');
+  t.after(() => hashtags.dom.window.close());
+  const unfollow = hashtags.document.getElementById('unfollow');
+  let clicks = 0;
+  unfollow.addEventListener('click', () => clicks++);
+  hashtags.run();
+  assert.equal(hashtags.text('settings-title'), 'フォロー中のハッシュタグ');
+  assert.equal(hashtags.text('settings-description'), 'フォローしたハッシュタグの投稿が「フォロー中」に表示されます。ここでフォローを解除すると、そのタグ経由の投稿を表示しなくなります。');
+  assert.equal(hashtags.text('tag'), '#Following');
+  assert.equal(hashtags.text('user'), hashtagsHelp);
+  assert.equal(hashtags.document.getElementById('unfollow'), unfollow);
+  assert.equal(clicks, 0);
+  unfollow.click();
+  assert.equal(clicks, 1);
+});
+
+test('ja: Nests directory and creation render remaining counts without rewriting notes or controls', t => {
+  const cap = 'You own 3 live Nests, the most you can. Delete one to create another.';
+  const remaining = 'Start a Nest for people who share an interest. You own 2 of 3 Nests. 1 left.';
+  const count = 'You own 2 of 3 Nests. 1 left.';
+  const countJapanese = 'ネストは上限3件のうち2件を作成済みです。あと1件作れます。';
+  const directory = `<main><div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-tl-app-border">
+    <p id="allowance" class="text-[0.8125rem] text-tl-app-text-muted">${cap}</p>
+    <button id="create" type="button" disabled><svg></svg> Create a Nest</button>
+  </div><article><p class="tl-user-text" id="post">${cap}</p></article></main>`;
+  const listing = fixture('ja', directory, '/nests');
+  t.after(() => listing.dom.window.close());
+  const allowance = listing.document.getElementById('allowance');
+  const originalText = allowance.firstChild;
+  const button = listing.document.getElementById('create');
+  const originalIcon = button.firstChild;
+  listing.run();
+  assert.equal(listing.text('allowance'), '運営中のネストは上限の3件です。新しく作るには、1件削除してください。');
+  assert.equal(listing.text('create').trim(), 'ネストを作成');
+  assert.equal(listing.text('post'), cap);
+  assert.equal(allowance.firstChild, originalText);
+  assert.equal(button.firstChild, originalIcon);
+  assert.equal(button.disabled, true);
+  originalText.nodeValue = remaining;
+  button.disabled = false;
+  listing.run(originalText);
+  assert.equal(listing.text('allowance'), '同じ話題に興味がある人が集まるネストを作れます。' + countJapanese);
+  assert.equal(allowance.firstChild, originalText);
+  assert.equal(button.disabled, false);
+  originalText.nodeValue = 'You own 5 live Nests, over the limit of 3. Delete 3 to create another.';
+  button.disabled = true;
+  listing.run(originalText);
+  assert.equal(listing.text('allowance'), 'ネストを5件所有しており、上限の3件を超えています。新しく作るには、3件削除してください。');
+  assert.equal(allowance.firstChild, originalText);
+  assert.equal(button.disabled, true);
+
+  const outsideDirectory = fixture('ja', directory, '/explore');
+  t.after(() => outsideDirectory.dom.window.close());
+  outsideDirectory.run();
+  assert.equal(outsideDirectory.text('allowance'), cap);
+
+  const create = fixture('ja', `<main><p id="count" class="px-4 py-2.5 border-b border-tl-app-border text-[0.8125rem] text-tl-app-text-muted"></p>
+    <form><label><textarea maxlength="500">Drafts don't count.</textarea></label>
+      <label><input name="nest-visibility" type="radio" value="public" checked><span>Public</span></label>
+    </form></main>`, '/nests/new');
+  t.after(() => create.dom.window.close());
+  const note = create.document.getElementById('count');
+  note.append(count, " Drafts don't count.");
+  const segments = [...note.childNodes];
+  create.run();
+  assert.equal(segments[0].nodeValue, countJapanese);
+  assert.equal(segments[1].nodeValue.trim(), '下書きは上限に含まれません。');
+  assert.deepEqual([...note.childNodes], segments);
+  assert.equal(create.document.querySelector('textarea').value, "Drafts don't count.");
+  assert.equal(create.document.querySelector('input:checked').value, 'public');
+});
+
+test('ja: Nest invite settings localize audience choices and preserve the selected value', t => {
+  const description = 'Choose who can invite you to join a Nest.';
+  const followingOnly = 'Only people you follow can invite you.';
+  const f = fixture('ja', currentSettingsPanel('Nest invites', description, `
+    <fieldset><legend id="legend" class="sr-only">Who can invite you to a Nest</legend>
+      <label><input type="radio" name="nest-invites-from" value="following">
+        <span id="following">People you follow</span><span id="following-hint">${followingOnly}</span></label>
+      <label><input type="radio" name="nest-invites-from" value="mutuals" checked>
+        <span id="mutuals">People you follow who follow you back</span>
+        <span id="mutuals-hint">Invites only come from your followers, so this also needs them to follow you.</span></label>
+      <label><input type="radio" name="nest-invites-from" value="none">
+        <span id="none">No one</span><span id="none-hint">Nobody can invite you to a Nest. You can still join public Nests.</span></label>
+    </fieldset>
+    <p id="author-note" data-user-content>${followingOnly}</p>
+  `), '/settings');
+  t.after(() => f.dom.window.close());
+  const chosen = f.document.querySelector('input:checked');
+  const labels = ['following', 'mutuals', 'none'].map(id => f.document.getElementById(id).firstChild);
+  f.run();
+  for (const [id, expected] of Object.entries({
+    'settings-title': 'ネストへの招待', 'settings-description': 'ネストに招待できる相手を選びます。',
+    legend: 'ネストに招待できる相手', following: 'フォローしている人', 'following-hint': 'あなたがフォローしている人だけが招待できます。',
+    mutuals: '相互フォローの人', 'mutuals-hint': 'お互いにフォローしている人からだけ招待を受け取ります。',
+    none: '誰からも受け取らない', 'none-hint': '招待は届きませんが、公開ネストには参加できます。'
+  })) assert.equal(f.text(id), expected, id);
+  assert.equal(f.text('author-note'), followingOnly);
+  assert.equal(f.document.querySelector('input:checked'), chosen);
+  assert.deepEqual([...f.document.querySelectorAll('input')].map(input => input.value), ['following', 'mutuals', 'none']);
+  assert.deepEqual(['following', 'mutuals', 'none'].map(id => f.document.getElementById(id).firstChild), labels);
 });

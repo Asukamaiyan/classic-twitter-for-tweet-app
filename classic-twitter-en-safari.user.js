@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Classic Twitter for tweet.app - English Safari
 // @namespace    https://tweet.app/
-// @version      6.32.2
+// @version      6.32.3
 // @description  Classic Twitter styling and star Favorites, photo slides, notification filters and local tools. Keeps post text, names and drafts intact.
 // @match        https://app.tweet.app/*
 // @grant        GM_xmlhttpRequest
@@ -2937,7 +2937,7 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
   function start() {
     if (ctStarted) return;
     if (document.documentElement.dataset.ctActiveVersion) return;
-    document.documentElement.dataset.ctActiveVersion = '6.32.2';
+    document.documentElement.dataset.ctActiveVersion = '6.32.3';
     ctStarted = true;
     ctBrowserNotifications = createBrowserNotifications({ locale: CT_LOCALE });
     document.addEventListener('click', ctCaptureFavoriteClick, true);
@@ -9258,5 +9258,5 @@ function createDeviceTranslation({ locale = 'ja', getContext, isActive, isManual
     start();
   }
 
-  console.log('🐦 Classic Twitter EN v6.32.2 loaded');
+  console.log('🐦 Classic Twitter EN v6.32.3 loaded');
 })();
